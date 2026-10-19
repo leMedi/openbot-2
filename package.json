@@ -1,0 +1,14 @@
+{
+  "name": "openbot",
+  "private": true,
+  "packageManager": "pnpm@12.6.0",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "start": "turbo run start",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "turbo": "^2.11.9"
+  }
+}
