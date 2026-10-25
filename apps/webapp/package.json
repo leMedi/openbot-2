@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite dev --port 3000",
-    "build": "vite build",
-    "start": "vite preview --port 3000",
+    "with-env": "dotenv -e ../../.env --",
+    "dev": "pnpm with-env vite dev --port 3000",
+    "build": "pnpm with-env vite build",
+    "start": "pnpm with-env vite preview --port 3000",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -19,6 +20,7 @@
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.1.2",
     "typescript": "^7.0.2",
-    "vite": "^8.3.4"
+    "vite": "^8.3.4",
+    "dotenv-cli": "^11.0.0"
   }
 }

@@ -1,0 +1,31 @@
+import { existsSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { createEnv } from '@t3-oss/env-core'
+import { z } from 'zod'
+
+// Scripts run from each package's folder, so relative paths are anchored to the repo root instead of the cwd.
+function findRepoRoot(from = process.cwd()): string {
+  let dir = resolve(from)
+  while (!existsSync(join(dir, 'pnpm-workspace.yaml'))) {
+    const parent = dirname(dir)
+    if (parent === dir) throw new Error(`pnpm-workspace.yaml not found above ${from}`)
+    dir = parent
+  }
+  return dir
+}
+
+export const env = createEnv({
+  server: {
+    OPENBOT_DATA_DIR: z
+      .string()
+      .min(1)
+      .transform((path) => resolve(findRepoRoot(), path)),
+  },
+  runtimeEnv: process.env,
+  emptyStringAsUndefined: true,
+})
+
+export const paths = {
+  dataDir: env.OPENBOT_DATA_DIR,
+  database: join(env.OPENBOT_DATA_DIR, 'openbot.db'),
+}

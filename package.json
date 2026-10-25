@@ -6,7 +6,10 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "start": "turbo run start",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "db:generate": "turbo run db:generate",
+    "db:migrate": "turbo run db:migrate",
+    "db:studio": "turbo run db:studio"
   },
   "devDependencies": {
     "turbo": "^2.11.9"
