@@ -1,5 +1,5 @@
 import { replyReminder } from '@openbot/agent'
-import { callsTools, endsSilently, says } from '@openbot/agent/testing'
+import { callsTools, endsSilently, fails, says } from '@openbot/agent/testing'
 import type { BotInfo, NewBot } from '@openbot/api-contract'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createTestServer, restartTestServer, type TestServer } from './testing/harness.ts'
@@ -139,6 +139,25 @@ describe('chatting in a DM', () => {
       ['owner', 'What was the word?'],
       ['bot', 'banana'],
     ])
+  })
+})
+
+describe('a failing model', () => {
+  it('tells the owner the bot could not reach its model, until a later run succeeds', async () => {
+    const { server, bot } = await startWithRex()
+    server.providers.script(fails('401 Unauthorized: invalid API key'))
+
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Hello?' })
+    await untilIdle(server, bot)
+
+    expect((await server.client.bots.list())[0]!.error).toMatch(/invalid API key/)
+    expect(await texts(server, bot)).toEqual([['owner', 'Hello?']])
+
+    server.providers.script(callsTools(['sendMessage', { text: 'Back!' }]), endsSilently())
+    await server.client.chats.send({ chatId: bot.chatId, text: 'And now?' })
+    await untilIdle(server, bot)
+
+    expect((await server.client.bots.list())[0]!.error).toBeNull()
   })
 })
 

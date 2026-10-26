@@ -76,7 +76,7 @@ export class LiveStore {
         return this.addBot(event.bot)
       case 'bot.status':
         return this.#update(() => {
-          this.bots = this.bots?.map((bot) => (bot.id === event.botId ? { ...bot, working: event.working } : bot))
+          this.bots = this.bots?.map((bot) => (bot.id === event.botId ? { ...bot, working: event.working, error: event.error } : bot))
         })
       case 'message.created':
         // Chats not opened yet load everything when they are.

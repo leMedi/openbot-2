@@ -49,6 +49,8 @@ export const bot = z.object({
   chatId: z.string(),
   /** A run is going: the bot is thinking, using tools or writing. */
   working: z.boolean(),
+  /** Why the bot's latest run failed, e.g. its provider rejected the request; null once a later run starts. */
+  error: z.string().nullable(),
 })
 export type BotInfo = z.infer<typeof bot>
 
@@ -95,7 +97,7 @@ export const liveEvent = z.discriminatedUnion('type', [
    */
   z.object({ type: z.literal('hello'), resumed: z.boolean() }),
   z.object({ type: z.literal('bot.created'), bot }),
-  z.object({ type: z.literal('bot.status'), botId: z.string(), working: z.boolean() }),
+  z.object({ type: z.literal('bot.status'), botId: z.string(), working: z.boolean(), error: z.string().nullable() }),
   z.object({ type: z.literal('message.created'), message }),
 ])
 export type LiveEvent = z.infer<typeof liveEvent>

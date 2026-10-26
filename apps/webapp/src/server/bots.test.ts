@@ -45,7 +45,7 @@ describe('bots', () => {
 
     const created = await server.client.bots.create(rex)
 
-    expect(created).toEqual({ ...rex, id: expect.any(String), chatId: expect.any(String), working: false })
+    expect(created).toEqual({ ...rex, id: expect.any(String), chatId: expect.any(String), working: false, error: null })
     expect(await server.client.bots.list()).toEqual([created])
     expect(await server.client.chats.messages({ chatId: created.chatId })).toEqual([])
   })

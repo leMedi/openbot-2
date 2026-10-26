@@ -1,6 +1,6 @@
 import type { BotInfo, MessageInfo } from '@openbot/api-contract'
 import { cn } from '@openbot/ui/lib/utils'
-import { createFileRoute } from '@tanstack/react-router'
+import { Link, createFileRoute } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { BotAvatar } from '../../components/bot-avatar.tsx'
 import { Markdown } from '../../components/markdown.tsx'
@@ -42,6 +42,15 @@ function Dm() {
       </header>
       <MessageList bot={bot} messages={messages ?? []} loading={loading} />
       {error && <p className="px-6 text-destructive-foreground">{error}</p>}
+      {bot.error && !bot.working && (
+        <p role="alert" className="mx-[max(24px,calc((100%-700px)/2))] rounded-lg bg-red/10 px-3 py-2 text-sm text-red-foreground">
+          {bot.name} couldn't reach its model: {bot.error}. Check its provider in{' '}
+          <Link to="/settings/providers" className="underline">
+            Settings
+          </Link>
+          , then send your message again.
+        </p>
+      )}
       <Composer bot={bot} onSent={(message) => live.addMessage(message)} />
     </>
   )
@@ -70,7 +79,7 @@ function MessageList({ bot, messages, loading }: { bot: BotInfo; messages: Messa
                 mine ? 'bg-bubble-user text-on-color' : 'bg-bubble-agent',
               )}
             >
-              {mine ? <p className="whitespace-pre-wrap">{message.text}</p> : <Markdown text={message.text} />}
+              <Markdown text={message.text} onColor={mine} />
             </div>
           </div>
         )

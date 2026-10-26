@@ -9,6 +9,7 @@ import {
   MemoryStorage,
   type ModelRef,
   type Storage,
+  type Submission,
   createRegistry,
   defineExtension,
   defineTool,
@@ -39,6 +40,12 @@ Text like a person, not a memo: reply in one to four short messages, one sendMes
 
 export class NoModelError extends Error {}
 
+export type BotStatus = {
+  working: boolean
+  /** Why the bot's latest run failed, e.g. its provider rejected the request; cleared when it is woken again. */
+  error: string | null
+}
+
 export type BotRuntimeOptions = {
   db: Db
   /** pi's model collection, with credentials resolved through our store. */
@@ -47,8 +54,8 @@ export type BotRuntimeOptions = {
   storagePath?: string
   /** Posts a bot's message to its DM; `idempotencyKey` makes a replayed tool call post once. */
   sendMessage(bot: BotWithChat, text: string, idempotencyKey: string): Promise<void>
-  /** A bot started or finished working. */
-  onStatus(botId: string, working: boolean): void
+  /** A bot's status changed: it started or finished working, or a run failed. */
+  onStatus(botId: string, status: BotStatus): void
 }
 
 /** `provider/modelId`, split at the first slash since model ids may contain slashes. */
@@ -85,6 +92,8 @@ export class BotRuntime implements AgentRuntime {
   readonly #histories = new Map<string, Promise<Conversation>>()
   /** Bots with a run going, and how many times each was woken, so an idle wait can tell it was overtaken. */
   readonly #working = new Map<string, number>()
+  /** Why each bot's latest run failed. */
+  readonly #errors = new Map<string, string>()
 
   private constructor(harness: Harness, options: BotRuntimeOptions) {
     this.#harness = harness
@@ -136,7 +145,8 @@ export class BotRuntime implements AgentRuntime {
     const history = await this.#history(bot)
     await history.configure({ model: parseModelRef(model), instructions: personaPrompt(bot) }, context)
 
-    await history.submit(
+    this.#errors.delete(botId)
+    const submission = await history.submit(
       {
         type: 'input',
         content: input.text,
@@ -150,6 +160,7 @@ export class BotRuntime implements AgentRuntime {
     // Counted once the input is queued, so an idle wait that ends before it can tell it was overtaken.
     this.#setWorking(botId)
     void this.#untilIdle(botId, history)
+    void this.#reportFailure(botId, submission)
   }
 
   async stop(botId: string): Promise<void> {
@@ -158,8 +169,8 @@ export class BotRuntime implements AgentRuntime {
     await (await this.#harness.conversation(toConversationId(bot.historyId), context))?.abort(context)
   }
 
-  isWorking(botId: string): boolean {
-    return this.#working.has(botId)
+  status(botId: string): BotStatus {
+    return { working: this.#working.has(botId), error: this.#errors.get(botId) ?? null }
   }
 
   async close(): Promise<void> {
@@ -208,7 +219,7 @@ export class BotRuntime implements AgentRuntime {
   #setWorking(botId: string) {
     const wakes = this.#working.get(botId)
     this.#working.set(botId, (wakes ?? 0) + 1)
-    if (wakes === undefined) this.#options.onStatus(botId, true)
+    if (wakes === undefined) this.#options.onStatus(botId, this.status(botId))
   }
 
   async #untilIdle(botId: string, history: Conversation) {
@@ -222,6 +233,22 @@ export class BotRuntime implements AgentRuntime {
       // The Harness closed.
     }
     if (!this.#working.delete(botId)) return
-    this.#options.onStatus(botId, false)
+    this.#options.onStatus(botId, this.status(botId))
+  }
+
+  /** A run that ends without answering, other than by Stop, failed: the model or its provider errored. */
+  async #reportFailure(botId: string, submission: Submission) {
+    let settled
+    try {
+      settled = await submission.wait(context)
+    } catch {
+      return // The Harness closed.
+    }
+    if (settled.status !== 'unanswered' || settled.reason === 'aborted') return
+    const { detail, reason } = settled
+    const error = typeof detail === 'string' ? detail : detail === undefined ? reason : JSON.stringify(detail)
+    console.error(`[agent] Bot ${botId}'s run failed: ${error}`)
+    this.#errors.set(botId, error)
+    this.#options.onStatus(botId, this.status(botId))
   }
 }

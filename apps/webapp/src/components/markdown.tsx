@@ -1,3 +1,4 @@
+import { cn } from '@openbot/ui/lib/utils'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -23,18 +24,23 @@ const components: Components = {
   th: ({ children }) => <th className="border border-border px-2 py-1 text-left font-semibold">{children}</th>,
   td: ({ children }) => <td className="border border-border px-2 py-1">{children}</td>,
   pre: ({ children }) => (
-    <pre className="my-1.5 overflow-x-auto rounded-lg bg-black/5 p-3 font-mono text-sm leading-5 dark:bg-white/10 [&_code]:bg-transparent [&_code]:p-0">
+    <pre className="my-1.5 overflow-x-auto rounded-lg bg-(--code-tint) p-3 font-mono text-sm leading-5 [&_code]:bg-transparent [&_code]:p-0">
       {children}
     </pre>
   ),
-  code: ({ children }) => <code className="rounded-sm bg-black/10 px-1 font-mono text-[0.9em] dark:bg-white/15">{children}</code>,
+  code: ({ children }) => <code className="rounded-sm bg-(--code-tint) px-1 font-mono text-[0.9em]">{children}</code>,
 }
 
-/** A message's Markdown, with GitHub extensions (tables, task lists, strikethrough, autolinks). */
-export function Markdown({ text }: { text: string }) {
+/**
+ * A message's Markdown, with GitHub extensions (tables, task lists, strikethrough, autolinks). `onColor` is for text on
+ * the owner's dark bubbles, where code needs a light tint.
+ */
+export function Markdown({ text, onColor = false }: { text: string; onColor?: boolean }) {
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-      {text}
-    </ReactMarkdown>
+    <div className={cn(onColor ? '[--code-tint:#ffffff26]' : '[--code-tint:#0000000f] dark:[--code-tint:#ffffff1a]')}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+        {text}
+      </ReactMarkdown>
+    </div>
   )
 }

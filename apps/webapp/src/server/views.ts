@@ -1,4 +1,5 @@
 import type { BotInfo, MessageInfo } from '@openbot/api-contract'
+import type { BotStatus } from '@openbot/agent'
 import type { BotWithChat } from '@openbot/core'
 import type { Message } from '@openbot/db'
 
@@ -15,7 +16,7 @@ export function toMessageInfo(message: Message): MessageInfo {
   }
 }
 
-export function toBotInfo(bot: BotWithChat, working: boolean): BotInfo {
+export function toBotInfo(bot: BotWithChat, { working, error }: BotStatus): BotInfo {
   return {
     id: bot.id,
     handle: bot.handle,
@@ -27,5 +28,6 @@ export function toBotInfo(bot: BotWithChat, working: boolean): BotInfo {
     model: bot.model,
     chatId: bot.chatId,
     working,
+    error,
   }
 }

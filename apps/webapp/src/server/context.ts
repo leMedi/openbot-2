@@ -43,7 +43,7 @@ export async function createServerContext({
       })
       if (created) bus.publish({ type: 'message.created', message: toMessageInfo(message) })
     },
-    onStatus: (botId, working) => bus.publish({ type: 'bot.status', botId, working }),
+    onStatus: (botId, status) => bus.publish({ type: 'bot.status', botId, ...status }),
   })
   return { db, bus, providers, runtime }
 }

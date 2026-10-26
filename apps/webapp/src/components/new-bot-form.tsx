@@ -48,7 +48,7 @@ export function NewBotForm({
     )
   }, [])
 
-  const shownHandle = handle ?? suggestHandle(name)
+  const shownHandle = handle ?? (name.trim() ? suggestHandle(name) : '')
   const defaultModel = models.find((entry) => entry.ref === settings?.defaultModel)
 
   async function submit(event: React.FormEvent) {

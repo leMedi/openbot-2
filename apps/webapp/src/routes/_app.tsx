@@ -86,9 +86,13 @@ function Sidebar() {
               <BotAvatar shape={bot.avatarShape} color={bot.avatarColor} working={bot.working} />
               <span className="flex min-w-0 flex-col">
                 <span className="truncate">{bot.name}</span>
-                <span className={bot.working ? 'truncate text-xs text-green-foreground' : 'truncate text-xs text-muted-foreground'}>
-                  {bot.working ? 'Working…' : (bot.title ?? `@${bot.handle}`)}
-                </span>
+                {bot.working ? (
+                  <span className="truncate text-xs text-green-foreground">Working…</span>
+                ) : bot.error ? (
+                  <span className="truncate text-xs text-red-foreground">Couldn't reach its model</span>
+                ) : (
+                  <span className="truncate text-xs text-muted-foreground">{bot.title ?? `@${bot.handle}`}</span>
+                )}
               </span>
             </Link>
           </li>

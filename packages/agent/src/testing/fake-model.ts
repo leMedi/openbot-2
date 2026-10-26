@@ -24,6 +24,11 @@ export function says(text: string): FakeTurn {
   return fauxAssistantMessage(fauxText(text))
 }
 
+/** A response the provider fails, e.g. on a revoked API key. */
+export function fails(errorMessage: string): FakeTurn {
+  return fauxAssistantMessage([], { stopReason: 'error', errorMessage })
+}
+
 /** A turn that ends the run with no text and no tool calls. */
 export function endsSilently(): FakeTurn {
   return fauxAssistantMessage([])

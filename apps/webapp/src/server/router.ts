@@ -50,7 +50,7 @@ export const router = os.router({
 
   bots: {
     list: os.bots.list.handler(async ({ context }) =>
-      (await listBots(context.db)).map((bot) => toBotInfo(bot, context.runtime.isWorking(bot.id))),
+      (await listBots(context.db)).map((bot) => toBotInfo(bot, context.runtime.status(bot.id))),
     ),
 
     create: os.bots.create.handler(async ({ context, input }) => {
@@ -58,7 +58,7 @@ export const router = os.router({
         throw new ORPCError('BAD_REQUEST', { message: `${input.model} is not a model of a connected provider` })
       }
       try {
-        const bot = toBotInfo(await createBot(context.db, input), false)
+        const bot = toBotInfo(await createBot(context.db, input), { working: false, error: null })
         context.bus.publish({ type: 'bot.created', bot })
         return bot
       } catch (error) {
