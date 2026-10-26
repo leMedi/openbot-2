@@ -2,12 +2,10 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createFakeModel } from '@openbot/agent/testing'
-import type { LiveEvent } from '@openbot/api-contract'
-import { EventBus } from '@openbot/core'
 import { createFakeComputer } from '@openbot/core/testing'
 import { openDb } from '@openbot/db'
 import { createRouterClient } from '@orpc/server'
-import type { ServerContext } from '../context.ts'
+import { createServerContext } from '../context.ts'
 import { handleApiRequest } from '../http.ts'
 import { router } from '../router.ts'
 
@@ -18,7 +16,7 @@ import { router } from '../router.ts'
 export async function createTestServer({ dataDir }: { dataDir?: string } = {}) {
   const dir = dataDir ?? (await mkdtemp(join(tmpdir(), 'openbot-test-')))
   const db = await openDb(join(dir, 'openbot.db'))
-  const context: ServerContext = { db, bus: new EventBus<LiveEvent>() }
+  const context = createServerContext(db)
 
   return {
     dataDir: dir,

@@ -4,7 +4,10 @@ import { OpenAPILink } from '@orpc/openapi-client/fetch'
 import { z } from 'zod'
 
 export const liveEvent = z.discriminatedUnion('type', [
-  /** First event of every subscription; a new `epoch` means the server restarted and the client must refetch. */
+  /**
+   * First event of every subscription. A new `epoch` means the server restarted and the client must refetch;
+   * its `seq` is the last one already published, so every later event has a greater `seq`.
+   */
   z.object({ type: z.literal('hello') }),
 ])
 export type LiveEvent = z.infer<typeof liveEvent>

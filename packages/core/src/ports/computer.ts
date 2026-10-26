@@ -9,8 +9,8 @@ export type ExecResult = { stdout: string; stderr: string; exitCode: number }
 export type BrowserSnapshot = { url: string; title: string; tree: string }
 
 /**
- * The machine all bots share. The real implementation talks to the screen daemon, pi-env and Chromium over CDP;
- * Seam 1 tests use the in-memory fake from `@openbot/core/testing`.
+ * The machine all bots share. The real implementation (`@openbot/computer`) talks to the screen daemon and to
+ * Chromium over CDP; Seam 1 tests use the in-memory fake from `@openbot/core/testing`.
  */
 export interface Computer {
   screens: {
