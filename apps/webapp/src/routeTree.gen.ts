@@ -9,21 +9,33 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppRouteImport } from './routes/_app'
+import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
 import { Route as SettingsModelsRouteImport } from './routes/settings/models'
 import { Route as SettingsProvidersRouteImport } from './routes/settings/providers'
+import { Route as AppBotsBotIdRouteImport } from './routes/_app/bots.$botId'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OnboardingRoute = OnboardingRouteImport.update({
+  id: '/onboarding',
+  path: '/onboarding',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AppIndexRoute = AppIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppRoute,
 } as any)
 const ApiSplatRoute = ApiSplatRouteImport.update({
   id: '/api/$',
@@ -40,57 +52,93 @@ const SettingsProvidersRoute = SettingsProvidersRouteImport.update({
   path: '/providers',
   getParentRoute: () => SettingsRoute,
 } as any)
+const AppBotsBotIdRoute = AppBotsBotIdRouteImport.update({
+  id: '/bots/$botId',
+  path: '/bots/$botId',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
+  '/': typeof AppIndexRoute
+  '/onboarding': typeof OnboardingRoute
   '/settings': typeof SettingsRouteWithChildren
   '/api/$': typeof ApiSplatRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/providers': typeof SettingsProvidersRoute
+  '/bots/$botId': typeof AppBotsBotIdRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
+  '/onboarding': typeof OnboardingRoute
   '/settings': typeof SettingsRouteWithChildren
   '/api/$': typeof ApiSplatRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/providers': typeof SettingsProvidersRoute
+  '/': typeof AppIndexRoute
+  '/bots/$botId': typeof AppBotsBotIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
+  '/_app': typeof AppRouteWithChildren
+  '/onboarding': typeof OnboardingRoute
   '/settings': typeof SettingsRouteWithChildren
   '/api/$': typeof ApiSplatRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/providers': typeof SettingsProvidersRoute
+  '/_app/': typeof AppIndexRoute
+  '/_app/bots/$botId': typeof AppBotsBotIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/settings' | '/api/$' | '/settings/models' | '/settings/providers'
-  fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/settings' | '/api/$' | '/settings/models' | '/settings/providers'
-  id:
-    | '__root__'
     | '/'
+    | '/onboarding'
     | '/settings'
     | '/api/$'
     | '/settings/models'
     | '/settings/providers'
+    | '/bots/$botId'
+  fileRoutesByTo: FileRoutesByTo
+  to:
+    | '/onboarding'
+    | '/settings'
+    | '/api/$'
+    | '/settings/models'
+    | '/settings/providers'
+    | '/'
+    | '/bots/$botId'
+  id:
+    | '__root__'
+    | '/_app'
+    | '/onboarding'
+    | '/settings'
+    | '/api/$'
+    | '/settings/models'
+    | '/settings/providers'
+    | '/_app/'
+    | '/_app/bots/$botId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
+  AppRoute: typeof AppRouteWithChildren
+  OnboardingRoute: typeof OnboardingRoute
   SettingsRoute: typeof SettingsRouteWithChildren
   ApiSplatRoute: typeof ApiSplatRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
+    '/_app': {
+      id: '/_app'
+      path: ''
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+      preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/onboarding': {
+      id: '/onboarding'
+      path: '/onboarding'
+      fullPath: '/onboarding'
+      preLoaderRoute: typeof OnboardingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -99,6 +147,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_app/': {
+      id: '/_app/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
     }
     '/api/$': {
       id: '/api/$'
@@ -121,8 +176,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsProvidersRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/_app/bots/$botId': {
+      id: '/_app/bots/$botId'
+      path: '/bots/$botId'
+      fullPath: '/bots/$botId'
+      preLoaderRoute: typeof AppBotsBotIdRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
+
+interface AppRouteChildren {
+  AppIndexRoute: typeof AppIndexRoute
+  AppBotsBotIdRoute: typeof AppBotsBotIdRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppIndexRoute: AppIndexRoute,
+  AppBotsBotIdRoute: AppBotsBotIdRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
 interface SettingsRouteChildren {
   SettingsModelsRoute: typeof SettingsModelsRoute
@@ -139,7 +213,8 @@ const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
 )
 
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
+  AppRoute: AppRouteWithChildren,
+  OnboardingRoute: OnboardingRoute,
   SettingsRoute: SettingsRouteWithChildren,
   ApiSplatRoute: ApiSplatRoute,
 }

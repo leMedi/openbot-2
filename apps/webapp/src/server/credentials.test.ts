@@ -1,3 +1,4 @@
+import { callsTools, endsSilently } from '@openbot/agent/testing'
 import { contract } from '@openbot/api-contract'
 import { systemCredentials } from '@openbot/db'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -45,6 +46,20 @@ describe('system credentials', () => {
       ...(await signInSteps(server, 'fake', 'api_key', [apiKey])),
     ]
 
+    const settings = await server.client.models.updateSettings({ defaultModel: 'fake/fake-model' })
+    const bot = await server.client.bots.create({
+      name: 'Rex',
+      handle: 'rex',
+      title: null,
+      persona: '',
+      avatarShape: 'blob',
+      avatarColor: 'red',
+      model: null,
+    })
+    server.providers.script(callsTools(['sendMessage', { text: 'Hi' }]), endsSilently())
+    const sent = await server.client.chats.send({ chatId: bot.chatId, text: 'Hello' })
+    await expect.poll(async () => (await server.client.chats.messages({ chatId: bot.chatId })).length).toBe(2)
+
     // Each procedure that returns data, called once it has something to return. A new procedure fails the check
     // below until it is added here.
     const responses: Record<string, unknown> = {
@@ -55,7 +70,12 @@ describe('system credentials', () => {
       'providers.disconnect': null,
       'models.list': await server.client.models.list(),
       'models.getSettings': await server.client.models.getSettings(),
-      'models.updateSettings': await server.client.models.updateSettings({ defaultModel: 'fake/fake-model' }),
+      'models.updateSettings': settings,
+      'onboarding.status': await server.client.onboarding.status(),
+      'bots.list': await server.client.bots.list(),
+      'bots.create': bot,
+      'chats.messages': await server.client.chats.messages({ chatId: bot.chatId }),
+      'chats.send': sent,
       events: null,
       openapi: await (await server.fetch('/api/openapi.json')).json(),
     }

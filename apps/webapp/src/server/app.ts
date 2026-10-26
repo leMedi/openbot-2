@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import { builtinModelProviders } from '@openbot/agent'
 import { openDb } from '@openbot/db'
 import { env, paths } from '@openbot/db/env'
@@ -28,7 +28,7 @@ async function loadSecretKey(): Promise<string> {
 
 async function open(): Promise<ServerContext> {
   const [db, secretKey, providers] = await Promise.all([openDb(paths.database), loadSecretKey(), builtinModelProviders()])
-  return createServerContext({ db, secretKey, providers })
+  return createServerContext({ db, secretKey, providers, agentStoragePath: join(paths.dataDir, 'agent.sqlite') })
 }
 
 let context: Promise<ServerContext> | undefined

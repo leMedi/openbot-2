@@ -1,5 +1,7 @@
 import {
+  type AssistantMessage,
   type FauxModelDefinition,
+  type Message,
   type OAuthAuth,
   type OAuthCredential,
   type Provider,
@@ -150,8 +152,25 @@ export function createFakeProviders() {
     oauth: device.oauth,
   })
 
+  const requests: { model: string; messages: Message[] }[] = []
+
   return {
     providers: [fake.provider, fakeDevice.provider] as Provider[],
+    /** Queues responses of `fake` models, one per request in order; build them with `callsTools`, `says`… */
+    script(...turns: AssistantMessage[]) {
+      fake.faux.appendResponses(
+        turns.map((turn) => (context, _options, _state, model) => {
+          requests.push({ model: `${model.provider}/${model.id}`, messages: [...context.messages] })
+          return turn
+        }),
+      )
+    },
+    /** Requests that scripted turns answered, in order: the model and the messages it was sent. */
+    requests,
+    /** Scripted turns not requested yet. */
+    get pendingTurns() {
+      return fake.faux.getPendingResponseCount()
+    },
     /** Answers the next request to a `fake` model with "ok", recording the API key it was sent with. */
     answerNextRequest() {
       const request: { apiKey?: string } = {}

@@ -1,6 +1,8 @@
 export { EventBus, type Stamp, type Stamped } from './events.ts'
 export { SecretBox } from './secret-box.ts'
 export { groupRoundRules } from './group-rules.ts'
+export { createBot, findBotByHistory, getBot, HandleTakenError, listBots, setBotHistory, type BotWithChat } from './bots.ts'
+export { getChat, listMessages, postMessage } from './chats.ts'
 export { readModelSettings, writeModelSettings, type ModelSettings } from './settings.ts'
 export { lanes, type AgentRuntime, type BotInput, type Lane } from './ports/agent-runtime.ts'
 export type {

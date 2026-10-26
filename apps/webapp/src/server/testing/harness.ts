@@ -22,12 +22,18 @@ export async function createTestServer() {
 async function open(dir: string, secretKey = testSecretKey) {
   const db = await openDb(join(dir, 'openbot.db'))
   const providers = createFakeProviders()
-  const context = createServerContext({ db, secretKey, providers: providers.providers })
+  const context = await createServerContext({
+    db,
+    secretKey,
+    providers: providers.providers,
+    agentStoragePath: join(dir, 'agent.sqlite'),
+  })
+  const client = createRouterClient(router, { context })
 
   return {
     dataDir: dir,
     db,
-    client: createRouterClient(router, { context }),
+    client,
     model: createFakeModel(),
     /** The scripted providers behind the API, and their sign-ins. */
     providers,
@@ -36,8 +42,24 @@ async function open(dir: string, secretKey = testSecretKey) {
     computer: createFakeComputer(),
     /** An HTTP request against the API, e.g. `fetch('/api/health')`. */
     fetch: (path: string, init?: RequestInit) => handleApiRequest(new Request(new URL(path, 'http://openbot.test'), init), context),
+    /** Connects the `fake` provider with an API key, as the owner would in Settings → Providers. */
+    async connectProvider(key = 'sk-fake-123') {
+      const steps = await client.providers.connect({ providerId: 'fake', method: 'api_key' })
+      let signInId = ''
+      for await (const step of steps) {
+        if (step.type === 'started') signInId = step.signInId
+        if (step.type === 'prompt') await client.providers.answer({ signInId, promptId: step.promptId, value: key })
+        if (step.type === 'failed') throw new Error(step.message)
+      }
+    },
+    /** Stops the runtime and closes the database, keeping the data. */
+    async shutdown() {
+      await context.runtime.close()
+      db.$client.close()
+    },
     /** Closes the database and deletes the data. */
     async close() {
+      await context.runtime.close()
       db.$client.close()
       await rm(dir, { recursive: true, force: true })
     },
@@ -51,6 +73,6 @@ export type TestServer = Awaited<ReturnType<typeof open>>
  * another secret key (as when the owner loses theirs).
  */
 export async function restartTestServer(server: TestServer, { secretKey }: { secretKey?: string } = {}): Promise<TestServer> {
-  server.db.$client.close()
+  await server.shutdown()
   return open(server.dataDir, secretKey)
 }

@@ -3,12 +3,100 @@ import { type ContractRouterClient, eventIterator, oc } from '@orpc/contract'
 import { OpenAPILink } from '@orpc/openapi-client/fetch'
 import { z } from 'zod'
 
+export const avatarShapes = ['blob', 'pebble', 'squircle', 'tablet', 'wedge', 'hex', 'cloud', 'teardrop'] as const
+export const avatarColors = [
+  'black',
+  'brown',
+  'red',
+  'orange',
+  'yellow',
+  'green',
+  'cyan',
+  'blue',
+  'violet',
+  'magenta',
+  'gray',
+] as const
+
+/** A bot's `@handle`: lowercase letters, digits and underscores. */
+export const handle = z
+  .string()
+  .regex(/^[a-z0-9_]{2,32}$/, 'Use 2 to 32 lowercase letters, digits or underscores')
+
+/** The handle a new bot named `name` is offered, e.g. "Rex the Builder" → `rex_the_builder`. */
+export function suggestHandle(name: string): string {
+  const words = name
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+  const suggestion = words.join('_').slice(0, 32).replace(/_+$/, '')
+  return suggestion.length >= 2 ? suggestion : 'bot'
+}
+
+export const bot = z.object({
+  id: z.string(),
+  handle: z.string(),
+  name: z.string(),
+  title: z.string().nullable(),
+  persona: z.string(),
+  avatarShape: z.enum(avatarShapes),
+  avatarColor: z.enum(avatarColors),
+  /** `provider/modelId`; null follows the default model. */
+  model: z.string().nullable(),
+  /** The bot's DM. */
+  chatId: z.string(),
+  /** A run is going: the bot is thinking, using tools or writing. */
+  working: z.boolean(),
+})
+export type BotInfo = z.infer<typeof bot>
+
+export const newBot = z.object({
+  name: z.string().trim().min(1).max(80),
+  handle,
+  title: z.string().trim().max(120).nullable(),
+  persona: z.string().max(20_000),
+  avatarShape: z.enum(avatarShapes),
+  avatarColor: z.enum(avatarColors),
+  model: z.string().nullable(),
+})
+export type NewBot = z.infer<typeof newBot>
+
+/** Something the owner or a bot posted in a chat. A bot's thinking and tool use are never messages. */
+export const message = z.object({
+  id: z.string(),
+  chatId: z.string(),
+  author: z.enum(['owner', 'bot']),
+  /** The bot that posted it, when `author` is `bot`. */
+  botId: z.string().nullable(),
+  authorName: z.string(),
+  /** Markdown. */
+  text: z.string(),
+  /** Milliseconds since the epoch. */
+  createdAt: z.number(),
+})
+export type MessageInfo = z.infer<typeof message>
+
+export const onboarding = z.object({
+  provider: z.boolean(),
+  defaultModel: z.boolean(),
+  bot: z.boolean(),
+  /** Every step is done; until then the web app shows onboarding. */
+  done: z.boolean(),
+})
+export type Onboarding = z.infer<typeof onboarding>
+
 export const liveEvent = z.discriminatedUnion('type', [
   /**
-   * First event of every subscription. A new `epoch` means the server restarted and the client must refetch;
-   * its `seq` is the last one already published, so every later event has a greater `seq`.
+   * First event of every subscription. With `resumed`, the events the client missed since the stamp it reconnected
+   * with follow, and the hello carries that stamp. Otherwise (a new `epoch` after a restart, or too far behind) the
+   * client must refetch; its `seq` is the last one already published, so every later event has a greater `seq`.
    */
-  z.object({ type: z.literal('hello') }),
+  z.object({ type: z.literal('hello'), resumed: z.boolean() }),
+  z.object({ type: z.literal('bot.created'), bot }),
+  z.object({ type: z.literal('bot.status'), botId: z.string(), working: z.boolean() }),
+  z.object({ type: z.literal('message.created'), message }),
 ])
 export type LiveEvent = z.infer<typeof liveEvent>
 
@@ -92,8 +180,35 @@ export const contract = {
     .route({ method: 'GET', path: '/health', summary: 'Liveness, used by the installer and the updater' })
     .output(z.object({ status: z.literal('ok'), epoch: z.string() })),
   events: oc
-    .route({ method: 'GET', path: '/events', summary: 'The live event stream, as server-sent events' })
+    .route({
+      method: 'GET',
+      path: '/events',
+      summary: 'The live event stream, as server-sent events; a reconnecting client passes its last stamp to catch up',
+    })
+    .input(z.object({ epoch: z.string().optional(), seq: z.coerce.number().int().nonnegative().optional() }).optional())
     .output(eventIterator(stampedEvent)),
+  onboarding: {
+    status: oc
+      .route({ method: 'GET', path: '/onboarding', summary: 'Which first-run steps are done' })
+      .output(onboarding),
+  },
+  bots: {
+    list: oc.route({ method: 'GET', path: '/bots', summary: 'Every bot, oldest first' }).output(z.array(bot)),
+    create: oc
+      .route({ method: 'POST', path: '/bots', summary: 'Create a bot and its DM; the handle must be unused' })
+      .input(newBot)
+      .output(bot),
+  },
+  chats: {
+    messages: oc
+      .route({ method: 'GET', path: '/chats/{chatId}/messages', summary: "A chat's messages, oldest first" })
+      .input(z.object({ chatId: z.string() }))
+      .output(z.array(message)),
+    send: oc
+      .route({ method: 'POST', path: '/chats/{chatId}/messages', summary: 'Post the owner\'s message and wake the bot' })
+      .input(z.object({ chatId: z.string(), text: z.string().trim().min(1).max(100_000) }))
+      .output(message),
+  },
   providers: {
     list: oc
       .route({ method: 'GET', path: '/providers', summary: 'Every provider OpenBot can use, and whether it is connected' })

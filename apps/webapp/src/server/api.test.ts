@@ -31,7 +31,7 @@ describe('health and the live event stream', () => {
     const hello = await firstEvent(server)
 
     expect(health).toEqual({ status: 'ok', epoch: expect.any(String) })
-    expect(hello).toEqual({ epoch: health.epoch, seq: expect.any(Number), event: { type: 'hello' } })
+    expect(hello).toEqual({ epoch: health.epoch, seq: expect.any(Number), event: { type: 'hello', resumed: false } })
   })
 
   it('starts a new epoch when the server restarts on the same data', async () => {
