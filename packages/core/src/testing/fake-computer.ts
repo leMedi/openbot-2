@@ -13,7 +13,7 @@ export type FakeComputerScript = {
 }
 
 export type FakeComputer = Computer & {
-  /** Every side-effecting call, in order, keyed by bot handle. Status reads are not recorded. */
+  /** Every side-effecting call, in order, keyed by bot name. Status reads are not recorded. */
   readonly calls: ComputerCall[]
 }
 
@@ -33,13 +33,13 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
     calls,
     screens: {
       async start(bot) {
-        calls.push({ bot: bot.handle, kind: 'screens.start' })
+        calls.push({ bot: bot.name, kind: 'screens.start' })
         if (!displays.has(bot.id)) displays.set(bot.id, 100 + displays.size)
         running.add(bot.id)
         return status(bot)
       },
       async stop(bot) {
-        calls.push({ bot: bot.handle, kind: 'screens.stop' })
+        calls.push({ bot: bot.name, kind: 'screens.stop' })
         running.delete(bot.id)
       },
       async status(bot) {
@@ -48,27 +48,27 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
     },
     shell: {
       async exec(bot, command) {
-        calls.push({ bot: bot.handle, kind: 'shell.exec', command })
+        calls.push({ bot: bot.name, kind: 'shell.exec', command })
         return script.shell?.(command, bot) ?? { stdout: '', stderr: '', exitCode: 0 }
       },
     },
     browser: {
       async snapshot(bot): Promise<BrowserSnapshot> {
-        calls.push({ bot: bot.handle, kind: 'browser.snapshot' })
+        calls.push({ bot: bot.name, kind: 'browser.snapshot' })
         return { url: pages.get(bot.id) ?? 'about:blank', title: '', tree: '' }
       },
       async navigate(bot, url) {
-        calls.push({ bot: bot.handle, kind: 'browser.navigate', url })
+        calls.push({ bot: bot.name, kind: 'browser.navigate', url })
         pages.set(bot.id, url)
       },
       async click(bot, ref) {
-        calls.push({ bot: bot.handle, kind: 'browser.click', ref })
+        calls.push({ bot: bot.name, kind: 'browser.click', ref })
       },
       async type(bot, ref, text) {
-        calls.push({ bot: bot.handle, kind: 'browser.type', ref, text })
+        calls.push({ bot: bot.name, kind: 'browser.type', ref, text })
       },
       async screenshot(bot) {
-        calls.push({ bot: bot.handle, kind: 'browser.screenshot' })
+        calls.push({ bot: bot.name, kind: 'browser.screenshot' })
         return new Uint8Array()
       },
     },

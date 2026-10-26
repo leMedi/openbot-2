@@ -19,10 +19,9 @@ export function toMessageInfo(message: Message): MessageInfo {
 export function toBotInfo(bot: BotWithChat, { working, error }: BotStatus): BotInfo {
   return {
     id: bot.id,
-    handle: bot.handle,
     name: bot.name,
     title: bot.title,
-    persona: bot.persona,
+    instructions: bot.instructions,
     avatarShape: bot.avatarShape,
     avatarColor: bot.avatarColor as BotInfo['avatarColor'],
     model: bot.model,

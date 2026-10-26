@@ -1,16 +1,19 @@
 import { type Bot, type Db, type NewBot, bots, chats } from '@openbot/db'
-import { asc, eq } from 'drizzle-orm'
+import { asc, eq, sql } from 'drizzle-orm'
 
-export class HandleTakenError extends Error {}
+export class NameTakenError extends Error {}
 
 /** A bot with the id of its DM. */
 export type BotWithChat = Bot & { chatId: string }
 
-/** Creates a bot and its DM in one transaction. Throws `HandleTakenError` when another bot has the handle. */
+/** Creates a bot and its DM in one transaction. Throws `NameTakenError` when another bot has the name, ignoring case. */
 export async function createBot(db: Db, values: Omit<NewBot, 'id' | 'historyId' | 'displayNumber'>): Promise<BotWithChat> {
   return db.transaction(async (tx) => {
-    const [taken] = await tx.select({ id: bots.id }).from(bots).where(eq(bots.handle, values.handle))
-    if (taken) throw new HandleTakenError(`@${values.handle} is already taken`)
+    const [taken] = await tx
+      .select({ id: bots.id })
+      .from(bots)
+      .where(sql`lower(${bots.name}) = lower(${values.name})`)
+    if (taken) throw new NameTakenError(`There is already a bot named ${values.name}`)
     const [bot] = await tx.insert(bots).values(values).returning()
     const [chat] = await tx.insert(chats).values({ kind: 'dm', botId: bot!.id }).returning()
     return { ...bot!, chatId: chat!.id }

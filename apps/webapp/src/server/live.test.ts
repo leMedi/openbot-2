@@ -12,9 +12,8 @@ afterEach(async () => {
 
 const rex: NewBot = {
   name: 'Rex',
-  handle: 'rex',
   title: null,
-  persona: '',
+  instructions: '',
   avatarShape: 'blob',
   avatarColor: 'green',
   model: null,

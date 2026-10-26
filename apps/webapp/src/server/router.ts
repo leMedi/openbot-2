@@ -4,7 +4,7 @@ import {
   createBot,
   getBot,
   getChat,
-  HandleTakenError,
+  NameTakenError,
   listBots,
   listMessages,
   postMessage,
@@ -62,7 +62,7 @@ export const router = os.router({
         context.bus.publish({ type: 'bot.created', bot })
         return bot
       } catch (error) {
-        if (error instanceof HandleTakenError) throw new ORPCError('CONFLICT', { message: error.message })
+        if (error instanceof NameTakenError) throw new ORPCError('CONFLICT', { message: error.message })
         throw error
       }
     }),

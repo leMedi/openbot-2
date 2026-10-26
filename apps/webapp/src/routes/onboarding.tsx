@@ -13,7 +13,7 @@ export const Route = createFileRoute('/onboarding')({
 const steps = [
   { key: 'provider', title: 'Connect a provider', description: 'An API key or a subscription your bots run on.' },
   { key: 'defaultModel', title: 'Pick the default model', description: 'Every bot uses it unless it has its own.' },
-  { key: 'bot', title: 'Create your first bot', description: 'Give it a name and a persona; you can chat right away.' },
+  { key: 'bot', title: 'Create your first bot', description: 'Give it a name and instructions; you can chat right away.' },
 ] as const
 
 /** First run: connect a provider, pick the default model, create a first bot. */

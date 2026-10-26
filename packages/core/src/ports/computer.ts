@@ -1,5 +1,5 @@
 /** Which bot's screen, folder and browser a call targets. */
-export type ComputerBot = { id: string; handle: string }
+export type ComputerBot = { id: string; name: string }
 
 export type ScreenStatus = { state: 'stopped' | 'starting' | 'running' | 'crashed'; display: number | null }
 

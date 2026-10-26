@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createFakeComputer } from './fake-computer.ts'
 
-const rex = { id: 'bot-rex', handle: 'rex' }
+const rex = { id: 'bot-rex', name: 'Rex' }
 
 describe('fake computer', () => {
   it('records screen, shell and browser calls in order', async () => {
@@ -14,11 +14,11 @@ describe('fake computer', () => {
     await computer.browser.type(rex, 'e4', 'hello')
 
     expect(computer.calls).toEqual([
-      { bot: 'rex', kind: 'screens.start' },
-      { bot: 'rex', kind: 'shell.exec', command: 'ls ~' },
-      { bot: 'rex', kind: 'browser.navigate', url: 'https://example.com' },
-      { bot: 'rex', kind: 'browser.click', ref: 'e3' },
-      { bot: 'rex', kind: 'browser.type', ref: 'e4', text: 'hello' },
+      { bot: 'Rex', kind: 'screens.start' },
+      { bot: 'Rex', kind: 'shell.exec', command: 'ls ~' },
+      { bot: 'Rex', kind: 'browser.navigate', url: 'https://example.com' },
+      { bot: 'Rex', kind: 'browser.click', ref: 'e3' },
+      { bot: 'Rex', kind: 'browser.type', ref: 'e4', text: 'hello' },
     ])
   })
 

@@ -49,9 +49,8 @@ describe('system credentials', () => {
     const settings = await server.client.models.updateSettings({ defaultModel: 'fake/fake-model' })
     const bot = await server.client.bots.create({
       name: 'Rex',
-      handle: 'rex',
       title: null,
-      persona: '',
+      instructions: '',
       avatarShape: 'blob',
       avatarColor: 'red',
       model: null,

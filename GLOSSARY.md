@@ -1,6 +1,6 @@
 # OpenBot
 
-OpenBot gives one person a team of always-on bots that run on a machine they control. Each bot has a persona, its own memory and routines, and its own screen they can watch and take over.
+OpenBot gives one person a team of always-on bots that run on a machine they control. Each bot has its own instructions, memory and routines, and its own screen they can watch and take over.
 
 ## Language
 
@@ -11,16 +11,12 @@ The one person an OpenBot instance belongs to. There are no other users.
 _Avoid_: User, admin, account
 
 **Bot**:
-A named, long-lived agent with a persona, its own memory, routines and screen, that the owner chats with.
+A named, long-lived agent with its own instructions, memory, routines and screen, that the owner chats with. Its name is unique, ignoring case, and is how the owner and other bots mention it (`@Rex`).
 _Avoid_: Agent, assistant
 
-**Handle**:
-A bot's unique `@name`, used to mention it.
-_Avoid_: Username, slug
-
-**Persona**:
+**Instructions**:
 The owner-written description of who a bot is and how it behaves.
-_Avoid_: System prompt, instructions
+_Avoid_: Persona, system prompt
 
 ### Talking
 

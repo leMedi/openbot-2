@@ -11,9 +11,8 @@ afterEach(async () => {
 
 const rex: NewBot = {
   name: 'Rex',
-  handle: 'rex',
   title: 'Builder',
-  persona: 'Rex fixes builds and never gives up.',
+  instructions: 'Rex fixes builds and never gives up.',
   avatarShape: 'hex',
   avatarColor: 'blue',
   model: null,
@@ -69,7 +68,7 @@ describe('chatting in a DM', () => {
     await untilIdle(server, bot)
 
     const system = JSON.stringify(server.providers.requests[0]!.messages)
-    expect(system).toContain('Rex (@rex), Builder')
+    expect(system).toContain('You are Rex, Builder.')
     expect(system).toContain('Rex fixes builds and never gives up.')
   })
 
@@ -86,7 +85,7 @@ describe('chatting in a DM', () => {
 
   it('runs a bot with its own model on that model', async () => {
     const { server } = await startWithRex()
-    const ana = await server.client.bots.create({ ...rex, name: 'Ana', handle: 'ana', model: 'fake/fake-mini' })
+    const ana = await server.client.bots.create({ ...rex, name: 'Ana', model: 'fake/fake-mini' })
     server.providers.script(callsTools(['sendMessage', { text: 'Hi' }]), endsSilently())
 
     await server.client.chats.send({ chatId: ana.chatId, text: 'Hello' })

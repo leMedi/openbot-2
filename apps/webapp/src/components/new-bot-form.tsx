@@ -5,7 +5,6 @@ import {
   type ModelInfo,
   type ModelSettings,
   type NewBot,
-  suggestHandle,
 } from '@openbot/api-contract'
 import { cn } from '@openbot/ui/lib/utils'
 import { useEffect, useState } from 'react'
@@ -16,7 +15,7 @@ const followDefault = ''
 
 const inputClass = 'rounded-md border border-input bg-input-fill px-2.5 py-1.5 text-base outline-none focus:border-ring'
 
-/** Name, handle (generated from the name until edited), title, persona, avatar and model of a new bot. */
+/** Name, title, instructions, avatar and model of a new bot. */
 export function NewBotForm({
   onCreated,
   onCancel,
@@ -27,9 +26,8 @@ export function NewBotForm({
   submitLabel?: string
 }) {
   const [name, setName] = useState('')
-  const [handle, setHandle] = useState<string>()
   const [title, setTitle] = useState('')
-  const [persona, setPersona] = useState('')
+  const [instructions, setInstructions] = useState('')
   const [shape, setShape] = useState<NewBot['avatarShape']>(() => avatarShapes[Math.floor(Math.random() * avatarShapes.length)]!)
   const [color, setColor] = useState<NewBot['avatarColor']>(() => avatarColors[Math.floor(Math.random() * avatarColors.length)]!)
   const [model, setModel] = useState(followDefault)
@@ -48,7 +46,6 @@ export function NewBotForm({
     )
   }, [])
 
-  const shownHandle = handle ?? (name.trim() ? suggestHandle(name) : '')
   const defaultModel = models.find((entry) => entry.ref === settings?.defaultModel)
 
   async function submit(event: React.FormEvent) {
@@ -59,9 +56,8 @@ export function NewBotForm({
       onCreated(
         await api().bots.create({
           name: name.trim(),
-          handle: shownHandle,
           title: title.trim() || null,
-          persona,
+          instructions,
           avatarShape: shape,
           avatarColor: color,
           model: model || null,
@@ -110,36 +106,21 @@ export function NewBotForm({
         </div>
       </div>
 
-      <Field label="Name" htmlFor="bot-name">
+      <Field label="Name" htmlFor="bot-name" hint="How you and other bots mention it; no two bots share one.">
         <input id="bot-name" required autoFocus placeholder="Rex" value={name} onChange={(event) => setName(event.target.value)} className={inputClass} />
-      </Field>
-
-      <Field label="Handle" htmlFor="bot-handle" hint="How you and other bots mention it.">
-        <div className="flex items-center rounded-md border border-input bg-input-fill focus-within:border-ring">
-          <span className="pl-2.5 text-muted-foreground">@</span>
-          <input
-            id="bot-handle"
-            required
-            pattern="[a-z0-9_]{2,32}"
-            title="2 to 32 lowercase letters, digits or underscores"
-            value={shownHandle}
-            onChange={(event) => setHandle(event.target.value.toLowerCase())}
-            className="min-w-0 flex-1 bg-transparent py-1.5 pr-2.5 pl-0.5 text-base outline-none"
-          />
-        </div>
       </Field>
 
       <Field label="Title" htmlFor="bot-title">
         <input id="bot-title" placeholder="Describe what your bot does" value={title} onChange={(event) => setTitle(event.target.value)} className={inputClass} />
       </Field>
 
-      <Field label="Persona" htmlFor="bot-persona" hint="Who the bot is and how it behaves.">
+      <Field label="Instructions" htmlFor="bot-instructions" hint="Who the bot is and how it behaves.">
         <textarea
-          id="bot-persona"
+          id="bot-instructions"
           rows={4}
           placeholder="A calm release engineer who fixes builds and explains what went wrong in plain words."
-          value={persona}
-          onChange={(event) => setPersona(event.target.value)}
+          value={instructions}
+          onChange={(event) => setInstructions(event.target.value)}
           className={cn(inputClass, 'resize-y')}
         />
       </Field>

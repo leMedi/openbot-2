@@ -14,9 +14,8 @@ afterEach(async () => {
 
 const rex: NewBot = {
   name: 'Rex',
-  handle: 'rex',
   title: 'Builder',
-  persona: 'Rex fixes builds and never gives up.',
+  instructions: 'Rex fixes builds and never gives up.',
   avatarShape: 'hex',
   avatarColor: 'blue',
   model: null,
@@ -50,19 +49,19 @@ describe('bots', () => {
     expect(await server.client.chats.messages({ chatId: created.chatId })).toEqual([])
   })
 
-  it('rejects a handle already in use', async () => {
+  it('rejects a name already in use, ignoring case', async () => {
     const server = await start()
     await server.connectProvider()
     await server.client.bots.create(rex)
 
-    await expect(server.client.bots.create({ ...rex, name: 'Rex Two' })).rejects.toMatchObject({ code: 'CONFLICT' })
+    await expect(server.client.bots.create({ ...rex, name: 'REX' })).rejects.toMatchObject({ code: 'CONFLICT' })
     expect(await server.client.bots.list()).toHaveLength(1)
   })
 
-  it('rejects handles that cannot be mentioned', async () => {
+  it('rejects a bot without a name', async () => {
     const server = await start()
 
-    await expect(server.client.bots.create({ ...rex, handle: 'Rex Bot' })).rejects.toMatchObject({ code: 'BAD_REQUEST' })
+    await expect(server.client.bots.create({ ...rex, name: '  ' })).rejects.toMatchObject({ code: 'BAD_REQUEST' })
   })
 
   it('only accepts a model override from a connected provider', async () => {

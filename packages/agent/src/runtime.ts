@@ -68,9 +68,10 @@ function parseModelRef(ref: string): ModelRef {
 const toHistoryId = (id: ConversationId) => String(id)
 const toConversationId = (historyId: string) => Number(historyId) as ConversationId
 
-function personaPrompt(bot: BotWithChat): string {
-  const who = `You are ${bot.name} (@${bot.handle})${bot.title ? `, ${bot.title}` : ''}.`
-  return bot.persona.trim() ? `${who}\n\n${bot.persona.trim()}` : who
+/** Who the bot is, then the owner's instructions. */
+function botPrompt(bot: BotWithChat): string {
+  const who = `You are ${bot.name}${bot.title ? `, ${bot.title}` : ''}.`
+  return bot.instructions.trim() ? `${who}\n\n${bot.instructions.trim()}` : who
 }
 
 const isReminder = (entry: EntryRecord) =>
@@ -143,7 +144,7 @@ export class BotRuntime implements AgentRuntime {
     const model = bot.model ?? (await readModelSettings(this.#options.db)).defaultModel
     if (!model) throw new NoModelError('Choose a default model first')
     const history = await this.#history(bot)
-    await history.configure({ model: parseModelRef(model), instructions: personaPrompt(bot) }, context)
+    await history.configure({ model: parseModelRef(model), instructions: botPrompt(bot) }, context)
 
     this.#errors.delete(botId)
     const submission = await history.submit(

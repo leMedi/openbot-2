@@ -91,7 +91,7 @@ function Sidebar() {
                 ) : bot.error ? (
                   <span className="truncate text-xs text-red-foreground">Couldn't reach its model</span>
                 ) : (
-                  <span className="truncate text-xs text-muted-foreground">{bot.title ?? `@${bot.handle}`}</span>
+                  <span className="truncate text-xs text-muted-foreground">{bot.title}</span>
                 )}
               </span>
             </Link>

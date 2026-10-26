@@ -1,6 +1,6 @@
 # OpenBot: design
 
-OpenBot is an open-source alternative to Grok Bot. You run it on your own machine as one Docker container. It gives you a team of always-on bots. Each bot has a persona, its own memory and routines, and its own screen on the container's desktop, which you can watch and take over from the web.
+OpenBot is an open-source alternative to Grok Bot. You run it on your own machine as one Docker container. It gives you a team of always-on bots. Each bot has its own instructions, memory and routines, and its own screen on the container's desktop, which you can watch and take over from the web.
 
 This document records the decisions agreed on 2026-10-25 and 2026-10-26. The research behind them is in [`grok-bot/`](grok-bot/README.md) (with the UI spec in [`grok-bot/05-ui.md`](grok-bot/05-ui.md)) and in [`research/cua-overview.md`](research/cua-overview.md).
 
@@ -56,7 +56,7 @@ Only values needed before the database opens are env vars. Everything else lives
 | Env var | Default | Holds |
 |---|---|---|
 | `OPENBOT_DATA_DIR` | `/var/lib/openbot` | libSQL db, pi-durable storage, plugin installs, audit log. Mode 0700, server user only. |
-| `OPENBOT_HOME` | `/home/openbot` | Bots' world: `shared/`, `bots/<handle>/` (workspace, uploads, Chromium profile), installed tools |
+| `OPENBOT_HOME` | `/home/openbot` | Bots' world: `shared/`, `bots/<id>/` (workspace, uploads, Chromium profile), installed tools |
 | `OPENBOT_APP_DIR` | `/opt/openbot` | `releases/<version>/`, `current` symlink |
 | `OPENBOT_SECRET_KEY` | generated on first boot | Encryption of vault and system credentials |
 | `OPENBOT_PUBLIC_URL`, `OPENBOT_PORT` | `3000` | Links and OAuth redirects |
@@ -91,9 +91,9 @@ Re-running never overwrites `.env`; it offers a runtime update. Flags: `--yes --
 
 ### 3.1 Bots
 
-- Fields: name, `@handle` (unique), title, persona/instructions, avatar shape and color, `model` (null follows `settings.defaultModel`), display number, `pi_conversation_id`, sidebar `section_id` and `pinned_position` (P1).
+- Fields: name (unique ignoring case; bots are mentioned by name), title, instructions, avatar shape and color, `model` (null follows `settings.defaultModel`), display number, `pi_conversation_id`, sidebar `section_id` and `pinned_position` (P1).
 - **New bot** opens a popup with those fields. **New group chat** opens an empty conversation with a Slack-style "To:" chip field; the first message creates the group.
-- **Delete is permanent.** It removes the bot row, its pi conversation, 1:1 messages, routines, memory, grants, rules, audit entries, display and `$OPENBOT_HOME/bots/<handle>/`, and removes it from groups. Messages it left elsewhere keep an `author_name` snapshot and show as "Name (deleted)". Global memory facts it wrote stay.
+- **Delete is permanent.** It removes the bot row, its pi conversation, 1:1 messages, routines, memory, grants, rules, audit entries, display and `$OPENBOT_HOME/bots/<id>/`, and removes it from groups. Messages it left elsewhere keep an `author_name` snapshot and show as "Name (deleted)". Global memory facts it wrote stay.
 
 ### 3.2 One conversation per bot (Grok's model)
 
@@ -125,7 +125,7 @@ Grok's rules: at most 3 rounds and 10 member turns per human message, speaker or
 
 ## 4. The bot's computer
 
-- **One X display per bot, always on.** Xvfb at 1280×800 + Openbox + its own Chromium profile at `$OPENBOT_HOME/bots/<handle>/chromium` (logins are not shared between bots). Display numbers are stable per bot.
+- **One X display per bot, always on.** Xvfb at 1280×800 + Openbox + its own Chromium profile at `$OPENBOT_HOME/bots/<id>/chromium` (logins are not shared between bots). Display numbers are stable per bot.
 - **noVNC** per display, proxied at `/vnc/:botId`. The Screen pane shows a view-only preview; ✋ switches to interactive with "Hand back"; ⤢ opens fullscreen.
 - **Tool priority**, stated in the prompt: plugin/MCP → shell and web fetch → browser → desktop.
 - Browser and desktop tools live only in a **computerUse subagent** (a pi-durable task-owned conversation running `computerUseModel`). The main bot calls `use_computer({ goal, reason, startUrl? })`; the reason is logged and scored by evals. Its activity is hidden in the chat, like Grok's.
@@ -170,7 +170,7 @@ type Verdict = { decision: 'allow' } | { decision: 'deny'; reason: string } | { 
 - Called from one `beforeTool` hook. Each tool declares its surface; read-only tools declare `none`.
 - Modes per surface: `off | shadow | enforce`, set globally and overridable per bot.
 - **P0:** `AllowAllOrchestrator`, still writing every proposed action and verdict to the audit log.
-- **P1:** `LlmOrchestrator` (Grok's recipe): the redacted action, bot persona, last 2 user + 4 bot messages, and global + per-bot natural-language rules (≤ 20 each, "ask first" wins). Returns allow / deny / ask with a proposed rule. Errors or a 10 s timeout fall back to `ask` in enforce and `allow` in shadow. Ships in **shadow** everywhere.
+- **P1:** `LlmOrchestrator` (Grok's recipe): the redacted action, the bot's instructions, last 2 user + 4 bot messages, and global + per-bot natural-language rules (≤ 20 each, "ask first" wins). Returns allow / deny / ask with a proposed rule. Errors or a 10 s timeout fall back to `ask` in enforce and `allow` in shadow. Ships in **shadow** everywhere.
 - `ask` reuses the approval cards that the vault and plugins use. Vault and plugin approvals are hard-coded `ask` rules in front of the orchestrator.
 
 ### 5.3 Memory (P1)
@@ -241,7 +241,7 @@ scripts/         install.sh, release packaging
 
 ## 8. Evals
 
-Developer-only. YAML scenarios in `evals/` define setup (persona, model, plugins, vault, memory), a fake world (fake MCP servers, browser, computer and clock), a script of user messages, and assertions: deterministic checks (`tool_called`, `tool_not_called`, `approval_requested`, `no_secret_in_context`, message counts) plus LLM-judge rubric items on `evalJudgeModel`. `pnpm eval [suite] --model X --runs 3` reports pass rates; CI runs a smoke suite on each push to `main`.
+Developer-only. YAML scenarios in `evals/` define setup (instructions, model, plugins, vault, memory), a fake world (fake MCP servers, browser, computer and clock), a script of user messages, and assertions: deterministic checks (`tool_called`, `tool_not_called`, `approval_requested`, `no_secret_in_context`, message counts) plus LLM-judge rubric items on `evalJudgeModel`. `pnpm eval [suite] --model X --runs 3` reports pass rates; CI runs a smoke suite on each push to `main`.
 
 First suites: `tool-priority`, `voice`, `vault`, `routines`, `groups`, `memory`.
 

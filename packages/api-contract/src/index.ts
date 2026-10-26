@@ -18,29 +18,13 @@ export const avatarColors = [
   'gray',
 ] as const
 
-/** A bot's `@handle`: lowercase letters, digits and underscores. */
-export const handle = z
-  .string()
-  .regex(/^[a-z0-9_]{2,32}$/, 'Use 2 to 32 lowercase letters, digits or underscores')
-
-/** The handle a new bot named `name` is offered, e.g. "Rex the Builder" → `rex_the_builder`. */
-export function suggestHandle(name: string): string {
-  const words = name
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean)
-  const suggestion = words.join('_').slice(0, 32).replace(/_+$/, '')
-  return suggestion.length >= 2 ? suggestion : 'bot'
-}
-
 export const bot = z.object({
   id: z.string(),
-  handle: z.string(),
+  /** Unique, ignoring case; how the owner and other bots mention the bot. */
   name: z.string(),
   title: z.string().nullable(),
-  persona: z.string(),
+  /** The owner's instructions: who the bot is and how it behaves. */
+  instructions: z.string(),
   avatarShape: z.enum(avatarShapes),
   avatarColor: z.enum(avatarColors),
   /** `provider/modelId`; null follows the default model. */
@@ -56,9 +40,8 @@ export type BotInfo = z.infer<typeof bot>
 
 export const newBot = z.object({
   name: z.string().trim().min(1).max(80),
-  handle,
   title: z.string().trim().max(120).nullable(),
-  persona: z.string().max(20_000),
+  instructions: z.string().max(20_000),
   avatarShape: z.enum(avatarShapes),
   avatarColor: z.enum(avatarColors),
   model: z.string().nullable(),
@@ -197,7 +180,7 @@ export const contract = {
   bots: {
     list: oc.route({ method: 'GET', path: '/bots', summary: 'Every bot, oldest first' }).output(z.array(bot)),
     create: oc
-      .route({ method: 'POST', path: '/bots', summary: 'Create a bot and its DM; the handle must be unused' })
+      .route({ method: 'POST', path: '/bots', summary: 'Create a bot and its DM; no other bot may have its name' })
       .input(newBot)
       .output(bot),
   },

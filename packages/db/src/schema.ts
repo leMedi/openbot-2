@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { type AnySQLiteColumn, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { type AnySQLiteColumn, index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 import { uuidv7 } from 'uuidv7'
 
 const id = () =>
@@ -38,25 +38,29 @@ export const systemCredentials = sqliteTable('system_credentials', {
 export const avatarShapes = ['blob', 'pebble', 'squircle', 'tablet', 'wedge', 'hex', 'cloud', 'teardrop'] as const
 export type AvatarShape = (typeof avatarShapes)[number]
 
-export const bots = sqliteTable('bots', {
-  id: id(),
-  /** Unique @mention handle. */
-  handle: text('handle').notNull().unique(),
-  name: text('name').notNull(),
-  title: text('title'),
-  persona: text('persona').notNull().default(''),
-  avatarShape: text('avatar_shape', { enum: avatarShapes }).notNull(),
-  /** One of the persona-mark colours (black, brown, red…). */
-  avatarColor: text('avatar_color').notNull(),
-  /** `provider/modelId`; null follows the default model in settings. */
-  model: text('model'),
-  /** The bot's one history (ADR 0001); set when its first run starts. */
-  historyId: text('history_id').unique(),
-  /** X display of the bot's screen; stable for the bot's lifetime. */
-  displayNumber: integer('display_number').unique(),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-})
+export const bots = sqliteTable(
+  'bots',
+  {
+    id: id(),
+    /** Unique, ignoring case: the owner and other bots mention a bot by name. */
+    name: text('name').notNull(),
+    title: text('title'),
+    /** The owner's instructions: who the bot is and how it behaves. */
+    instructions: text('instructions').notNull().default(''),
+    avatarShape: text('avatar_shape', { enum: avatarShapes }).notNull(),
+    /** One of the persona-mark colours (black, brown, red…). */
+    avatarColor: text('avatar_color').notNull(),
+    /** `provider/modelId`; null follows the default model in settings. */
+    model: text('model'),
+    /** The bot's one history (ADR 0001); set when its first run starts. */
+    historyId: text('history_id').unique(),
+    /** X display of the bot's screen; stable for the bot's lifetime. */
+    displayNumber: integer('display_number').unique(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [uniqueIndex('bots_name_unique').on(sql`lower(${table.name})`)],
+)
 
 export const chatKinds = ['dm', 'group'] as const
 export type ChatKind = (typeof chatKinds)[number]
