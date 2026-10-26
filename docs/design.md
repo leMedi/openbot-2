@@ -126,7 +126,7 @@ Grok's rules: at most 3 rounds and 10 member turns per human message, speaker or
 ## 4. The bot's computer
 
 - **One X display per bot, always on.** Xvfb at 1280×800 + Openbox + its own Chromium profile at `$OPENBOT_HOME/bots/<handle>/chromium` (logins are not shared between bots). Display numbers are stable per bot.
-- **noVNC** per display, proxied at `/vnc/:botId`. The Computer pane shows a view-only preview; ✋ switches to interactive with "Hand back"; ⤢ opens fullscreen.
+- **noVNC** per display, proxied at `/vnc/:botId`. The Screen pane shows a view-only preview; ✋ switches to interactive with "Hand back"; ⤢ opens fullscreen.
 - **Tool priority**, stated in the prompt: plugin/MCP → shell and web fetch → browser → desktop.
 - Browser and desktop tools live only in a **computerUse subagent** (a pi-durable task-owned conversation running `computerUseModel`). The main bot calls `use_computer({ goal, reason, startUrl? })`; the reason is logged and scored by evals. Its activity is hidden in the chat, like Grok's.
   - **Browser:** our own CDP tools (`browser_snapshot` with `[ref=eN]`, click, type, navigate, tabs, screenshot).
@@ -204,7 +204,7 @@ type Verdict = { decision: 'allow' } | { decision: 'deny'; reason: string } | { 
 The UI copies Grok Bot's; the full spec is [`grok-bot/05-ui.md`](grok-bot/05-ui.md).
 
 - Three columns: resizable sidebar (280px, 240–400), a centred chat (≤ 690px messages), and one right-hand pane at a time (320px, 280–480).
-- Header icons pick the pane: **Computer** (default), **Profile** (Grok's fields + Model), **Routines**; **Memory**, **Access** (plugin accounts and vault items, with revoke) and **Activity** (audit + orchestrator mode and rules) are under "⋯". Groups get a **Members** pane.
+- Header icons pick the pane: **Screen** (default), **Profile** (Grok's fields + Model), **Routines**; **Memory**, **Access** (plugin accounts and vault items, with revoke) and **Activity** (audit + orchestrator mode and rules) are under "⋯". Groups get a **Members** pane.
 - Settings: Providers, Models, Plugins, Vault, Global memory, Global rules, Updates, System (displays, disk, logs, terminal).
 - Grok's visual language: black/white primary buttons, blue only for links/focus/unread, no shadows in dark mode, autosave instead of Save buttons, letter keys for question cards.
 
