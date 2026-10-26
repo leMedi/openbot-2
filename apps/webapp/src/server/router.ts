@@ -66,6 +66,11 @@ export const router = os.router({
         throw error
       }
     }),
+
+    stop: os.bots.stop.handler(async ({ context, input }) => {
+      if (!(await getBot(context.db, input.botId))) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
+      await context.runtime.stop(input.botId)
+    }),
   },
 
   chats: {

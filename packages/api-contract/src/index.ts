@@ -183,6 +183,10 @@ export const contract = {
       .route({ method: 'POST', path: '/bots', summary: 'Create a bot and its DM; no other bot may have its name' })
       .input(newBot)
       .output(bot),
+    stop: oc
+      .route({ method: 'POST', path: '/bots/{botId}/stop', summary: "Abort the bot's current run; returns once it is idle" })
+      .input(z.object({ botId: z.string() }))
+      .output(z.void()),
   },
   chats: {
     messages: oc

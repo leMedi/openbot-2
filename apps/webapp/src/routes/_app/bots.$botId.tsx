@@ -51,7 +51,12 @@ function Dm() {
           , then send your message again.
         </p>
       )}
-      <Composer bot={bot} onSent={(message) => live.addMessage(message)} />
+      <Composer
+        bot={bot}
+        draft={live.drafts.get(bot.chatId) ?? ''}
+        onDraft={(text) => live.setDraft(bot.chatId, text)}
+        onSent={(message) => live.addMessage(message)}
+      />
     </>
   )
 }
@@ -96,22 +101,55 @@ function MessageList({ bot, messages, loading }: { bot: BotInfo; messages: Messa
   )
 }
 
-function Composer({ bot, onSent }: { bot: BotInfo; onSent: (message: MessageInfo) => void }) {
-  const [text, setText] = useState('')
+const roundButton = 'grid size-[30px] shrink-0 place-items-center rounded-full bg-primary text-primary-foreground disabled:opacity-40'
+
+/**
+ * Writes to the bot. A message sent while it works steers the current run; with nothing typed, the button stops the
+ * run instead.
+ */
+function Composer({
+  bot,
+  draft,
+  onDraft,
+  onSent,
+}: {
+  bot: BotInfo
+  /** The chat's unsent text, kept by the live store so switching chats doesn't lose it. */
+  draft: string
+  onDraft: (text: string) => void
+  onSent: (message: MessageInfo) => void
+}) {
   const [error, setError] = useState<string>()
+  const [stopping, setStopping] = useState(false)
+  // Errors belong to the chat they happened in.
+  useEffect(() => setError(undefined), [bot.chatId])
 
   async function send() {
-    const draft = text.trim()
-    if (!draft) return
-    setText('')
+    const text = draft.trim()
+    if (!text) return
+    onDraft('')
     setError(undefined)
     try {
-      onSent(await api().chats.send({ chatId: bot.chatId, text: draft }))
+      onSent(await api().chats.send({ chatId: bot.chatId, text }))
     } catch (caught) {
-      setText(draft)
+      onDraft(text)
       setError(errorMessage(caught))
     }
   }
+
+  async function stop() {
+    setStopping(true)
+    setError(undefined)
+    try {
+      await api().bots.stop({ botId: bot.id })
+    } catch (caught) {
+      setError(errorMessage(caught))
+    } finally {
+      setStopping(false)
+    }
+  }
+
+  const canStop = bot.working && !draft.trim()
 
   return (
     <div className="px-[max(24px,calc((100%-700px)/2))] pt-2 pb-[18px]">
@@ -127,8 +165,8 @@ function Composer({ bot, onSent }: { bot: BotInfo; onSent: (message: MessageInfo
           aria-label={`Message ${bot.name}`}
           placeholder={`Message ${bot.name}`}
           rows={2}
-          value={text}
-          onChange={(event) => setText(event.target.value)}
+          value={draft}
+          onChange={(event) => onDraft(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault()
@@ -137,14 +175,27 @@ function Composer({ bot, onSent }: { bot: BotInfo; onSent: (message: MessageInfo
           }}
           className="max-h-60 min-h-12 flex-1 resize-none bg-transparent px-1 leading-[1.4] outline-none"
         />
-        <button
-          type="submit"
-          aria-label="Send"
-          disabled={!text.trim()}
-          className="grid size-[30px] shrink-0 place-items-center rounded-full bg-primary text-primary-foreground disabled:opacity-40"
-        >
-          ↑
-        </button>
+        {canStop ? (
+          <button
+            type="button"
+            aria-label={`Stop ${bot.name}`}
+            title="Stop"
+            disabled={stopping}
+            onClick={() => void stop()}
+            className={roundButton}
+          >
+            <span className="size-2.5 rounded-[2px] bg-current" />
+          </button>
+        ) : (
+          <button
+            type="submit"
+            aria-label="Send"
+            disabled={!draft.trim()}
+            className={roundButton}
+          >
+            ↑
+          </button>
+        )}
       </form>
     </div>
   )

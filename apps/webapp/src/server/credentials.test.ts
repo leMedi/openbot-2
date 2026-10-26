@@ -73,6 +73,7 @@ describe('system credentials', () => {
       'onboarding.status': await server.client.onboarding.status(),
       'bots.list': await server.client.bots.list(),
       'bots.create': bot,
+      'bots.stop': null,
       'chats.messages': await server.client.chats.messages({ chatId: bot.chatId }),
       'chats.send': sent,
       events: null,

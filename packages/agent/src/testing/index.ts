@@ -1,2 +1,2 @@
-export { callsTools, createFakeModel, endsSilently, fails, says, type FakeModel, type FakeTurn } from './fake-model.ts'
+export { callsTools, createFakeModel, endsSilently, fails, held, says, type FakeModel, type FakeTurn, type HeldTurn } from './fake-model.ts'
 export { createFakeProviders, type FakeProviders } from './fake-providers.ts'

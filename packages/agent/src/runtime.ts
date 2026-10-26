@@ -6,6 +6,7 @@ import {
   type EntryRecord,
   GenerationTask,
   Harness,
+  InboxDoc,
   MemoryStorage,
   type ModelRef,
   type Storage,
@@ -15,6 +16,7 @@ import {
   defineTool,
   hook,
   section,
+  ToolTask,
 } from '@earendil-works/pi-durable'
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node'
 import { type AgentRuntime, type BotInput, type BotWithChat, findBotByHistory, getBot, readModelSettings, setBotHistory } from '@openbot/core'
@@ -31,6 +33,11 @@ const maxReplyReminders = 3
 export const replyReminder =
   '<system_reminder>You ended your turn without replying. The owner only sees what you send with sendMessage; ' +
   'your plain text is private. Reply to them now with sendMessage.</system_reminder>'
+
+/** Why a message is held back while the owner's newer message waits to join the run. */
+export const steerPending =
+  'Not sent: the owner sent a new message while you were working, so this may answer an outdated request. ' +
+  'Read their new message, then reply to it.'
 
 const voice = `You are one of the owner's bots, a member of their always-on team. You talk to the owner like a colleague texting them.
 
@@ -91,8 +98,8 @@ export class BotRuntime implements AgentRuntime {
   readonly #options: BotRuntimeOptions
   /** Serialises creating a bot's history. */
   readonly #histories = new Map<string, Promise<Conversation>>()
-  /** Bots with a run going, and how many times each was woken, so an idle wait can tell it was overtaken. */
-  readonly #working = new Map<string, number>()
+  /** Bots with a run going, and a token of each one's latest wake, so an idle wait can tell it was overtaken. */
+  readonly #working = new Map<string, object>()
   /** Why each bot's latest run failed. */
   readonly #errors = new Map<string, string>()
 
@@ -124,7 +131,17 @@ export class BotRuntime implements AgentRuntime {
             },
           }),
         ],
-        hooks: [hook(GenerationTask, { onYield: (_answer, api) => runtime?.remindIfOwed(api.conversationId) })],
+        hooks: [
+          hook(GenerationTask, { onYield: (_answer, api) => runtime?.remindIfOwed(api.conversationId) }),
+          // A steer joins the run after this tool round; until then the bot can't answer the request it replaces.
+          hook(ToolTask, {
+            beforeTool: async (call, api) => {
+              if (call.name !== 'sendMessage') return
+              const inbox = await api.snapshot(InboxDoc, api.conversationId, context)
+              return inbox?.items.some((item) => item.mode === 'steer') ? { block: steerPending } : undefined
+            },
+          }),
+        ],
       }),
     )
     const storage: Storage = options.storagePath ? await openNodeSqliteStorage(options.storagePath) : new MemoryStorage()
@@ -158,7 +175,7 @@ export class BotRuntime implements AgentRuntime {
       },
       context,
     )
-    // Counted once the input is queued, so an idle wait that ends before it can tell it was overtaken.
+    // Marked once the input is queued, so an idle wait that ends before it can tell it was overtaken.
     this.#setWorking(botId)
     void this.#untilIdle(botId, history)
     void this.#reportFailure(botId, submission)
@@ -167,7 +184,11 @@ export class BotRuntime implements AgentRuntime {
   async stop(botId: string): Promise<void> {
     const bot = await getBot(this.#options.db, botId)
     if (!bot?.historyId) return
+    const wake = this.#working.get(botId)
     await (await this.#harness.conversation(toConversationId(bot.historyId), context))?.abort(context)
+    // The abort resolves once the history is idle; report it now rather than when the idle wait notices, unless the
+    // bot was woken again meanwhile.
+    if (wake === this.#working.get(botId)) this.#setIdle(botId)
   }
 
   status(botId: string): BotStatus {
@@ -218,21 +239,25 @@ export class BotRuntime implements AgentRuntime {
   }
 
   #setWorking(botId: string) {
-    const wakes = this.#working.get(botId)
-    this.#working.set(botId, (wakes ?? 0) + 1)
-    if (wakes === undefined) this.#options.onStatus(botId, this.status(botId))
+    const wasWorking = this.#working.has(botId)
+    this.#working.set(botId, {})
+    if (!wasWorking) this.#options.onStatus(botId, this.status(botId))
   }
 
   async #untilIdle(botId: string, history: Conversation) {
     try {
-      let wakes
+      let wake
       do {
-        wakes = this.#working.get(botId)
+        wake = this.#working.get(botId)
         await history.waitForIdle(context)
-      } while (wakes !== this.#working.get(botId))
+      } while (wake !== this.#working.get(botId))
     } catch {
       // The Harness closed.
     }
+    this.#setIdle(botId)
+  }
+
+  #setIdle(botId: string) {
     if (!this.#working.delete(botId)) return
     this.#options.onStatus(botId, this.status(botId))
   }

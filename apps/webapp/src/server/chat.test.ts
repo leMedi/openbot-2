@@ -1,5 +1,5 @@
-import { replyReminder } from '@openbot/agent'
-import { callsTools, endsSilently, fails, says } from '@openbot/agent/testing'
+import { replyReminder, steerPending } from '@openbot/agent'
+import { callsTools, endsSilently, fails, held, says } from '@openbot/agent/testing'
 import type { BotInfo, NewBot } from '@openbot/api-contract'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createTestServer, restartTestServer, type TestServer } from './testing/harness.ts'
@@ -218,5 +218,68 @@ describe('the reply guarantee', () => {
 
     expect(server.providers.requests).toHaveLength(4)
     expect(server.providers.pendingTurns).toBe(1)
+  })
+})
+
+describe('steering', () => {
+  it("delivers a message sent while the bot works to its current run, holding back its answer to the old request", async () => {
+    const { server, bot } = await startWithRex()
+    const stale = held(callsTools(['sendMessage', { text: 'Done, I fixed it with npm.' }]))
+    server.providers.script(stale, callsTools(['sendMessage', { text: 'Switching to pnpm.' }]), endsSilently())
+
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Fix the build' })
+    await stale.requested
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Use pnpm, not npm' })
+    stale.release()
+    await untilIdle(server, bot)
+
+    expect(await texts(server, bot)).toEqual([
+      ['owner', 'Fix the build'],
+      ['owner', 'Use pnpm, not npm'],
+      ['bot', 'Switching to pnpm.'],
+    ])
+    // One run: the steer joined it after the held-back message, instead of starting a run of its own.
+    expect(server.providers.requests).toHaveLength(3)
+    const steered = JSON.stringify(server.providers.requests[1]!.messages)
+    expect(steered).toContain('Done, I fixed it with npm.')
+    expect(steered).toContain(steerPending)
+    expect(steered).toContain('Use pnpm, not npm')
+    expect(server.providers.pendingTurns).toBe(0)
+  })
+})
+
+describe('stopping', () => {
+  it('aborts the current run, leaving the bot idle and ready for the next message', async () => {
+    const { server, bot } = await startWithRex()
+    const runaway = held(callsTools(['sendMessage', { text: 'Still deleting files…' }]))
+    server.providers.script(runaway)
+
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Clean up the disk' })
+    await runaway.requested
+    await server.client.bots.stop({ botId: bot.id })
+
+    const [stopped] = await server.client.bots.list()
+    expect(stopped).toMatchObject({ working: false, error: null })
+    expect(await texts(server, bot)).toEqual([['owner', 'Clean up the disk']])
+
+    server.providers.script(callsTools(['sendMessage', { text: 'Stopped. What next?' }]), endsSilently())
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Sorry, wrong disk' })
+    await untilIdle(server, bot)
+    expect((await texts(server, bot)).at(-1)).toEqual(['bot', 'Stopped. What next?'])
+    expect(server.providers.pendingTurns).toBe(0)
+  })
+
+  it('does nothing to an idle bot', async () => {
+    const { server, bot } = await startWithRex()
+
+    await server.client.bots.stop({ botId: bot.id })
+
+    expect((await server.client.bots.list())[0]).toMatchObject({ working: false, error: null })
+  })
+
+  it('refuses an unknown bot', async () => {
+    const { server } = await startWithRex()
+
+    await expect(server.client.bots.stop({ botId: 'nobody' })).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
 })

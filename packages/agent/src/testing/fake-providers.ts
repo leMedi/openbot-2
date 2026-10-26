@@ -11,6 +11,7 @@ import {
   envApiKeyAuth,
   fauxAssistantMessage,
 } from '@earendil-works/pi-ai'
+import { HeldTurn } from './fake-model.ts'
 
 /** Sign-ins are scripted in tests; tokens they mint are good for an hour unless `expired` is set. */
 const tokenLifetimeMs = 60 * 60 * 1000
@@ -156,12 +157,12 @@ export function createFakeProviders() {
 
   return {
     providers: [fake.provider, fakeDevice.provider] as Provider[],
-    /** Queues responses of `fake` models, one per request in order; build them with `callsTools`, `says`… */
-    script(...turns: AssistantMessage[]) {
+    /** Queues responses of `fake` models, one per request in order; build them with `callsTools`, `says`, `held`… */
+    script(...turns: (AssistantMessage | HeldTurn)[]) {
       fake.faux.appendResponses(
-        turns.map((turn) => (context, _options, _state, model) => {
+        turns.map((turn) => (context, options, _state, model) => {
           requests.push({ model: `${model.provider}/${model.id}`, messages: [...context.messages] })
-          return turn
+          return turn instanceof HeldTurn ? turn.answer(options?.signal) : turn
         }),
       )
     },

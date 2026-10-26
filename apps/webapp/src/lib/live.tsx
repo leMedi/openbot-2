@@ -18,6 +18,8 @@ function mergeMessages(messages: readonly MessageInfo[], incoming: readonly Mess
 export class LiveStore {
   bots: BotInfo[] | undefined
   messages: ReadonlyMap<string, MessageInfo[]> = new Map()
+  /** What the owner has typed but not sent, per chat; kept while the app is open. */
+  drafts: ReadonlyMap<string, string> = new Map()
   connected = false
   #stamp: { epoch: string; seq: number } | undefined
   #listeners = new Set<() => void>()
@@ -56,6 +58,15 @@ export class LiveStore {
   /** Adds a message the server returned, e.g. the owner's own, which also arrives live. */
   addMessage(message: MessageInfo) {
     this.#update(() => this.#setMessages(message.chatId, mergeMessages(this.messages.get(message.chatId) ?? [], [message])))
+  }
+
+  setDraft(chatId: string, text: string) {
+    this.#update(() => {
+      const drafts = new Map(this.drafts)
+      if (text) drafts.set(chatId, text)
+      else drafts.delete(chatId)
+      this.drafts = drafts
+    })
   }
 
   addBot(bot: BotInfo) {

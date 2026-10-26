@@ -34,6 +34,37 @@ export function endsSilently(): FakeTurn {
   return fauxAssistantMessage([])
 }
 
+/** A turn the provider holds back until `release()`, so a test can act while the bot is working; an abort ends it. */
+export class HeldTurn {
+  /** Resolves once the model has been asked for this turn. */
+  readonly requested: Promise<void>
+  readonly #released: Promise<void>
+  #markRequested!: () => void
+  #release!: () => void
+
+  constructor(readonly turn: FakeTurn) {
+    this.requested = new Promise((resolve) => (this.#markRequested = resolve))
+    this.#released = new Promise((resolve) => (this.#release = resolve))
+  }
+
+  release() {
+    this.#release()
+  }
+
+  /** Answers the request with the turn once released, or as aborted once `signal` aborts. */
+  async answer(signal: AbortSignal | undefined): Promise<FakeTurn> {
+    this.#markRequested()
+    const aborted = new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))
+    await Promise.race([this.#released, aborted])
+    return this.turn
+  }
+}
+
+/** Holds `turn` back until the test releases it, e.g. to send another message while the bot is working. */
+export function held(turn: FakeTurn): HeldTurn {
+  return new HeldTurn(turn)
+}
+
 /** pi-ai's faux provider behind a scriptable model, for Seam 1 tests. */
 export function createFakeModel() {
   const faux = fauxProvider({ provider: 'fake', models: [{ id: 'fake-model', input: ['text', 'image'] }] })
