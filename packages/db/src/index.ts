@@ -1,3 +1,2 @@
-export { createDb, type Db } from './client.ts'
-export { env, paths } from './env.ts'
+export { migrationsFolder, openDb, type Db } from './client.ts'
 export * from './schema.ts'

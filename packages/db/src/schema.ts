@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { type AnySQLiteColumn, index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { uuidv7 } from 'uuidv7'
 
 const id = () =>
@@ -18,72 +18,163 @@ const updatedAt = () =>
     .default(sql`(unixepoch('subsec') * 1000)`)
     .$onUpdateFn(() => new Date())
 
+/** Everything configured after the database opens: default model, computer-use model, orchestrator modes… */
+export const settings = sqliteTable('settings', {
+  key: text('key').primaryKey(),
+  value: text('value', { mode: 'json' }).$type<unknown>().notNull(),
+  updatedAt: updatedAt(),
+})
+
+/** Credentials OpenBot holds to reach providers; encrypted, never returned by any API or tool (ADR 0006). */
+export const systemCredentials = sqliteTable('system_credentials', {
+  /** e.g. `provider:anthropic`. */
+  key: text('key').primaryKey(),
+  /** Encrypted with OPENBOT_SECRET_KEY. */
+  ciphertext: text('ciphertext').notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+})
+
+export const avatarShapes = ['blob', 'pebble', 'squircle', 'tablet', 'wedge', 'hex', 'cloud', 'teardrop'] as const
+export type AvatarShape = (typeof avatarShapes)[number]
+
 export const bots = sqliteTable('bots', {
   id: id(),
   /** Unique @mention handle. */
   handle: text('handle').notNull().unique(),
   name: text('name').notNull(),
   title: text('title'),
-  /** Appended to the bot's system prompt. */
-  instructions: text('instructions').notNull(),
-  avatarType: text('avatar_type', { enum: ['bot'] })
-    .notNull()
-    .default('bot'),
-  botColor: text('bot_color').notNull(),
-  botFgColor: text('bot_fg_color').notNull(),
-  /** `provider/modelId`; null uses OPENBOT_DEFAULT_MODEL. */
+  persona: text('persona').notNull().default(''),
+  avatarShape: text('avatar_shape', { enum: avatarShapes }).notNull(),
+  /** One of the persona-mark colours (black, brown, red…). */
+  avatarColor: text('avatar_color').notNull(),
+  /** `provider/modelId`; null follows the default model in settings. */
   model: text('model'),
-  /** Soft delete: conversations reference bots from a JSON column, without foreign keys. */
-  deletedAt: integer('deleted_at', { mode: 'timestamp_ms' }),
+  /** The bot's one history (ADR 0001); set when its first run starts. */
+  historyId: text('history_id').unique(),
+  /** X display of the bot's screen; stable for the bot's lifetime. */
+  displayNumber: integer('display_number').unique(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 })
 
-export type Participant = {
-  botId: string
-  /** The bot's own pi-durable conversation for this group; set on its first run. */
-  piConversationId?: string
-}
+export const chatKinds = ['dm', 'group'] as const
+export type ChatKind = (typeof chatKinds)[number]
 
-export const conversations = sqliteTable('conversations', {
-  id: id(),
-  title: text('title'),
-  /** Bots in turn order. A 1:1 chat is a conversation with one participant. */
-  participants: text('participants', { mode: 'json' })
-    .$type<Participant[]>()
-    .notNull()
-    .default(sql`'[]'`),
-  /** Runs each bot may take after a human message, mention runs included. */
-  maxRunsPerBot: integer('max_runs_per_bot').notNull().default(1),
-  /** Cap on all bot runs after a human message. */
-  maxTurnsPerMessage: integer('max_turns_per_message').notNull().default(10),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-})
-
-export const conversationMessages = sqliteTable(
-  'conversation_messages',
+export const chats = sqliteTable(
+  'chats',
   {
     id: id(),
-    conversationId: text('conversation_id')
+    kind: text('kind', { enum: chatKinds }).notNull(),
+    /** The DM's bot; deleting the bot deletes its DM. Null for group chats. */
+    botId: text('bot_id')
+      .unique()
+      .references(() => bots.id, { onDelete: 'cascade' }),
+    /** Group chats only; null names the group from its members. */
+    title: text('title'),
+    /** Group chats only: member bot ids. Deleting a bot removes it here in code. */
+    members: text('members', { mode: 'json' })
+      .$type<string[]>()
       .notNull()
-      .references(() => conversations.id, { onDelete: 'cascade' }),
-    role: text('role', { enum: ['user', 'bot'] }).notNull(),
-    /** Set when `role` is `bot`. */
-    authorBotId: text('author_bot_id').references(() => bots.id),
-    content: text('content').notNull(),
-    /** User messages: `pending` until submitted to every bot that must see them. */
-    deliveryStatus: text('delivery_status', { enum: ['pending', 'delivered'] }),
-    /** pi task ID of the sendMessage call that wrote this message; makes replayed calls idempotent. */
-    sourceTaskId: text('source_task_id').unique(),
+      .default(sql`'[]'`),
+    /** Sidebar order of pinned chats; null when not pinned. */
+    pinnedPosition: integer('pinned_position'),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
-  (table) => [index('conversation_messages_conversation_idx').on(table.conversationId, table.id)],
+  (table) => [index('chats_kind_idx').on(table.kind)],
 )
 
+export type Attachment = {
+  name: string
+  mimeType: string
+  size: number
+  /** Path on the computer, under the bot's folder. */
+  path: string
+}
+
+export const messageAuthors = ['owner', 'bot'] as const
+export type MessageAuthor = (typeof messageAuthors)[number]
+
+/** A message between bots, as it appears in a bot's DM: `to` the peer (outgoing) or `from` the peer (incoming). */
+export const botMessageDirections = ['to', 'from'] as const
+export type BotMessageDirection = (typeof botMessageDirections)[number]
+
+export const messages = sqliteTable(
+  'messages',
+  {
+    id: id(),
+    chatId: text('chat_id')
+      .notNull()
+      .references(() => chats.id, { onDelete: 'cascade' }),
+    author: text('author', { enum: messageAuthors }).notNull(),
+    /** Set when `author` is `bot`; nulled when that bot is deleted. */
+    authorBotId: text('author_bot_id').references((): AnySQLiteColumn => bots.id, { onDelete: 'set null' }),
+    /** Author's name when posted, shown as "Name (deleted)" once the bot is gone. */
+    authorName: text('author_name').notNull(),
+    text: text('text').notNull().default(''),
+    attachments: text('attachments', { mode: 'json' })
+      .$type<Attachment[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /** Card payload (question, take-over…); its shape is owned by `core`. */
+    card: text('card', { mode: 'json' }).$type<unknown>(),
+    /** Card answer or progress. */
+    cardState: text('card_state', { mode: 'json' }).$type<unknown>(),
+    /** Messages between bots only. */
+    direction: text('direction', { enum: botMessageDirections }),
+    peerBotId: text('peer_bot_id').references((): AnySQLiteColumn => bots.id, { onDelete: 'set null' }),
+    peerName: text('peer_name'),
+    /** ID of the tool call that posted this message; makes replayed calls idempotent. */
+    idempotencyKey: text('idempotency_key').unique(),
+    createdAt: createdAt(),
+  },
+  (table) => [index('messages_chat_idx').on(table.chatId, table.id)],
+)
+
+export const surfaces = [
+  'shell',
+  'computer_session',
+  'mcp',
+  'vault',
+  'plugin_request',
+  'routine_change',
+  'memory_global_write',
+] as const
+export type Surface = (typeof surfaces)[number]
+
+export const orchestratorModes = ['off', 'shadow', 'enforce'] as const
+export type OrchestratorMode = (typeof orchestratorModes)[number]
+
+export type Verdict =
+  | { decision: 'allow' }
+  | { decision: 'deny'; reason: string }
+  | { decision: 'ask'; reason: string; proposedRule?: string }
+
+export const auditLog = sqliteTable(
+  'audit_log',
+  {
+    id: id(),
+    botId: text('bot_id')
+      .notNull()
+      .references(() => bots.id, { onDelete: 'cascade' }),
+    surface: text('surface', { enum: surfaces }).notNull(),
+    /** The proposed action with secrets redacted. */
+    action: text('action', { mode: 'json' }).$type<unknown>().notNull(),
+    verdict: text('verdict', { mode: 'json' }).$type<Verdict>().notNull(),
+    mode: text('mode', { enum: orchestratorModes }).notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [index('audit_log_bot_idx').on(table.botId, table.id)],
+)
+
+export type Setting = typeof settings.$inferSelect
+export type SystemCredential = typeof systemCredentials.$inferSelect
 export type Bot = typeof bots.$inferSelect
 export type NewBot = typeof bots.$inferInsert
-export type Conversation = typeof conversations.$inferSelect
-export type NewConversation = typeof conversations.$inferInsert
-export type ConversationMessage = typeof conversationMessages.$inferSelect
-export type NewConversationMessage = typeof conversationMessages.$inferInsert
+export type Chat = typeof chats.$inferSelect
+export type NewChat = typeof chats.$inferInsert
+export type Message = typeof messages.$inferSelect
+export type NewMessage = typeof messages.$inferInsert
+export type AuditEntry = typeof auditLog.$inferSelect
+export type NewAuditEntry = typeof auditLog.$inferInsert

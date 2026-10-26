@@ -1,14 +1,22 @@
 import { mkdirSync } from 'node:fs'
-import { pathToFileURL } from 'node:url'
+import { dirname } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createClient } from '@libsql/client'
 import { drizzle } from 'drizzle-orm/libsql'
-import { paths } from './env.ts'
+import { migrate } from 'drizzle-orm/libsql/migrator'
 import * as schema from './schema.ts'
 
-export function createDb(file = paths.database) {
-  mkdirSync(paths.dataDir, { recursive: true })
+export const migrationsFolder = fileURLToPath(new URL('../drizzle', import.meta.url))
+
+/** Opens the libSQL file at `file`, creating it and applying pending migrations. */
+export async function openDb(file: string) {
+  mkdirSync(dirname(file), { recursive: true })
   const client = createClient({ url: pathToFileURL(file).href })
-  return drizzle(client, { schema })
+  // Bot deletion relies on real cascades (ADR 0009); SQLite leaves them off per connection.
+  await client.execute('PRAGMA foreign_keys = ON')
+  const db = drizzle(client, { schema })
+  await migrate(db, { migrationsFolder })
+  return db
 }
 
-export type Db = ReturnType<typeof createDb>
+export type Db = Awaited<ReturnType<typeof openDb>>

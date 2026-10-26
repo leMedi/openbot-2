@@ -1,9 +1,92 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "06b8352f-539a-4e13-9717-5f290dd55525",
+  "id": "19ea260d-d547-47b3-94a3-c0d4d375c693",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
+    "audit_log": {
+      "name": "audit_log",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "bot_id": {
+          "name": "bot_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "surface": {
+          "name": "surface",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "verdict": {
+          "name": "verdict",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mode": {
+          "name": "mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch('subsec') * 1000)"
+        }
+      },
+      "indexes": {
+        "audit_log_bot_idx": {
+          "name": "audit_log_bot_idx",
+          "columns": [
+            "bot_id",
+            "id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "audit_log_bot_id_bots_id_fk": {
+          "name": "audit_log_bot_id_bots_id_fk",
+          "tableFrom": "audit_log",
+          "tableTo": "bots",
+          "columnsFrom": [
+            "bot_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "bots": {
       "name": "bots",
       "columns": {
@@ -35,30 +118,23 @@
           "notNull": false,
           "autoincrement": false
         },
-        "instructions": {
-          "name": "instructions",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "avatar_type": {
-          "name": "avatar_type",
+        "persona": {
+          "name": "persona",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'bot'"
+          "default": "''"
         },
-        "bot_color": {
-          "name": "bot_color",
+        "avatar_shape": {
+          "name": "avatar_shape",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "bot_fg_color": {
-          "name": "bot_fg_color",
+        "avatar_color": {
+          "name": "avatar_color",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -71,8 +147,15 @@
           "notNull": false,
           "autoincrement": false
         },
-        "deleted_at": {
-          "name": "deleted_at",
+        "history_id": {
+          "name": "history_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "display_number": {
+          "name": "display_number",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
@@ -102,6 +185,20 @@
             "handle"
           ],
           "isUnique": true
+        },
+        "bots_history_id_unique": {
+          "name": "bots_history_id_unique",
+          "columns": [
+            "history_id"
+          ],
+          "isUnique": true
+        },
+        "bots_display_number_unique": {
+          "name": "bots_display_number_unique",
+          "columns": [
+            "display_number"
+          ],
+          "isUnique": true
         }
       },
       "foreignKeys": {},
@@ -109,8 +206,8 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "conversation_messages": {
-      "name": "conversation_messages",
+    "chats": {
+      "name": "chats",
       "columns": {
         "id": {
           "name": "id",
@@ -119,15 +216,113 @@
           "notNull": true,
           "autoincrement": false
         },
-        "conversation_id": {
-          "name": "conversation_id",
+        "kind": {
+          "name": "kind",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "role": {
-          "name": "role",
+        "bot_id": {
+          "name": "bot_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "members": {
+          "name": "members",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "pinned_position": {
+          "name": "pinned_position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch('subsec') * 1000)"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch('subsec') * 1000)"
+        }
+      },
+      "indexes": {
+        "chats_bot_id_unique": {
+          "name": "chats_bot_id_unique",
+          "columns": [
+            "bot_id"
+          ],
+          "isUnique": true
+        },
+        "chats_kind_idx": {
+          "name": "chats_kind_idx",
+          "columns": [
+            "kind"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "chats_bot_id_bots_id_fk": {
+          "name": "chats_bot_id_bots_id_fk",
+          "tableFrom": "chats",
+          "tableTo": "bots",
+          "columnsFrom": [
+            "bot_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "messages": {
+      "name": "messages",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "chat_id": {
+          "name": "chat_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "author": {
+          "name": "author",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -140,22 +335,66 @@
           "notNull": false,
           "autoincrement": false
         },
-        "content": {
-          "name": "content",
+        "author_name": {
+          "name": "author_name",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "delivery_status": {
-          "name": "delivery_status",
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
+        "attachments": {
+          "name": "attachments",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "card": {
+          "name": "card",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "source_task_id": {
-          "name": "source_task_id",
+        "card_state": {
+          "name": "card_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "direction": {
+          "name": "direction",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "peer_bot_id": {
+          "name": "peer_bot_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "peer_name": {
+          "name": "peer_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -171,29 +410,29 @@
         }
       },
       "indexes": {
-        "conversation_messages_source_task_id_unique": {
-          "name": "conversation_messages_source_task_id_unique",
+        "messages_idempotency_key_unique": {
+          "name": "messages_idempotency_key_unique",
           "columns": [
-            "source_task_id"
+            "idempotency_key"
           ],
           "isUnique": true
         },
-        "conversation_messages_conversation_idx": {
-          "name": "conversation_messages_conversation_idx",
+        "messages_chat_idx": {
+          "name": "messages_chat_idx",
           "columns": [
-            "conversation_id",
+            "chat_id",
             "id"
           ],
           "isUnique": false
         }
       },
       "foreignKeys": {
-        "conversation_messages_conversation_id_conversations_id_fk": {
-          "name": "conversation_messages_conversation_id_conversations_id_fk",
-          "tableFrom": "conversation_messages",
-          "tableTo": "conversations",
+        "messages_chat_id_chats_id_fk": {
+          "name": "messages_chat_id_chats_id_fk",
+          "tableFrom": "messages",
+          "tableTo": "chats",
           "columnsFrom": [
-            "conversation_id"
+            "chat_id"
           ],
           "columnsTo": [
             "id"
@@ -201,9 +440,9 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "conversation_messages_author_bot_id_bots_id_fk": {
-          "name": "conversation_messages_author_bot_id_bots_id_fk",
-          "tableFrom": "conversation_messages",
+        "messages_author_bot_id_bots_id_fk": {
+          "name": "messages_author_bot_id_bots_id_fk",
+          "tableFrom": "messages",
           "tableTo": "bots",
           "columnsFrom": [
             "author_bot_id"
@@ -211,7 +450,20 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "messages_peer_bot_id_bots_id_fk": {
+          "name": "messages_peer_bot_id_bots_id_fk",
+          "tableFrom": "messages",
+          "tableTo": "bots",
+          "columnsFrom": [
+            "peer_bot_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -219,46 +471,54 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "conversations": {
-      "name": "conversations",
+    "settings": {
+      "name": "settings",
       "columns": {
-        "id": {
-          "name": "id",
+        "key": {
+          "name": "key",
           "type": "text",
           "primaryKey": true,
           "notNull": true,
           "autoincrement": false
         },
-        "title": {
-          "name": "title",
+        "value": {
+          "name": "value",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
-        "participants": {
-          "name": "participants",
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch('subsec') * 1000)"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "system_credentials": {
+      "name": "system_credentials",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ciphertext": {
+          "name": "ciphertext",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "'[]'"
-        },
-        "max_runs_per_bot": {
-          "name": "max_runs_per_bot",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        },
-        "max_turns_per_message": {
-          "name": "max_turns_per_message",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 10
+          "autoincrement": false
         },
         "created_at": {
           "name": "created_at",
