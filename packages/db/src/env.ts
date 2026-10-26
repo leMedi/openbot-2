@@ -20,6 +20,8 @@ export const env = createEnv({
       .string()
       .min(1)
       .transform((path) => resolve(findRepoRoot(), path)),
+    /** Encrypts system credentials; when unset, one is generated into the data dir on first boot. */
+    OPENBOT_SECRET_KEY: z.string().min(32).optional(),
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,
@@ -28,4 +30,5 @@ export const env = createEnv({
 export const paths = {
   dataDir: env.OPENBOT_DATA_DIR,
   database: join(env.OPENBOT_DATA_DIR, 'openbot.db'),
+  secretKey: join(env.OPENBOT_DATA_DIR, 'secret.key'),
 }

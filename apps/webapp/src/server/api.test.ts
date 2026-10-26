@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { createTestServer, type TestServer } from './testing/harness.ts'
+import { createTestServer, restartTestServer, type TestServer } from './testing/harness.ts'
 
 const servers: TestServer[] = []
-async function start(dataDir?: string) {
-  const server = await createTestServer({ dataDir })
+async function start() {
+  const server = await createTestServer()
   servers.push(server)
   return server
+}
+async function restart(server: TestServer) {
+  servers.splice(servers.indexOf(server), 1, await restartTestServer(server))
+  return servers.at(-1)!
 }
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()))
@@ -33,9 +37,8 @@ describe('health and the live event stream', () => {
   it('starts a new epoch when the server restarts on the same data', async () => {
     const before = await start()
     const epochBefore = (await firstEvent(before))?.epoch
-    await before.close()
 
-    const after = await start(before.dataDir)
+    const after = await restart(before)
     const epochAfter = (await firstEvent(after))?.epoch
 
     expect(epochAfter).toBeDefined()

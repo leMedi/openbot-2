@@ -254,6 +254,12 @@ importers:
       '@openbot/core':
         specifier: workspace:*
         version: link:../core
+      '@openbot/db':
+        specifier: workspace:*
+        version: link:../db
+      drizzle-orm:
+        specifier: ^0.45.4
+        version: 0.45.4(@libsql/client@0.18.0)
     devDependencies:
       '@types/node':
         specifier: ^24
@@ -292,6 +298,9 @@ importers:
       '@openbot/db':
         specifier: workspace:*
         version: link:../db
+      drizzle-orm:
+        specifier: ^0.45.4
+        version: 0.45.4(@libsql/client@0.18.0)
     devDependencies:
       '@types/node':
         specifier: ^24

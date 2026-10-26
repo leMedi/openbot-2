@@ -10,11 +10,19 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
+import { Route as SettingsModelsRouteImport } from './routes/settings/models'
+import { Route as SettingsProvidersRouteImport } from './routes/settings/providers'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSplatRoute = ApiSplatRouteImport.update({
@@ -22,30 +30,57 @@ const ApiSplatRoute = ApiSplatRouteImport.update({
   path: '/api/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsModelsRoute = SettingsModelsRouteImport.update({
+  id: '/models',
+  path: '/models',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsProvidersRoute = SettingsProvidersRouteImport.update({
+  id: '/providers',
+  path: '/providers',
+  getParentRoute: () => SettingsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/api/$': typeof ApiSplatRoute
+  '/settings/models': typeof SettingsModelsRoute
+  '/settings/providers': typeof SettingsProvidersRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/api/$': typeof ApiSplatRoute
+  '/settings/models': typeof SettingsModelsRoute
+  '/settings/providers': typeof SettingsProvidersRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/api/$': typeof ApiSplatRoute
+  '/settings/models': typeof SettingsModelsRoute
+  '/settings/providers': typeof SettingsProvidersRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/$'
+  fullPaths:
+    '/' | '/settings' | '/api/$' | '/settings/models' | '/settings/providers'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/$'
-  id: '__root__' | '/' | '/api/$'
+  to: '/' | '/settings' | '/api/$' | '/settings/models' | '/settings/providers'
+  id:
+    | '__root__'
+    | '/'
+    | '/settings'
+    | '/api/$'
+    | '/settings/models'
+    | '/settings/providers'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  SettingsRoute: typeof SettingsRouteWithChildren
   ApiSplatRoute: typeof ApiSplatRoute
 }
 
@@ -58,6 +93,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/$': {
       id: '/api/$'
       path: '/api/$'
@@ -65,11 +107,40 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/models': {
+      id: '/settings/models'
+      path: '/models'
+      fullPath: '/settings/models'
+      preLoaderRoute: typeof SettingsModelsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/providers': {
+      id: '/settings/providers'
+      path: '/providers'
+      fullPath: '/settings/providers'
+      preLoaderRoute: typeof SettingsProvidersRouteImport
+      parentRoute: typeof SettingsRoute
+    }
   }
 }
 
+interface SettingsRouteChildren {
+  SettingsModelsRoute: typeof SettingsModelsRoute
+  SettingsProvidersRoute: typeof SettingsProvidersRoute
+}
+
+const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsModelsRoute: SettingsModelsRoute,
+  SettingsProvidersRoute: SettingsProvidersRoute,
+}
+
+const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
+  SettingsRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  SettingsRoute: SettingsRouteWithChildren,
   ApiSplatRoute: ApiSplatRoute,
 }
 export const routeTree = rootRouteImport

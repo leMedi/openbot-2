@@ -1,2 +1,11 @@
 // The only package that imports pi (ADR 0005). The pi-durable runtime, credential store and tools land here.
-export {}
+export {
+  builtinModelProviders,
+  Providers,
+  type ModelProvider,
+  SignInNotFoundError,
+  type ModelSummary,
+  type ProviderSummary,
+  type SignInMethod,
+  type SignInStep,
+} from './providers.ts'
