@@ -1,0 +1,146 @@
+# OpenBot
+
+OpenBot gives one person a team of always-on bots that run on a machine they control. Each bot has a persona, its own memory and routines, and its own screen they can watch and take over.
+
+## Language
+
+### People and bots
+
+**Owner**:
+The one person an OpenBot instance belongs to. There are no other users.
+_Avoid_: User, admin, account
+
+**Bot**:
+A named, long-lived agent with a persona, its own memory, routines and screen, that the owner chats with.
+_Avoid_: Agent, assistant
+
+**Handle**:
+A bot's unique `@name`, used to mention it.
+_Avoid_: Username, slug
+
+**Persona**:
+The owner-written description of who a bot is and how it behaves.
+_Avoid_: System prompt, instructions
+
+### Talking
+
+**Message**:
+Something the owner or a bot posts in a chat, readable by everyone in that chat; a bot may also send one straight to another bot, which then appears in both bots' DMs. A bot's history, thinking and tool use are private and never messages.
+_Avoid_: Memo, agent message, bubble
+
+**Chat**:
+Anything the owner sees and talks in: a DM or a group chat.
+_Avoid_: Conversation, room, thread
+
+**DM**:
+The chat between the owner and one bot. Every bot has exactly one.
+_Avoid_: Direct chat, 1:1, main conversation
+
+**Group chat**:
+A chat between the owner and two or more bots, played in rounds where bots may pass.
+_Avoid_: Room, channel, group conversation
+
+**History**:
+A bot's single private record of everything it has seen and done across all its chats, messages from other bots, and routines; what its model reads.
+_Avoid_: Conversation, transcript, context
+
+**Pass**:
+A bot choosing to say nothing on its turn in a group chat.
+
+**Lane**:
+The priority class of a bot's pending work: owner, bot, or background (routines and revivals), in that order.
+
+### Approvals and access
+
+**Card**:
+An interactive item in a chat that asks the owner for something: a choice, an approval, a secret, or a take-over.
+_Avoid_: Widget, prompt
+
+**Approval**:
+The owner's yes or no on a card asking to let a bot do something.
+
+**Grant**:
+A standing permission for one bot to use one thing (a plugin account, a vault item), created by an approval and revocable.
+_Avoid_: Permission, access
+
+**Take over**:
+The owner controlling a bot's screen directly to unblock it, ending with **hand back**.
+_Avoid_: Remote control, box help
+
+### The machine
+
+**Computer**:
+The one machine all bots share, with a common filesystem and tools that bots fully control.
+_Avoid_: Box, container, VM, sandbox
+
+**Screen**:
+A bot's own desktop on the computer, with its own browser, which the owner can watch and take over.
+_Avoid_: Display, desktop, window, VNC
+
+### Capabilities
+
+**Plugin**:
+An installable bundle of skills, tool servers, or both, giving bots a capability such as Gmail or GitHub.
+_Avoid_: Connector, integration, extension
+
+**Plugin account**:
+One named sign-in to a plugin's service; a plugin may have several, and the first is called `default`.
+_Avoid_: Connection, profile
+
+**Skill**:
+A packaged set of instructions that comes from a plugin. There are no other kinds of skill.
+
+**Vault**:
+The owner's store of logins, contacts and secrets that bots may use only through grants.
+_Avoid_: Keychain, password manager
+
+**Vault item**:
+One entry in the vault: a login, a contact, or a secret.
+
+**System credential**:
+A credential OpenBot itself holds to reach model providers and plugin accounts; never visible or grantable to bots.
+_Avoid_: Vault secret, token
+
+**Provider**:
+A model vendor or subscription OpenBot can call, such as OpenAI or Claude Pro.
+
+**Default model**:
+The model every bot uses unless it has its own.
+
+### Memory and routines
+
+**Memory**:
+Facts a bot keeps across conversations, either its own or shared by all bots (global memory).
+
+**Fact**:
+One remembered statement, with a tier: profile (always relevant), log (a dated event) or note (short-lived).
+
+**Routine**:
+A note from a bot to its future self plus a schedule; when it fires, the bot wakes and may stay silent.
+_Avoid_: Automation, cron job, task
+
+**Reminder**:
+A routine that fires once.
+
+### Oversight
+
+**Orchestrator**:
+The reviewer that judges a bot's side-effecting actions before they happen, answering allow, deny or ask.
+_Avoid_: Auto-review, guard, classifier
+
+**Surface**:
+A kind of side effect the orchestrator reviews, such as shell commands or vault use.
+
+**Rule**:
+An owner-written sentence telling the orchestrator to allow something automatically or ask first.
+
+**Shadow mode**:
+The orchestrator judging and logging actions without ever blocking them.
+
+### Delivery
+
+**Release**:
+A versioned build of OpenBot's code, produced by every push to main and installed in place.
+
+**Runtime image**:
+The container image holding OpenBot's operating system and tools, updated rarely and separately from releases.
