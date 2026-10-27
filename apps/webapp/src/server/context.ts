@@ -4,6 +4,7 @@ import {
   AllowAllOrchestrator,
   AttachmentStore,
   type Browser,
+  type Desktop,
   EventBus,
   getChatSummary,
   type Orchestrator,
@@ -51,6 +52,7 @@ export async function createServerContext({
   orchestrator = new AllowAllOrchestrator(),
   computer,
   browser,
+  desktop,
   attachmentsDir,
   screens,
   screenTickets,
@@ -69,6 +71,8 @@ export async function createServerContext({
   computer: BotComputer
   /** Each bot's own browser on its screen: over CDP, or the fake's in tests. */
   browser: Browser
+  /** Each bot's desktop apps on its screen: through its cua-driver, or the fake's in tests. Closed with the runtime. */
+  desktop: Desktop & { close?(): Promise<void> }
   /** Where the server keeps copies of messages' files, in its data dir. */
   attachmentsDir: string
   /** Every bot's screen: the screen daemon's, or the fake's in tests. */
@@ -87,6 +91,7 @@ export async function createServerContext({
     orchestrator,
     computer,
     browser,
+    desktop,
     tools,
     async sendMessage(bot, { text, attachments: files }, idempotencyKey) {
       const saved = await attachments.save(bot.chatId, files)

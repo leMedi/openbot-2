@@ -74,6 +74,67 @@ export interface Browser {
   screenshot(bot: ComputerBot): Promise<Uint8Array>
 }
 
+/** A top-level window on a bot's screen, by the id its desktop gives it; positions are in screen pixels. */
+export type DesktopWindow = { id: number; app: string; title: string; x: number; y: number; width: number; height: number }
+
+/**
+ * A window's accessibility tree: one element per line, indented by nesting, each element the desktop can act on with a
+ * reference, e.g. `- [ref=d12] push button "Save"` or `- [ref=d14] text "Hello"`. As with the browser, only the
+ * references of the latest snapshot (of any window) are accepted.
+ */
+export type DesktopSnapshot = { window: DesktopWindow; tree: string }
+
+/**
+ * What a desktop action did, as far as the desktop could tell:
+ * - `confirmed`: read back, e.g. the field now holds the typed text;
+ * - `unverifiable`: delivered, but its effect couldn't be seen; look before doing it again;
+ * - `suspected_noop`: delivered, but nothing seems to have changed;
+ * - `partial`: only part of it landed;
+ * - `refused`: nothing was delivered, e.g. a stale reference or a point outside the window.
+ */
+export const desktopEffects = ['confirmed', 'unverifiable', 'suspected_noop', 'partial', 'refused'] as const
+export type DesktopEffect = (typeof desktopEffects)[number]
+
+/** A desktop action's effect, and what happened in words, with a hint of what to do next when it isn't confirmed. */
+export type DesktopActionResult = { effect: DesktopEffect; summary: string }
+
+/** An element of the latest snapshot, by reference. */
+export type DesktopElement = { ref: string }
+/** A whole window, by id: keys and text go to what has focus in it. */
+export type DesktopWindowTarget = { window: number }
+/** A point of a window, in pixels of its latest screenshot. */
+export type DesktopPoint = { window: number; x: number; y: number }
+
+/** The bot's desktop can't be reached, e.g. its screen isn't running. */
+export class DesktopUnavailableError extends Error {}
+
+/**
+ * Each bot's desktop apps on its screen, driven through their accessibility trees: look (snapshot), act on what was seen
+ * by reference (or by a point of a screenshot when an app shows no tree), then look again. Every action reports its
+ * effect, so the caller verifies instead of assuming.
+ */
+export interface Desktop {
+  /** The screen's top-level windows, the browser's included. */
+  windows(bot: ComputerBot): Promise<DesktopWindow[]>
+  /** Opens an app by name or command, e.g. `mousepad`, and returns its windows once one shows. */
+  open(bot: ComputerBot, app: string): Promise<DesktopWindow[]>
+  /** Snapshots a window's accessibility tree; references from any earlier snapshot stop working. */
+  snapshot(bot: ComputerBot, windowId: number): Promise<DesktopSnapshot>
+  click(bot: ComputerBot, at: DesktopElement | DesktopPoint, options?: { button?: 'left' | 'right'; count?: 1 | 2 }): Promise<DesktopActionResult>
+  /** Types text into an element, or into whatever has focus in a window. */
+  type(bot: ComputerBot, into: DesktopElement | DesktopWindowTarget, text: string): Promise<DesktopActionResult>
+  /** Presses a key or a combination in a window, e.g. `Return` or `ctrl+s`. */
+  press(bot: ComputerBot, windowId: number, keys: string): Promise<DesktopActionResult>
+  scroll(
+    bot: ComputerBot,
+    at: DesktopElement | DesktopWindowTarget,
+    direction: 'up' | 'down' | 'left' | 'right',
+    amount?: number,
+  ): Promise<DesktopActionResult>
+  /** A window, or the whole screen without one, as PNG bytes. Points are measured on a window's latest screenshot. */
+  screenshot(bot: ComputerBot, windowId?: number): Promise<Uint8Array>
+}
+
 /** Every bot's always-on screen: a virtual display, a window manager and the bot's own browser. */
 export interface Screens {
   /** Starts the bot's screen at its display, or keeps it if it is already running there. Doesn't wait for it to be up. */
@@ -86,9 +147,9 @@ export interface Screens {
 }
 
 /**
- * The machine all bots share. The real one is the screen daemon's client and the browser over CDP
- * (`@openbot/computer`) plus the bots' shell from `@openbot/agent`; Seam 1 tests use the in-memory fake from
- * `@openbot/core/testing`. Both pass the contract suite there.
+ * The machine all bots share. The real one is the screen daemon's client, the browser over CDP and the desktop through
+ * each screen's cua-driver (`@openbot/computer`), plus the bots' shell from `@openbot/agent`; Seam 1 tests use the
+ * in-memory fake from `@openbot/core/testing`. Both pass the contract suite there.
  */
 export interface Computer {
   screens: Screens
@@ -97,4 +158,5 @@ export interface Computer {
     exec(bot: ComputerBot, command: string): Promise<ExecResult>
   }
   browser: Browser
+  desktop: Desktop
 }

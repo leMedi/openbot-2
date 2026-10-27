@@ -74,12 +74,20 @@ The one machine all bots share, with a common filesystem and tools that bots ful
 _Avoid_: Box, container, VM, sandbox
 
 **Screen**:
-A bot's own desktop on the computer, with its own browser, which the owner can watch and take over.
+A bot's own desktop on the computer, with its own browser and desktop apps, which the owner can watch and take over.
 _Avoid_: Display, desktop, window, VNC
 
 **Computer-use session**:
-A bot handing one goal to a helper that works its screen (browser, later desktop) and reports back a summary; the only way a bot clicks, types or sees its screen. Started with a stated reason, reviewed and logged, and never shown in the chat.
+A bot handing one goal to a helper that works its screen (browser and desktop apps) and reports back a summary; the only way a bot clicks, types or sees its screen. Started with a stated reason, reviewed and logged, and never shown in the chat.
 _Avoid_: Browser agent, subagent (in the UI), autopilot
+
+**Desktop apps**:
+The apps on a bot's screen other than its web pages (an editor, its browser's own window), which a computer-use session drives through their accessibility trees.
+_Avoid_: GUI, native apps; "desktop" alone for the screen itself
+
+**Effect**:
+What a desktop action did, as far as the screen can tell: confirmed (read back), unverifiable (sent, not seen), suspected no-op, partial, or refused (nothing sent). Anything short of confirmed is checked by looking again, never assumed.
+_Avoid_: Status, success
 
 ### Capabilities
 

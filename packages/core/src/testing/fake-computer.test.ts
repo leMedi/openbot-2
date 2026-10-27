@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { join } from 'node:path'
 import { describeComputerContract } from './computer-contract.ts'
-import { createFakeComputer } from './fake-computer.ts'
+import { createFakeComputer, fakeEditor } from './fake-computer.ts'
 
 const rex = { id: 'bot-rex', name: 'Rex', display: 1 }
 
@@ -25,6 +25,7 @@ describeComputerContract('the fake computer', async () => {
       computer.pages.set(url, page)
       return url
     },
+    editor: fakeEditor,
     close: () => computer.close(),
   }
 })

@@ -35,6 +35,7 @@ import {
   type AgentRuntime,
   type AttachmentFile,
   type Browser,
+  type Desktop,
   type BotInput,
   type BotWithChat,
   findBotByHistory,
@@ -107,6 +108,8 @@ export type BotRuntimeOptions = {
   computer: BotComputer
   /** Each bot's own browser, which only computer-use sessions drive. */
   browser: Browser
+  /** Each bot's desktop apps, which only computer-use sessions drive; closed with the runtime when it can be. */
+  desktop: Desktop & { close?(): Promise<void> }
   /** Tools beyond the built-in ones, e.g. a test's. */
   tools?: BotTool[]
   /** Posts a bot's message, with copies of the files it attached, to its DM; `idempotencyKey` makes a replayed tool call post once. */
@@ -148,9 +151,9 @@ function computerPrompt(computer: BotComputer, bot: BotWithChat, others: BotWith
   if (others.length) lines.push(`- The other bots' folders:`, ...others.map((other) => `  - ${other.name}: ${computer.folder(other.id)}`))
   lines.push(
     '',
-    'You also have a screen with your own web browser, which the owner can watch. You use it only through use_computer, which hands a goal to a computer-use helper and gives you back its summary and a final screenshot. Its work never shows in the chat.',
+    'You also have a screen with your own web browser and desktop apps, which the owner can watch. You use it only through use_computer, which hands a goal to a computer-use helper and gives you back its summary and a final screenshot. Its work never shows in the chat.',
     '',
-    'Choose tools in this order: plugin tools first, then the shell and fetching the web from it (curl, scripts), then the browser through use_computer, then the desktop. The browser is slow and costly: use it only when the shell can\'t do the job, e.g. pages that need JavaScript, signing in or clicking through, and say why in its reason.',
+    'Choose tools in this order: plugin tools first, then the shell and fetching the web from it (curl, scripts), then the browser through use_computer, then the desktop. The browser is slow and costly: use it only when the shell can\'t do the job, e.g. pages that need JavaScript, signing in or clicking through, and say why in its reason. Desktop apps come last, for what has no command line or web page.',
   )
   return lines.join('\n')
 }
@@ -236,6 +239,7 @@ export class BotRuntime implements AgentRuntime {
     }
     const computerUseSessions = computerUse({
       browser: options.browser,
+      desktop: options.desktop,
       computer: options.computer,
       images,
       botOf,
@@ -331,14 +335,15 @@ export class BotRuntime implements AgentRuntime {
         },
       }),
     }
-    // A computer-use session is reviewed, and logged with its reason, as a whole; its browser tools are not one by one.
+    // A computer-use session is reviewed, and logged with its reason, as a whole; its browser and desktop tools are not
+    // one by one.
     const useComputer: BotTool = { surface: 'computer_session', tool: computerUseSessions.useComputer }
     const tools = [sendMessage, askQuestion, ...computerTools(images), useComputer, ...(options.tools ?? [])]
     const toolSurfaces = new Map<string, Surface | null>([
       ...tools.map(({ surface, tool }) => [tool.name, surface] as const),
-      // Sessions don't select this extension, so its hooks shouldn't see browser tools; if they ever do, those calls
-      // were covered by the session's review.
-      ...computerUseSessions.browserToolNames.map((name) => [name, null] as const),
+      // Sessions don't select this extension, so its hooks shouldn't see their browser and desktop tools; if they ever
+      // do, those calls were covered by the session's review.
+      ...computerUseSessions.sessionToolNames.map((name) => [name, null] as const),
     ])
     const bots = defineExtension({
       name: 'openbot',
@@ -373,7 +378,8 @@ export class BotRuntime implements AgentRuntime {
         }),
       ],
     })
-    // Bots' histories select only their own extension; the browser tools are only in computer-use sessions (ADR 0008).
+    // Bots' histories select only their own extension; the browser and desktop tools are only in computer-use sessions
+    // (ADR 0008).
     registry.install(bots)
     registry.install(computerUseSessions.extension)
     const storage: Storage = options.storagePath ? await openNodeSqliteStorage(options.storagePath) : new MemoryStorage()
@@ -453,6 +459,7 @@ export class BotRuntime implements AgentRuntime {
   async close(): Promise<void> {
     await this.#harness.close(context)
     await this.#options.computer.close()
+    await this.#options.desktop.close?.()
   }
 
   /**

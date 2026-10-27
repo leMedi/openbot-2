@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { builtinModelProviders, openBotComputer } from '@openbot/agent'
-import { connectBrowser, connectScreens } from '@openbot/computer'
+import { botUser, builtinModelProviders, openBotComputer, userExists } from '@openbot/agent'
+import { connectBrowser, connectDesktop, connectScreens } from '@openbot/computer'
 import { openDb } from '@openbot/db'
 import { env, paths } from '@openbot/db/env'
 import { createServerContext, type ServerContext } from './context.ts'
@@ -38,6 +38,8 @@ async function open(): Promise<ServerContext> {
     agentStoragePath: join(paths.dataDir, 'agent.sqlite'),
     computer: openBotComputer({ home: paths.home }),
     browser: connectBrowser({ screens }),
+    // Each screen's cua-driver runs as the bots' user and answers only that user.
+    desktop: connectDesktop({ screens, runAs: userExists(botUser) ? botUser : undefined }),
     attachmentsDir: join(paths.dataDir, 'attachments'),
     screens,
     screenTickets: serverScreenTickets(),
