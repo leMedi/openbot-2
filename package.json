@@ -8,6 +8,7 @@
     "start": "turbo run start",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "eval": "node --experimental-transform-types --disable-warning=ExperimentalWarning evals/src/cli.ts",
     "db:generate": "turbo run db:generate",
     "db:migrate": "turbo run db:migrate",
     "db:studio": "turbo run db:studio",

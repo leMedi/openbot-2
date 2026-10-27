@@ -2,3 +2,4 @@ export { callsTools, createFakeModel, endsSilently, fails, held, says, type Fake
 export { createFakeProviders, type FakeProviders } from './fake-providers.ts'
 export { recordingTool } from './recording-tool.ts'
 export { fakeBotComputer } from './fake-computer.ts'
+export { answeringProvider } from './answering-provider.ts'

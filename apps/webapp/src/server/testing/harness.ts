@@ -3,7 +3,7 @@ import { createServer as createHttpServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { botUser, type BotTool, openBotComputer } from '@openbot/agent'
+import { botUser, type BotTool, type ModelProvider, openBotComputer } from '@openbot/agent'
 import { createFakeModel, createFakeProviders, fakeBotComputer } from '@openbot/agent/testing'
 import { connectBrowser, connectDesktop, connectScreens, defaultDaemonSocket } from '@openbot/computer'
 import type { Orchestrator, Screens, ScreenStatus } from '@openbot/core'
@@ -48,6 +48,8 @@ export type TestServerOptions = {
   pages?: FakeComputerScript['pages']
   /** Runs bots' tools on this machine's real computer, in `$OPENBOT_HOME`, instead of the fake; for the runtime image. */
   realComputer?: boolean
+  /** Model providers beside the scripted fakes, e.g. pi's built-in ones for evals on real models. */
+  modelProviders?: readonly ModelProvider[]
 }
 
 /**
@@ -58,7 +60,7 @@ export async function createTestServer(options: TestServerOptions = {}) {
   return open(await mkdtemp(join(tmpdir(), 'openbot-test-')), testSecretKey, options)
 }
 
-async function open(dir: string, secretKey: string, { shell, pages, realComputer, ...options }: TestServerOptions, kept?: FakeComputer) {
+async function open(dir: string, secretKey: string, { shell, pages, realComputer, modelProviders = [], ...options }: TestServerOptions, kept?: FakeComputer) {
   const db = await openDb(join(dir, 'openbot.db'))
   const providers = createFakeProviders()
   // The computer outlives the server, as the screen daemon does.
@@ -70,7 +72,7 @@ async function open(dir: string, secretKey: string, { shell, pages, realComputer
   const context = await createServerContext({
     db,
     secretKey,
-    providers: providers.providers,
+    providers: [...providers.providers, ...modelProviders],
     agentStoragePath: join(dir, 'agent.sqlite'),
     computer: realComputer ? openBotComputer({ home }) : fakeBotComputer(computer, home),
     browser: realScreens ? connectBrowser({ screens: realScreens }) : computer.browser,
@@ -129,6 +131,10 @@ async function open(dir: string, secretKey: string, { shell, pages, realComputer
         if (step.type === 'failed') throw new Error(step.message)
       }
     },
+    /** Connects `providerId` with the API key its usual variable holds in `env`; returns the variable's name. */
+    connectProviderFromEnv: (providerId: string, env: Record<string, string | undefined>) => context.providers.connectFromEnv(providerId, env),
+    /** One text request to a connected model, e.g. the eval judge's. */
+    complete: context.providers.complete.bind(context.providers),
     /** Stops the runtime and closes the database, keeping the data. */
     async shutdown() {
       for (const http of streamServers.splice(0)) http.close()

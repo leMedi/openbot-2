@@ -4,6 +4,7 @@ import {
   type AuthInteraction,
   type AuthPrompt,
   type AuthType,
+  type Credential,
   type Models,
   type Provider,
   createModels,
@@ -120,12 +121,52 @@ function stepQueue() {
 export class Providers {
   /** pi's model collection, for the runtime; auth resolves (and refreshes) through our credential store. */
   readonly models: Models
+  readonly #credentials: SystemCredentialStore
   readonly #signIns = new Map<string, Map<string, (answer: string) => void>>()
 
   constructor({ db, box, providers }: { db: Db; box: SecretBox; providers: readonly ModelProvider[] }) {
-    const models = createModels({ credentials: new SystemCredentialStore(db, box), authContext: noAmbientAuth })
+    this.#credentials = new SystemCredentialStore(db, box)
+    const models = createModels({ credentials: this.#credentials, authContext: noAmbientAuth })
     for (const provider of providers) models.setProvider(provider)
     this.models = models
+  }
+
+  /**
+   * Connects `providerId` with the API key its usual environment variables hold in `env` (e.g. `ANTHROPIC_API_KEY`),
+   * stored like one the owner entered; for evals and CI, which have no owner to sign in. Returns the variable it used.
+   * The server itself never reads keys from its environment.
+   */
+  async connectFromEnv(providerId: string, env: Record<string, string | undefined>): Promise<string> {
+    const apiKey = this.models.getProvider(providerId)?.auth.apiKey
+    if (!apiKey) throw new Error(`Provider ${providerId} doesn't exist or takes no API key`)
+    const resolved = await apiKey.resolve({
+      ctx: { env: async (name) => env[name] || undefined, fileExists: async () => false },
+      signal: new AbortController().signal,
+    })
+    if (!resolved) throw new Error(`No API key for ${providerId} in the environment: set its usual variable, e.g. ANTHROPIC_API_KEY for anthropic`)
+    const key = resolved.auth.apiKey
+    // A provider that needs no key is connected already.
+    if (key) {
+      const credential: Credential = { type: 'api_key', key, ...(resolved.env && { env: resolved.env }) }
+      await this.#credentials.modify(providerId, async () => credential)
+    }
+    return resolved.source ?? 'the environment'
+  }
+
+  /**
+   * One request to the model `ref` (`provider/modelId`) of a connected provider, answered in text; for the eval judge.
+   * Throws when the provider fails the request.
+   */
+  async complete(ref: string, { systemPrompt, prompt }: { systemPrompt: string; prompt: string }): Promise<string> {
+    const slash = ref.indexOf('/')
+    const model = this.models.getModel(ref.slice(0, slash), ref.slice(slash + 1))
+    if (!model) throw new Error(`No model ${ref}`)
+    const reply = await this.models.completeSimple(
+      model,
+      { systemPrompt, messages: [{ role: 'user', content: prompt, timestamp: Date.now() }] },
+    )
+    if (reply.stopReason === 'error' || reply.stopReason === 'aborted') throw new Error(reply.errorMessage ?? `${ref} failed the request`)
+    return reply.content.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('')
   }
 
   async list(): Promise<ProviderSummary[]> {

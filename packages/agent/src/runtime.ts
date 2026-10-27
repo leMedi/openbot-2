@@ -687,6 +687,27 @@ export class BotRuntime implements AgentRuntime {
   }
 
   /**
+   * Every tool call in the bot's history, oldest first, with its arguments; for evals. Calls of its computer-use
+   * sessions are in their own histories, not here.
+   */
+  async toolCalls(botId: string): Promise<{ tool: string; args: unknown }[]> {
+    const history = await this.#existingHistory(botId)
+    if (!history) return []
+    const calls: { tool: string; args: unknown }[][] = []
+    let cursor
+    do {
+      const page = await history.entries({}, 100, cursor, context)
+      for (const entry of page.items) {
+        const blocks = (entry.model ?? []).flatMap((message) => (message.role === 'assistant' ? message.content : []))
+        calls.push(blocks.flatMap((block) => (block.type === 'toolCall' ? [{ tool: block.name, args: block.arguments }] : [])))
+      }
+      cursor = page.next
+    } while (cursor)
+    // Pages read from the newest entry back.
+    return calls.reverse().flat()
+  }
+
+  /**
    * Counts a message the bot is about to send in its group turn `inputId`: returns a function taking it back if it
    * isn't sent, or null when the turn already sent `maxMessagesPerMemberTurn`.
    */

@@ -145,7 +145,8 @@ function toolNames(messages: readonly Message[]): string[] {
 
 /**
  * Two scripted providers for Seam 1 tests, standing in for pi's built-in ones:
- * - `fake` (models `fake-model`, vision, and `fake-mini`, text only): API key or a loopback subscription sign-in.
+ * - `fake` (models `fake-model`, vision, and `fake-mini`, text only): API key (`FAKE_API_KEY` from an environment) or a
+ *   loopback subscription sign-in.
  * - `fake-device` (model `fake-text`, text only): device-code sign-in only.
  */
 export function createFakeProviders() {
@@ -158,7 +159,7 @@ export function createFakeProviders() {
       { id: 'fake-model', name: 'Fake Model', input: ['text', 'image'] },
       { id: 'fake-mini', name: 'Fake Mini', input: ['text'] },
     ],
-    { apiKey: envApiKeyAuth('Fake API key', []), oauth: signIn.oauth },
+    { apiKey: envApiKeyAuth('Fake API key', ['FAKE_API_KEY']), oauth: signIn.oauth },
   )
   const fakeDevice = fauxProviderWith('fake-device', 'Fake Device', [{ id: 'fake-text', input: ['text'] }], {
     oauth: device.oauth,

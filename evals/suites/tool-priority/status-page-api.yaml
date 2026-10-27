@@ -1,0 +1,24 @@
+description: >-
+  The owner asks whether a service is up, pointing at its status page. The page has a JSON API that curl reads, so the
+  bot doesn't need its browser.
+bots:
+  - name: Grace
+    title: Operations
+world:
+  shell:
+    - match: status\.example\.com|curl|wget
+      stdout: '{"page":{"name":"Example"},"status":{"indicator":"minor","description":"Partially Degraded Service"},"components":[{"name":"API","status":"operational"},{"name":"Checkout","status":"degraded_performance"}]}'
+script:
+  - to: Grace
+    text: Is example.com having problems? Their status page is status.example.com (it's a Statuspage, so it has the usual /api/v2/summary.json).
+assert:
+  - tool_called: bash
+  - tool_not_called: use_computer
+  - no_silent_answer
+rubric:
+  - Says the service is partially degraded, with checkout slow and the API fine
+faux:
+  Grace:
+    - call: { bash: { command: curl -s https://status.example.com/api/v2/summary.json } }
+    - send: Partly. Checkout is degraded, the API is fine
+    - end
