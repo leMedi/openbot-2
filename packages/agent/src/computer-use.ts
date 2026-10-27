@@ -1,4 +1,4 @@
-import { awaitWithContext, BACKGROUND_CONTEXT, type Context } from '@earendil-works/chord/context'
+import { BACKGROUND_CONTEXT, type Context } from '@earendil-works/chord/context'
 import { type ImageContent, type TextContent, Type } from '@earendil-works/pi-ai'
 import {
   configure,
@@ -31,11 +31,8 @@ import type { BotComputer } from './computer.ts'
 
 const context = BACKGROUND_CONTEXT
 
-/**
- * How long a computer-use session may run before it is stopped, so a stuck one can't spend without end. Time it waits
- * while the owner holds the screen doesn't count.
- */
-const computerUseLimitMs = 15 * 60_000
+/** How long a computer-use session may run before it is stopped, so a stuck one can't spend without end. */
+const sessionTimeoutMs = 15 * 60_000
 
 /** What the subagent is told, beyond whose screen it uses. */
 const computerUseVoice = `You are a computer-use helper. You get one goal, reach it on a screen, in its web browser or its desktop apps, then answer with a short summary of what you did and what you found. That summary is all you hand back, so put the facts that were asked for in it: exact numbers, names, dates and URLs. Your text is never shown to the owner.
@@ -95,12 +92,6 @@ export type ComputerUseOptions = {
   botOf(conversationId: ConversationId): Promise<BotWithChat>
   /** The model the bot's computer-use sessions run on: the computer-use model, else the bot's own model, else the default. */
   model(bot: BotWithChat): Promise<ModelRef>
-  /** Resolves once the owner isn't holding the bot's screen, so a session never fights them for its input. */
-  screenFree(bot: BotWithChat): Promise<void>
-  /** How long the owner has held the bot's screen in all, a hold still on included; sessions' clocks leave it out. */
-  screenHeldMs(bot: BotWithChat): number
-  /** How long a session may work, time the screen is held left out; `computerUseLimitMs` when absent. */
-  limitMs?: number
   /** The instruction of the bot's take-over card still waiting for the owner, or null. */
   waitingTakeOver(bot: BotWithChat): Promise<string | null>
   /** Posts a take-over card to the bot's DM; `idempotencyKey` makes a replayed call post once. */
@@ -322,17 +313,7 @@ export function computerUse(options: ComputerUseOptions) {
     }),
   })
 
-  // Every screen tool first waits while the owner holds the screen: a session's input would fight theirs.
-  const pausable = [...browserTools, ...desktopTools].map(
-    (tool): ToolRegistration<any, any> => ({
-      ...tool,
-      execute: async (args: unknown, api: any, ctx: any) => {
-        await awaitWithContext(options.screenFree(await botOf(api.conversationId)), ctx)
-        return tool.execute(args as never, api, ctx)
-      },
-    }),
-  )
-  const tools = [...pausable, needsHelp]
+  const tools = [...browserTools, ...desktopTools, needsHelp]
   const extension: Extension = defineExtension({
     name: 'computer-use',
     sections: [section('computer-use', () => computerUseVoice, { tag: false })],
@@ -355,7 +336,7 @@ export function computerUse(options: ComputerUseOptions) {
     replay: 'safe',
     // A bot has one screen: two sessions at once would fight over it and invalidate each other's references.
     executionMode: 'sequential',
-    execute: async (args, api, ctx) => {
+    execute: async (args, api) => {
       const bot = await botOf(api.conversationId)
       // Checked once: a rerun after a restart may find the card this very call posted.
       const waiting = (await api.memo<boolean>('started', context)) ? null : await options.waitingTakeOver(bot)
@@ -382,7 +363,6 @@ export function computerUse(options: ComputerUseOptions) {
       // Opened once: a rerun after a restart finds the session mid-way and leaves its page alone.
       let start = (await api.memo<string>('start', context)) ?? ''
       if (args.startUrl && !start) {
-        await awaitWithContext(options.screenFree(bot), ctx)
         try {
           await browser.navigate(bot, args.startUrl)
           start = `\n\nThe browser has opened ${args.startUrl}.`
@@ -394,30 +374,12 @@ export function computerUse(options: ComputerUseOptions) {
       const handle = await api.conversation(session, context)
       if (!handle) throw new Error('The computer-use session is gone')
       const submission = await handle.submit({ type: 'input', content: `${args.goal}${start}`, requestId: `use_computer:${api.taskId}` }, context)
-      // The session's clock stops while the owner holds the screen: it waits then, and may wait longer than its limit.
-      const limitMs = options.limitMs ?? computerUseLimitMs
-      const startedAt = Date.now()
-      const heldBefore = options.screenHeldMs(bot)
-      const worked = () => Date.now() - startedAt - (options.screenHeldMs(bot) - heldBefore)
       let timedOut = false
-      let settledYet = false
-      let timer: ReturnType<typeof setTimeout>
-      const checkTime = async () => {
-        await options.screenFree(bot)
-        if (settledYet) return
-        const left = limitMs - worked()
-        if (left > 0) {
-          timer = setTimeout(checkTime, left)
-          return
-        }
+      const timer = setTimeout(() => {
         timedOut = true
         void handle.abort(context)
-      }
-      timer = setTimeout(checkTime, limitMs)
-      const settled = await submission.wait(context).finally(() => {
-        settledYet = true
-        clearTimeout(timer)
-      })
+      }, sessionTimeoutMs)
+      const settled = await submission.wait(context).finally(() => clearTimeout(timer))
       const instruction = await neededHelp(api, session, settled.entry)
       const answerId = settled.status === 'done' ? settled.answer : undefined
       if (instruction) {
@@ -437,7 +399,7 @@ export function computerUse(options: ComputerUseOptions) {
         }
       }
       if (answerId === undefined) {
-        const why = timedOut ? `it worked for more than ${limitMs / 60_000} minutes` : (settled.reason ?? 'it gave no answer')
+        const why = timedOut ? `it ran for more than ${sessionTimeoutMs / 60_000} minutes` : (settled.reason ?? 'it gave no answer')
         throw new Error(`The computer-use session stopped before finishing: ${why}`)
       }
       const answer = await api.commit((tx) => tx.entry(answerId), context)

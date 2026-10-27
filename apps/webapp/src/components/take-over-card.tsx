@@ -7,8 +7,6 @@ const status = {
   waiting: { label: 'Action needed', dot: 'bg-amber' },
   done: { label: 'Done', dot: 'bg-green' },
   skipped: { label: 'Skipped', dot: 'bg-muted-foreground' },
-  // The owner let go of the screen without saying; the bot checks it.
-  viewer_closed: { label: 'Handed back', dot: 'bg-muted-foreground' },
 } as const
 
 /** Hands a bot's screen back from its take-over card, once at a time, keeping the error to show. */
@@ -34,8 +32,8 @@ export function useHandBack(messageId: string, onHandedBack: (message: MessageIn
 
 /**
  * A bot stuck on its screen asks the owner to take over (as Grok's card for handing over its computer): the instruction, then **Take over**,
- * which opens the screen in take-over mode, **I'm done**, which hands it back and wakes the bot, and **Skip**, which
- * hands it back without doing the step. Once handed back it shows how, and opens the screen to watch.
+ * which opens the screen fullscreen, where the owner controls it, **I'm done**, which hands it back and wakes the bot, and
+ * **Skip**, which hands it back without doing the step. Once handed back it shows how, and opens the screen.
  */
 export function TakeOverCard({
   message,

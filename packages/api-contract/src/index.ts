@@ -82,14 +82,10 @@ export const questionCard = z.object({
 })
 export type QuestionCardInfo = z.infer<typeof questionCard>
 
-/** How the owner hands a bot's screen back from its take-over card: they did the step, or skipped it without doing it. */
+/** How the owner handed a bot's screen back: they did the step, or skipped it without doing it. */
 export const handBackOutcomes = ['done', 'skipped'] as const
 export const handBackOutcome = z.enum(handBackOutcomes)
 export type HandBackOutcome = z.infer<typeof handBackOutcome>
-
-/** How a take-over card was resolved: as the owner said, or `viewer_closed` when they let go of the screen without saying. */
-export const takeOverOutcome = z.enum([...handBackOutcomes, 'viewer_closed'])
-export type TakeOverOutcome = z.infer<typeof takeOverOutcome>
 
 /**
  * A bot stuck on its screen on something only the owner can do (a login, a captcha, two-factor, a payment): they take
@@ -100,7 +96,7 @@ export const takeOverCard = z.object({
   /** One line telling the owner what to do on the screen. */
   instruction: z.string(),
   /** Null while it waits for the owner; once handed back, it can't be handed back again. */
-  outcome: takeOverOutcome.nullable(),
+  outcome: handBackOutcome.nullable(),
 })
 export type TakeOverCardInfo = z.infer<typeof takeOverCard>
 
@@ -504,7 +500,7 @@ export const contract = {
         path: '/messages/{messageId}/hand-back',
         summary:
           "Hand a bot's screen back after its take-over card, once: `done` when the owner did the step, `skipped` when they " +
-          "didn't. Ends the owner's hold on the screen and wakes the bot with the outcome",
+          "didn't. Wakes the bot with the outcome",
       })
       .input(z.object({ messageId: z.string(), outcome: handBackOutcome }))
       .output(message),
@@ -591,26 +587,6 @@ export const contract = {
       })
       .input(z.object({ botId: z.string() }))
       .output(screenTicket),
-    hold: oc
-      .route({
-        method: 'PUT',
-        path: '/bots/{botId}/screen/hold',
-        summary:
-          "Take over the bot's screen, or renew the hold: the bot's computer-use sessions pause until it is handed back. A " +
-          'hold not renewed by `expiresAt` ends by itself',
-      })
-      .input(z.object({ botId: z.string() }))
-      .output(z.object({ expiresAt: z.number() })),
-    release: oc
-      .route({
-        method: 'DELETE',
-        path: '/bots/{botId}/screen/hold',
-        summary:
-          "Hand the bot's screen back; its sessions go on. Letting go of a held screen while a take-over card waits " +
-          'resolves the card (`viewer_closed`) and wakes the bot to check the screen',
-      })
-      .input(z.object({ botId: z.string() }))
-      .output(z.void()),
   },
   orchestrator: {
     getModes: oc

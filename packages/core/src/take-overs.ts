@@ -14,11 +14,8 @@ export type TakeOverCard = {
   goal: string
 }
 
-/**
- * How the owner handed the screen back: they did the step, skipped it without doing it, or closed the screen without
- * saying which (`viewer_closed`, as Grok's trigger of that name).
- */
-export const handBackOutcomes = ['done', 'skipped', 'viewer_closed'] as const
+/** How the owner handed the screen back: they did the step, or skipped it without doing it. */
+export const handBackOutcomes = ['done', 'skipped'] as const
 export type HandBackOutcome = (typeof handBackOutcomes)[number]
 
 /** A take-over card's progress, as stored in `messages.card_state`; absent while it waits for the owner. */
@@ -71,21 +68,17 @@ export async function reopenTakeOver(db: Db, messageId: string): Promise<Message
 
 /** How a hand-back reaches the bot that asked: the next input of its history. */
 export function describeHandBack(card: TakeOverCard, outcome: HandBackOutcome): string {
+  // Grok's resume prompts (box-handoff-resume.ts), with use_computer for its Screenshot tool.
   if (outcome === 'done') {
     return (
-      `The owner took over your screen and handed it back: they did what you asked ("${card.instruction}"). ` +
-      `The screen is as they left it. Go on with the goal by calling use_computer again: ${card.goal}`
-    )
-  }
-  if (outcome === 'viewer_closed') {
-    return (
-      `The owner took over your screen and closed it without saying whether they did what you asked ("${card.instruction}"). ` +
-      'Check the screen first: call use_computer with a goal that starts by taking a screenshot to see whether it is done. ' +
-      `If it clearly is, go on with the goal: ${card.goal} If you can't tell, ask the owner briefly.`
+      `The owner handed your screen back after what you asked them to do ("${card.instruction}"). Continue the goal: ` +
+      `call use_computer again, starting with a screenshot to see the current state of the screen. The goal: ${card.goal}`
     )
   }
   return (
-    `The owner skipped what you asked them to do on your screen ("${card.instruction}"), so it wasn't done. ` +
-    `Go on without it if you can; otherwise tell them what that means for the goal: ${card.goal}`
+    `The owner skipped what you asked them to do on your screen ("${card.instruction}") without doing it. Treat it as ` +
+    "declined: don't assume it happened, and don't immediately ask for the same step again. Continue the goal without " +
+    'it if you can: skip the step or find another way. If the goal cannot go on without it, send the owner a brief ' +
+    `message saying what is blocked, then stop and wait for their reply. The goal: ${card.goal}`
   )
 }

@@ -18,9 +18,7 @@ import {
   createBot,
   describeAnswer,
   describeHandBack,
-  findWaitingTakeOver,
   handBack,
-  type HandBackOutcome,
   HandedBackError,
   InvalidAnswerError,
   deleteBot,
@@ -64,39 +62,6 @@ async function assertCanRun(context: ServerContext, bot: BotWithChat) {
   if (!(await context.providers.findModel(model))) {
     throw new ORPCError('PRECONDITION_FAILED', { message: `${model} is not available; connect its provider or choose another model` })
   }
-}
-
-/**
- * Records how the owner handed the bot's screen back after its take-over card, once, lets go of the screen and wakes the
- * bot with the outcome. A hand-back the bot couldn't be woken with is taken back.
- */
-async function handBackScreen(context: ServerContext, bot: BotWithChat, messageId: string, outcome: HandBackOutcome) {
-  let handed
-  try {
-    handed = await handBack(context.db, messageId, outcome)
-  } catch (error) {
-    if (error instanceof TakeOverNotFoundError) throw new ORPCError('NOT_FOUND', { message: error.message })
-    if (error instanceof HandedBackError) throw new ORPCError('CONFLICT', { message: error.message })
-    throw error
-  }
-  const { message, card } = handed
-  // The screen is the bot's again before it wakes, so its next session doesn't wait for the owner.
-  context.screenHolds.release(bot.id)
-  const info = toMessageInfo(message)
-  context.bus.publish({ type: 'message.updated', message: info })
-  await publishChat(context, message.chatId)
-  try {
-    await context.runtime.wake(bot.id, { lane: 'owner', text: describeHandBack(card, outcome), id: `hand-back:${message.id}` })
-  } catch (error) {
-    // A hand-back the bot never got isn't kept, so the owner can hand back again.
-    const reopened = await reopenTakeOver(context.db, message.id)
-    if (reopened) {
-      context.bus.publish({ type: 'message.updated', message: toMessageInfo(reopened) })
-      await publishChat(context, reopened.chatId)
-    }
-    throw error
-  }
-  return info
 }
 
 /** `work`'s result, with a missing chat answered as NOT_FOUND. */
@@ -258,7 +223,6 @@ export const router = os.router({
       if (!bot) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
       // Its screen stops before its folder, with the browser profile in it, goes. If the computer can't be reached, the
       // screen is stopped when the server next starts.
-      context.screenHolds.release(bot.id)
       await context.screens.stop(bot).catch((error) => console.error(`[screens] Couldn't stop ${bot.name}'s screen:`, error))
       // Its pi history stays orphaned in pi-durable's storage, which can't delete a conversation yet; no bot reaches it.
       await context.runtime.forget(bot)
@@ -396,7 +360,30 @@ export const router = os.router({
       const bot = asked?.authorBotId ? await getBot(context.db, asked.authorBotId) : undefined
       if (!asked?.card || !bot) throw new ORPCError('NOT_FOUND', { message: 'No such take-over' })
       await assertCanRun(context, bot)
-      return handBackScreen(context, bot, input.messageId, input.outcome)
+      let handed
+      try {
+        handed = await handBack(context.db, input.messageId, input.outcome)
+      } catch (error) {
+        if (error instanceof TakeOverNotFoundError) throw new ORPCError('NOT_FOUND', { message: error.message })
+        if (error instanceof HandedBackError) throw new ORPCError('CONFLICT', { message: error.message })
+        throw error
+      }
+      const { message, card } = handed
+      const info = toMessageInfo(message)
+      context.bus.publish({ type: 'message.updated', message: info })
+      await publishChat(context, message.chatId)
+      try {
+        await context.runtime.wake(bot.id, { lane: 'owner', text: describeHandBack(card, input.outcome), id: `hand-back:${message.id}` })
+      } catch (error) {
+        // A hand-back the bot never got isn't kept, so the owner can hand back again.
+        const reopened = await reopenTakeOver(context.db, message.id)
+        if (reopened) {
+          context.bus.publish({ type: 'message.updated', message: toMessageInfo(reopened) })
+          await publishChat(context, reopened.chatId)
+        }
+        throw error
+      }
+      return info
     }),
   },
 
@@ -489,25 +476,6 @@ export const router = os.router({
       }
       const { ticket, expiresAt } = context.screenTickets.issue(bot.id, status.streamPort)
       return { url: screenStreamUrl(bot.id, ticket), expiresAt }
-    }),
-
-    hold: os.screens.hold.handler(async ({ context, input }) => {
-      const bot = await botMustExist(context, input.botId)
-      return context.screenHolds.hold(bot.id)
-    }),
-
-    release: os.screens.release.handler(async ({ context, input }) => {
-      if (!context.screenHolds.release(input.botId)) return
-      // Letting go of the screen while a take-over card waits closes the viewer without saying how it went.
-      const bot = await getBot(context.db, input.botId)
-      const waiting = bot && (await findWaitingTakeOver(context.db, bot.chatId))
-      if (!bot || !waiting) return
-      try {
-        await handBackScreen(context, bot, waiting.id, 'viewer_closed')
-      } catch (error) {
-        // Handed back from the card meanwhile: that outcome stands.
-        if (!(error instanceof ORPCError && error.code === 'CONFLICT')) throw error
-      }
     }),
   },
 

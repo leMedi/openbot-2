@@ -80,8 +80,8 @@ export function ChatView({
   allowFiles: boolean
   /** Shows each bot's name above its messages, as in a group chat. */
   showAuthors: boolean
-  /** Opens the bot's screen pane, in take-over mode or to watch, from a take-over card; DMs only. */
-  onScreen?: (takeOver: boolean) => void
+  /** Opens the bot's screen fullscreen, where the owner controls it, from a take-over card; DMs only. */
+  onScreen?: () => void
 }) {
   const live = useLive()
   const [loaded, setLoaded] = useState(false)
@@ -312,7 +312,7 @@ function MessageList({
   onDiscard: (entry: Outgoing) => void
   /** A card was answered or handed back: the server's message as it is now. */
   onAnswered: (message: MessageInfo) => void
-  onScreen?: (takeOver: boolean) => void
+  onScreen?: () => void
 }) {
   // Letter keys answer the newest open question only.
   const newestOpenQuestion = [...rows].reverse().find((row) => row.message?.card?.type === 'question' && !row.message.card.answer)?.key
@@ -342,13 +342,9 @@ function MessageList({
                 message={row.message!}
                 card={card}
                 botName={row.authorName}
-                onTakeOver={() => onScreen?.(true)}
-                onOpenScreen={() => onScreen?.(false)}
-                onHandedBack={(message) => {
-                  onAnswered(message)
-                  // Handing back ends the owner's control; the server already let go of the screen.
-                  onScreen?.(false)
-                }}
+                onTakeOver={() => onScreen?.()}
+                onOpenScreen={() => onScreen?.()}
+                onHandedBack={onAnswered}
               />
             </div>
           )
