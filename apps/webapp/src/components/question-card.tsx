@@ -16,8 +16,8 @@ function keyIsTaken(event: KeyboardEvent) {
 
 /**
  * A bot's question: its prompt, 1–6 lettered options and, when allowed, a free-text answer. With `letterKeys`
- * (the chat's newest open question), pressing an option's letter answers it. Once answered it shows the answer and
- * can't be answered again.
+ * (the chat's newest open question), pressing an option's letter answers it. Its × dismisses it unanswered without
+ * waking the bot. Once answered or dismissed it can't be answered again.
  */
 export function QuestionCard({
   message,
@@ -35,22 +35,25 @@ export function QuestionCard({
   const [error, setError] = useState<string>()
   const answerRef = useRef<(answer: QuestionAnswer) => void>(undefined)
 
-  async function answer(chosen: QuestionAnswer) {
-    if (sending || card.answer) return
+  /** Sends the owner's answer or dismissal, once at a time, and shows the card as the server now has it. */
+  async function close(request: () => Promise<MessageInfo>) {
+    if (sending || card.answer || card.dismissed) return
     setSending(true)
     setError(undefined)
     try {
-      onAnswered(await api().chats.answer({ messageId: message.id, answer: chosen }))
+      onAnswered(await request())
     } catch (caught) {
       setError(errorMessage(caught))
     } finally {
       setSending(false)
     }
   }
+  const answer = (chosen: QuestionAnswer) => close(() => api().chats.answer({ messageId: message.id, answer: chosen }))
+  const dismiss = () => close(() => api().chats.dismiss({ messageId: message.id }))
   answerRef.current = (chosen) => void answer(chosen)
 
   useEffect(() => {
-    if (!letterKeys || card.answer) return
+    if (!letterKeys || card.answer || card.dismissed) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (keyIsTaken(event) || event.key.length !== 1) return
       const index = event.key.toUpperCase().charCodeAt(0) - 65
@@ -60,7 +63,16 @@ export function QuestionCard({
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [letterKeys, card.answer, card.options.length])
+  }, [letterKeys, card.answer, card.dismissed, card.options.length])
+
+  if (card.dismissed) {
+    return (
+      <section aria-label="Dismissed question" className="w-full rounded-2xl bg-bubble-agent p-3 text-base/5 text-muted-foreground">
+        <p className="[overflow-wrap:anywhere]">{card.prompt}</p>
+        <p className="mt-1 text-sm">Dismissed</p>
+      </section>
+    )
+  }
 
   if (card.answer) {
     const shown = 'option' in card.answer ? `${letter(card.answer.option)}. ${card.options[card.answer.option]?.label}` : card.answer.text
@@ -80,7 +92,21 @@ export function QuestionCard({
 
   return (
     <section aria-label="Question" className="w-full rounded-2xl border border-border bg-bubble-agent p-3 text-base/5">
-      <p className="font-semibold [overflow-wrap:anywhere]">{card.prompt}</p>
+      <div className="flex items-start gap-2">
+        <p className="flex-1 font-semibold [overflow-wrap:anywhere]">{card.prompt}</p>
+        <button
+          type="button"
+          aria-label="Dismiss question"
+          title="Dismiss"
+          disabled={sending}
+          onClick={() => void dismiss()}
+          className="pressable -mt-1 -mr-1 grid size-7 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors duration-100 hover:bg-secondary-hover hover:text-foreground disabled:opacity-60"
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden>
+            <path d="M4 4l8 8M12 4l-8 8" />
+          </svg>
+        </button>
+      </div>
       {card.details && (
         <div className="mt-1 text-sm text-muted-foreground">
           <Markdown text={card.details} />

@@ -38,6 +38,7 @@ import {
   type Desktop,
   type BotInput,
   type BotWithChat,
+  describeUnanswered,
   findBotByHistory,
   findBotByName,
   findGroupByName,
@@ -50,6 +51,7 @@ import {
   listGroups,
   type Lane,
   listBots,
+  markReminded,
   maxAttachments,
   maxBotMessageLength,
   maxQuestionOptions,
@@ -61,6 +63,7 @@ import {
   readModelSettings,
   reviewAction,
   setBotHistory,
+  unansweredQuestions,
 } from '@openbot/core'
 import type { Attachment, Db, Message, Surface } from '@openbot/db'
 import type { BotComputer } from './computer.ts'
@@ -544,6 +547,13 @@ export class BotRuntime implements AgentRuntime {
             { minItems: 1, maxItems: maxQuestionOptions },
           ),
           allowText: Type.Optional(Type.Boolean({ description: 'Let the owner type their own answer instead' })),
+          dismissOnMoveOn: Type.Optional(
+            Type.Boolean({
+              description:
+                'Dismiss the card when the owner sends a new message without answering it. Set it only for low-stakes ' +
+                'questions that become moot if the owner moves on; keep it off for real decisions.',
+            }),
+          ),
         }),
         replay: 'safe',
         execute: async (args, api) => {
@@ -561,6 +571,7 @@ export class BotRuntime implements AgentRuntime {
               style: option.style ?? 'default',
             })),
             allowText: args.allowText ?? false,
+            dismissOnMoveOn: args.dismissOnMoveOn ?? false,
           }
           await options.askQuestion(bot, card, `${api.conversationId}:${api.callId}`)
           return {
@@ -850,9 +861,17 @@ export class BotRuntime implements AgentRuntime {
     return bot?.historyId ? this.#harness.conversation(toConversationId(bot.historyId), context) : undefined
   }
 
-  /** Configures the bot's history as the bot is now and submits `input`, after its earlier submissions. */
+  /**
+   * Configures the bot's history as the bot is now and submits `input`, after its earlier submissions. A run it starts
+   * in the bot's DM begins with the questions the owner left unanswered, each listed once.
+   */
   #submit(bot: BotWithChat, input: BotInput, whenBusy: 'steer' | 'followUp'): Promise<Submission> {
     return this.#serially(bot.id, async () => {
+      const unanswered = whenBusy === 'followUp' && !input.groupChatId ? await unansweredQuestions(this.#options.db, bot.chatId) : []
+      if (unanswered.length) {
+        const reminder = describeUnanswered(unanswered.map((question) => question.prompt))
+        input = { ...input, text: input.text ? `${reminder}\n\n${input.text}` : reminder }
+      }
       const history = await this.#history(bot)
       const others = (await listBots(this.#options.db)).filter((other) => other.id !== bot.id)
       const groups = await listGroups(this.#options.db, bot.id)
@@ -873,6 +892,7 @@ export class BotRuntime implements AgentRuntime {
         },
         context,
       )
+      await markReminded(this.#options.db, unanswered.map((question) => question.id))
       void this.#reportFailure(bot.id, submission)
       return submission
     })

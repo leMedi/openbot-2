@@ -79,6 +79,8 @@ export const questionCard = z.object({
   allowText: z.boolean(),
   /** Null while open; once answered, the card can't be answered again. */
   answer: questionAnswer.nullable(),
+  /** The owner dismissed the card unanswered, or it was dismissed when they moved on; it can't be answered any more. */
+  dismissed: z.boolean(),
 })
 export type QuestionCardInfo = z.infer<typeof questionCard>
 
@@ -181,8 +183,8 @@ export const chat = z.object({
   /** A bot posted since the owner last opened the chat. */
   unread: z.boolean(),
   /**
-   * The prompt of the newest question card still open, or the instruction of a take-over card still waiting: the chat
-   * needs the owner. Null when nothing waits.
+   * The prompt of the newest question card still open (neither answered nor dismissed), or the instruction of a
+   * take-over card still waiting: the chat needs the owner. Null when nothing waits.
    */
   waitingFor: z.string().nullable(),
   /** The newest message, for the sidebar's preview line; null when the chat is empty. */
@@ -488,6 +490,14 @@ export const contract = {
         summary: "Answer a bot's question card, once, and wake the bot with the answer",
       })
       .input(z.object({ messageId: z.string(), answer: questionAnswer }))
+      .output(message),
+    dismiss: oc
+      .route({
+        method: 'POST',
+        path: '/messages/{messageId}/dismiss',
+        summary: "Dismiss a bot's open question card unanswered, without waking the bot; it can't be answered afterwards",
+      })
+      .input(z.object({ messageId: z.string() }))
       .output(message),
     handBack: oc
       .route({

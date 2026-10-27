@@ -47,7 +47,10 @@ export type ChatSummary = Chat & {
   /** A group chat's name: its title, or its members' names; null for a DM. */
   name: string | null
   unread: boolean
-  /** The prompt of the newest open question card, or the instruction of a take-over card still waiting; else null. */
+  /**
+   * The prompt of the newest open (unanswered, undismissed) question card, or the instruction of a take-over card still
+   * waiting; else null.
+   */
   waitingFor: string | null
   lastMessage: Message | null
 }
@@ -67,7 +70,8 @@ export async function listChatSummaries(db: Db, chatIds?: readonly string[]): Pr
       waitingFor: sql<string | null>`(
         select coalesce(json_extract(${messages.card}, '$.prompt'), json_extract(${messages.card}, '$.instruction')) from ${messages}
         where ${messages.chatId} = ${chats.id} and json_extract(${messages.card}, '$.type') in ('question', 'take_over')
-          and ${messages.cardState} is null
+          and json_extract(${messages.cardState}, '$.answer') is null and json_extract(${messages.cardState}, '$.dismissed') is null
+          and json_extract(${messages.cardState}, '$.outcome') is null
         order by ${messages.id} desc limit 1
       )`,
       lastMessage: messages,

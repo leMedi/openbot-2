@@ -310,12 +310,14 @@ function MessageList({
   loading: boolean
   onResend: (entry: Outgoing) => void
   onDiscard: (entry: Outgoing) => void
-  /** A card was answered or handed back: the server's message as it is now. */
+  /** A card was answered, dismissed or handed back: the server's message as it is now. */
   onAnswered: (message: MessageInfo) => void
   onScreen?: (takeOver: boolean) => void
 }) {
-  // Letter keys answer the newest open question only.
-  const newestOpenQuestion = [...rows].reverse().find((row) => row.message?.card?.type === 'question' && !row.message.card.answer)?.key
+  // Letter keys answer the newest open question only, skipping dismissed ones.
+  const newestOpenQuestion = [...rows]
+    .reverse()
+    .find((row) => row.message?.card?.type === 'question' && !row.message.card.answer && !row.message.card.dismissed)?.key
   return (
     <div className="px-[max(30px,calc((100%-690px)/2))] pt-2 pb-7">
       {loading && <p className="text-center text-muted-foreground">Loading…</p>}

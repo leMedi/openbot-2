@@ -1,6 +1,6 @@
 import { type AuditEntryInfo, type BotInfo, type CardInfo, type ChatInfo, deletedAuthorName, type MessageInfo } from '@openbot/api-contract'
 import type { BotStatus } from '@openbot/agent'
-import { type BotWithChat, type ChatSummary, handBackOutcomeOf, isQuestionCard, isTakeOverCard, questionAnswerOf } from '@openbot/core'
+import { type BotWithChat, type ChatSummary, handBackOutcomeOf, isQuestionCard, isTakeOverCard, questionAnswerOf, questionDismissedOf } from '@openbot/core'
 import type { AuditEntry, Message } from '@openbot/db'
 
 /**
@@ -28,7 +28,7 @@ export function toMessageInfo(message: Message): MessageInfo {
 
 /** A message's card with its answer or outcome, or null when it is no card. */
 function toCardInfo(message: Message): CardInfo | null {
-  if (isQuestionCard(message.card)) return { ...message.card, answer: questionAnswerOf(message) }
+  if (isQuestionCard(message.card)) return { ...message.card, answer: questionAnswerOf(message), dismissed: questionDismissedOf(message) }
   // The goal is the bot's, for when it goes on; the owner sees the instruction.
   if (isTakeOverCard(message.card)) return { type: 'take_over', instruction: message.card.instruction, outcome: handBackOutcomeOf(message) }
   return null
