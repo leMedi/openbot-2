@@ -37,7 +37,7 @@ Not planned: bots creating bots, bot-written or user-written skills (all skills 
 ### 2.1 Single owner, single container
 
 - One instance belongs to one person. There are no user rows; the server has a `getOwner(request)` seam so auth can be added later in one place.
-- **No auth for now.** The host is private and reached over Tailscale. The compose sample includes an optional Tailscale sidecar (`tailscale serve`) for HTTPS on the tailnet, which the browser needs for clipboard and microphone.
+- **No auth for now** (ADR 0003). OpenBot runs on private networks only and knows nothing about how they're kept private; protecting ports is not a priority. Over plain HTTP (not `localhost`) the browser blocks clipboard and microphone; HTTPS, if wanted, comes from whatever the owner puts in front.
 - One container runs everything under supervisord:
   - `openbot` server (TanStack Start): UI, `/api/*`, SSE, the screen-stream proxy (`/api/screens/:botId/stream`), agent runtime, scheduler, MCP manager. Runs as user `openbot-server`.
   - `openbot-desktopd`: owns every bot's Xvfb, Openbox, Chromium, x11vnc and cua-driver. Runs as user `openbot`. Talks to the server over a Unix socket. Displays survive server restarts.
