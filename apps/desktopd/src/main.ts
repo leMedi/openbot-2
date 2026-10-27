@@ -11,7 +11,7 @@ const socketPath = process.env.OPENBOT_DESKTOPD_SOCKET || '/run/openbot/desktopd
 const log = (message: string) => console.log(`[desktopd] ${message}`)
 
 const sandbox = await userNamespacesAllowed()
-if (!sandbox) log("this host doesn't allow user namespaces: bots' browsers run without Chromium's sandbox")
+if (!sandbox) log("this host doesn't allow user namespaces: bots' browsers run without Chrome's sandbox")
 
 const manager = new ScreenManager({
   programs: screenPrograms(home, { sandbox }),

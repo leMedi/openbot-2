@@ -38,7 +38,7 @@ services:
       - ui-node-modules:/opt/openbot/current/packages/ui/node_modules
       - scripts-node-modules:/opt/openbot/current/scripts/node_modules
       - evals-node-modules:/opt/openbot/current/evals/node_modules
-    # Chromium needs more shared memory than Docker's 64 MB default.
+    # Chrome needs more shared memory than Docker's 64 MB default.
     shm_size: 1gb
 
 volumes:

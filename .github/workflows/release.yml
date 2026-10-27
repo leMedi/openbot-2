@@ -68,7 +68,7 @@ jobs:
           load: true
           cache-from: type=gha,scope=dev
           cache-to: type=gha,scope=dev,mode=max
-      # Ubuntu 24.04 hosts keep unprivileged user namespaces from containers, which Chromium's sandbox needs; the screen
+      # Ubuntu 24.04 hosts keep unprivileged user namespaces from containers, which Chrome's sandbox needs; the screen
       # daemon would run the browsers without it, and the suite checks they run in it.
       - name: Allow user namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0

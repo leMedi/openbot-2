@@ -52,20 +52,20 @@ const freshSocket = (socket: string, command: string[]) => ({
 })
 
 /**
- * Whether this user may create user namespaces, which Chromium's sandbox needs (Debian's Chromium has no setuid helper).
- * Some hosts block them in containers, e.g. Ubuntu 24.04's AppArmor restriction on unprivileged user namespaces.
+ * Whether this user may create user namespaces, which Chrome's sandbox needs in a container (its setuid helper can't
+ * work without privileges Docker drops). Some hosts block them, e.g. Ubuntu 24.04's AppArmor restriction.
  */
 export const userNamespacesAllowed = () => new Promise<boolean>((resolve) => execFile('unshare', ['--user', 'true'], (error) => resolve(!error)))
 
 /**
- * A bot's screen: Xvfb at 1280×800, its own D-Bus session with an accessibility bus, Openbox, the bot's own Chromium
- * profile in its folder, x11vnc serving the stream on localhost, and cua-driver for the desktop tools. Chromium runs in
- * its sandbox unless `sandbox` is false.
+ * A bot's screen: Xvfb at 1280×800, its own D-Bus session with an accessibility bus, Openbox, Google Chrome with the
+ * bot's own profile in its folder, x11vnc serving the stream on localhost, and cua-driver for the desktop tools. Chrome
+ * runs in its sandbox unless `sandbox` is false.
  */
 export function screenPrograms(home: string, { sandbox }: { sandbox: boolean }): (screen: ScreenSpec) => Program[] {
   return ({ botId, display }) => {
     const bus = sessionBusSocket(display)
-    // Every program after the bus is in the screen's session, so apps on it (and Chromium) show up on its AT-SPI bus.
+    // Every program after the bus is in the screen's session, so apps on it (and Chrome) show up on its AT-SPI bus.
     const env = { DISPLAY: `:${display}`, HOME: home, DBUS_SESSION_BUS_ADDRESS: `unix:path=${bus}` }
     const driver = desktopDriverSocket(display)
     return [
@@ -85,8 +85,8 @@ export function screenPrograms(home: string, { sandbox }: { sandbox: boolean }):
       { name: 'at-spi', command: '/usr/libexec/at-spi-bus-launcher', args: ['--launch-immediately'], env },
       { name: 'openbox', command: 'openbox', args: [], env },
       {
-        name: 'chromium',
-        command: 'chromium',
+        name: 'chrome',
+        command: 'google-chrome',
         args: [
           `--user-data-dir=${profileFolder(home, botId)}`,
           '--no-first-run',

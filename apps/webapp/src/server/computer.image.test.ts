@@ -29,7 +29,7 @@ function screenPids(botId: string): Promise<Record<string, number>> {
 }
 
 // Seam 2 on the real computer: the screen daemon running as openbot under supervisord, the bots' shell, each screen's
-// Chromium over CDP, loading pages this test serves on localhost, and each screen's cua-driver driving Mousepad.
+// Chrome over CDP, loading pages this test serves on localhost, and each screen's cua-driver driving Mousepad.
 describe.skipIf(!inRuntimeImage)('the real computer', () => {
   describeComputerContract(
     'the real computer',
@@ -227,13 +227,13 @@ describe.skipIf(!inRuntimeImage)('bots on the real computer', () => {
     expect(existsSync(join(server.home, 'bots', ada.id, 'chromium'))).toBe(true)
   })
 
-  it("run their browser in Chromium's sandbox", { timeout: 120_000 }, async () => {
+  it("run their browser in Chrome's sandbox", { timeout: 120_000 }, async () => {
     const server = await start()
     const rex = await server.client.bots.create(newBot('Rex'))
     await expect.poll(async () => (await server.client.screens.status({ botId: rex.id })).state, { timeout: 60_000 }).toBe('running')
     const display = (await connectScreens({ socketPath }).status(rex)).display!
 
-    // Chromium's own report: its pages run in their own user namespace, with seccomp-bpf on top.
+    // Chrome's own report: its pages run in their own user namespace, with seccomp-bpf on top.
     const report = await pageText(9222 + display, 'chrome://sandbox', 'sandboxed')
 
     expect(report).toContain('You are adequately sandboxed.')
@@ -265,7 +265,7 @@ describe.skipIf(!inRuntimeImage)('bots on the real computer', () => {
     expect(existsSync(join(server.home, 'bots', rex.id, 'chromium'))).toBe(false)
   })
 
-  it('complete a browser task in their own Chromium through use_computer', { timeout: 120_000 }, async () => {
+  it('complete a browser task in their own Chrome through use_computer', { timeout: 120_000 }, async () => {
     const pages = await servePages()
     try {
       const socks = pages.page('socks', { title: 'Socks', elements: [{ role: 'heading', name: 'Socks' }, { role: 'text', name: 'Wool socks: $5' }] })
@@ -277,7 +277,7 @@ describe.skipIf(!inRuntimeImage)('bots on the real computer', () => {
         callsTools(['use_computer', { goal: 'Find the price of socks', reason: 'Testing the browser', startUrl: shop }]),
         callsTools(['browser_snapshot', {}]),
         // The link is the second element with a reference on the page's first snapshot.
-        // Chromium's tree, as the fake's: the heading is e1, the link e2.
+        // Chrome's tree, as the fake's: the heading is e1, the link e2.
         callsTools(['browser_click', { ref: 'e2' }]),
         says('Wool socks cost $5.'),
         callsTools(['sendMessage', { text: 'Socks are $5' }]),

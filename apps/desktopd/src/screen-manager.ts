@@ -91,7 +91,7 @@ class Screen {
   async #launch(program: Program): Promise<void> {
     const child = spawn(program.command, program.args, {
       env: { ...process.env, ...program.env },
-      // Its own process group, so stopping it also stops what it started (Chromium's many processes).
+      // Its own process group, so stopping it also stops what it started (Chrome's many processes).
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })

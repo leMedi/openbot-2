@@ -20,7 +20,7 @@ services:
       - openbot-data:/var/lib/openbot
       - openbot-home:/home/openbot
       - openbot-app:/opt/openbot
-    # Chromium needs more shared memory than Docker's 64 MB default.
+    # Chrome needs more shared memory than Docker's 64 MB default.
     shm_size: 1gb
 
 volumes:

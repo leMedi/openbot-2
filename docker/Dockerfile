@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # OpenBot's one container (ADR 0002): the server, every bot's screen and the bots' shell on one computer.
-#   runtime  what users run: Debian, Node, Chromium, Xvfb, Openbox, x11vnc + websockify, AT-SPI, cua-driver, supervisord,
+#   runtime  what users run: Debian, Node, Google Chrome, Xvfb, Openbox, x11vnc + websockify, AT-SPI, cua-driver, supervisord,
 #            and the release it was built with (design §2.4)
 #   dev      the same system plus the toolchain, without a release; docker/compose.dev.yml runs the bind-mounted repo
 #            with hot reload
@@ -8,8 +8,7 @@
 # target takes as a build context: `docker build docker --target runtime --build-context release=<dir>`, where <dir>
 # holds a release built by `pnpm release:package --out <dir>`.
 
-# Debian trixie, pinned by digest: bumping it means updating both. Debian ships Chromium as a signed apt package for
-# amd64 and arm64.
+# Debian trixie, pinned by digest: bumping it means updating both.
 ARG DEBIAN_IMAGE=debian:trixie-20261020@sha256:4c25275446ca371766b8b093c696782eabce06263fccacb8d5d813b3dc44b308
 
 # cua-driver (MIT, https://github.com/trycua/cua) drives the desktop apps on bots' screens. A pinned release, checked
@@ -51,6 +50,23 @@ RUN case "${TARGETARCH}" in \
  && mkdir /out \
  && tar -xzf "${tarball}" -C /out --no-same-owner cua-driver
 
+# Google Chrome comes from Google's apt repository, which publishes it for amd64 and arm64, signed with Google's Linux
+# signing key. The key is checked here against the fingerprint recorded below; only the keyring reaches the runtime
+# image. The repository keeps only the latest Chrome, so each build installs the stable release of the day.
+FROM ${DEBIAN_IMAGE} AS chrome-key
+
+ARG CHROME_KEY_FINGERPRINT=EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl gpg \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN cd /tmp \
+ && curl -fsSL --retry 3 -o key.asc https://dl.google.com/linux/linux_signing_key.pub \
+ && test "$(gpg --show-keys --with-colons key.asc | awk -F: '$1 == "pub" { pub = 1; next } pub && $1 == "fpr" { print $10; pub = 0 }')" = "${CHROME_KEY_FINGERPRINT}" \
+ && mkdir /out \
+ && gpg --dearmor -o /out/google-chrome.gpg key.asc
+
 FROM ${DEBIAN_IMAGE} AS base
 
 ARG TARGETARCH
@@ -60,15 +76,22 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     TZ=UTC
 
+# Google's repository is HTTPS-only, so the certificates come first. Chrome's package then replaces this source with
+# its own, signed by the same keyring.
+COPY --from=chrome-key /out/google-chrome.gpg /usr/share/keyrings/google-chrome.gpg
 RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && echo "deb [arch=${TARGETARCH} signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
+      > /etc/apt/sources.list.d/google-chrome.list \
+ && apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates curl xz-utils openssl sudo procps less tzdata \
       supervisor \
       xvfb openbox x11vnc websockify xdotool x11-utils dbus-x11 \
       fonts-liberation fonts-noto-color-emoji \
       at-spi2-core mousepad \
-      chromium \
- && chromium --version \
+      google-chrome-stable \
+ && google-chrome --version \
  && rm -rf /var/lib/apt/lists/*
 
 # Desktop control (design §4): each screen runs its own cua-driver, which reads apps through AT-SPI (at-spi2-core) and
