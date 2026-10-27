@@ -50,6 +50,8 @@ export type TestServerOptions = {
   realComputer?: boolean
   /** Model providers beside the scripted fakes, e.g. pi's built-in ones for evals on real models. */
   modelProviders?: readonly ModelProvider[]
+  /** How long a computer-use session may work before it is stopped, instead of 15 minutes. */
+  computerUseLimitMs?: number
 }
 
 /**

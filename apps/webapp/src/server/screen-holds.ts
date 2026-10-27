@@ -1,7 +1,7 @@
 /** How long a hold lasts unless renewed: the pane renews it while the owner has the screen, so a closed tab lets go. */
 export const holdTtlMs = 60_000
 
-type Hold = { timer: ReturnType<typeof setTimeout>; expiresAt: number; released: Promise<void>; release: () => void }
+type Hold = { timer: ReturnType<typeof setTimeout>; since: number; expiresAt: number; released: Promise<void>; release: () => void }
 
 /**
  * Which bots' screens the owner holds (has taken over), kept in the server's memory. Computer-use sessions wait while a
@@ -10,6 +10,8 @@ type Hold = { timer: ReturnType<typeof setTimeout>; expiresAt: number; released:
  */
 export class ScreenHolds {
   readonly #holds = new Map<string, Hold>()
+  /** How long each bot's screen was held, holds that ended only. */
+  readonly #heldMs = new Map<string, number>()
   readonly #ttlMs: number
 
   constructor(ttlMs = holdTtlMs) {
@@ -28,21 +30,29 @@ export class ScreenHolds {
     }
     let release!: () => void
     const released = new Promise<void>((resolve) => (release = resolve))
-    this.#holds.set(botId, { timer: this.#expire(botId), expiresAt, released, release })
+    this.#holds.set(botId, { timer: this.#expire(botId), since: Date.now(), expiresAt, released, release })
     return { expiresAt }
   }
 
-  /** Hands the bot's screen back; sessions waiting for it go on. */
-  release(botId: string): void {
+  /** Hands the bot's screen back; sessions waiting for it go on. Returns whether it was held. */
+  release(botId: string): boolean {
     const held = this.#holds.get(botId)
-    if (!held) return
+    if (!held) return false
     clearTimeout(held.timer)
     this.#holds.delete(botId)
+    this.#heldMs.set(botId, (this.#heldMs.get(botId) ?? 0) + Date.now() - held.since)
     held.release()
+    return true
   }
 
   isHeld(botId: string): boolean {
     return this.#holds.has(botId)
+  }
+
+  /** How long the bot's screen has been held in all, a hold still on included: time its sessions spent waiting. */
+  heldMs(botId: string): number {
+    const held = this.#holds.get(botId)
+    return (this.#heldMs.get(botId) ?? 0) + (held ? Date.now() - held.since : 0)
   }
 
   /** Resolves once the bot's screen isn't held: at once when it isn't. */

@@ -154,6 +154,10 @@ export type BotRuntimeOptions = {
   requestTakeOver(bot: BotWithChat, card: TakeOverCard, idempotencyKey: string): Promise<void>
   /** Resolves once the owner isn't holding the bot's screen; computer-use sessions wait for it before each action. */
   screenFree(botId: string): Promise<void>
+  /** How long the owner has held the bot's screen in all, a hold still on included; sessions' time limits leave it out. */
+  screenHeldMs(botId: string): number
+  /** How long a computer-use session may work before it is stopped; 15 minutes when absent, shorter in tests. */
+  computerUseLimitMs?: number
   /** A bot's status changed: it started or finished working, or a run failed. */
   onStatus(botId: string, status: BotStatus): void
 }
@@ -390,6 +394,8 @@ export class BotRuntime implements AgentRuntime {
         return parseModelRef(model)
       },
       screenFree: (bot) => options.screenFree(bot.id),
+      screenHeldMs: (bot) => options.screenHeldMs(bot.id),
+      limitMs: options.computerUseLimitMs,
       waitingTakeOver: async (bot) => (await findWaitingTakeOver(options.db, bot.chatId))?.card.instruction ?? null,
       requestTakeOver: options.requestTakeOver,
     })

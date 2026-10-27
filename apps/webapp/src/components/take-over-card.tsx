@@ -7,6 +7,8 @@ const status = {
   waiting: { label: 'Action needed', dot: 'bg-amber' },
   done: { label: 'Done', dot: 'bg-green' },
   skipped: { label: 'Skipped', dot: 'bg-muted-foreground' },
+  // The owner let go of the screen without saying; the bot checks it.
+  viewer_closed: { label: 'Handed back', dot: 'bg-muted-foreground' },
 } as const
 
 /**

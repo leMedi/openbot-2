@@ -72,6 +72,7 @@ export async function createServerContext({
   screens,
   screenTickets,
   tools,
+  computerUseLimitMs,
 }: {
   db: Db
   /** Encrypts system credentials. */
@@ -95,6 +96,8 @@ export async function createServerContext({
   screenTickets: ScreenTickets
   /** Tools beyond the built-in ones, e.g. a test's. */
   tools?: BotTool[]
+  /** How long a computer-use session may work; 15 minutes when absent, shorter in tests. */
+  computerUseLimitMs?: number
 }): Promise<ServerContext> {
   const bus = new EventBus<LiveEvent>()
   const screenHolds = new ScreenHolds()
@@ -142,6 +145,7 @@ export async function createServerContext({
     browser,
     desktop,
     tools,
+    computerUseLimitMs,
     async sendMessage(bot, chatId, { text, attachments: files }, idempotencyKey) {
       await postBotMessage(bot, chatId, text, files, idempotencyKey)
     },
@@ -217,6 +221,7 @@ export async function createServerContext({
       await publish(bot.chatId)
     },
     screenFree: (botId) => screenHolds.whenFree(botId),
+    screenHeldMs: (botId) => screenHolds.heldMs(botId),
     onStatus: (botId, status) => bus.publish({ type: 'bot.status', botId, ...status }),
   })
   opened(runtime)

@@ -27,12 +27,12 @@ function Dm() {
   const setControl = (on: boolean) => setControlled(on ? botId : undefined)
   const bot = live.bots?.find((entry) => entry.id === botId)
   // A take-over card handed back, in this tab or another, ends the owner's control of the screen.
-  const waitingTakeOver = bot && [...(live.messages.get(bot.chatId) ?? [])].reverse().find((message) => message.card?.type === 'take_over' && !message.card.outcome)?.id
-  const wasWaiting = useRef(waitingTakeOver)
+  const waitingTakeOver = bot && [...(live.messages.get(bot.chatId) ?? [])].reverse().find((message) => message.card?.type === 'take_over' && !message.card.outcome)
+  const wasWaiting = useRef(waitingTakeOver?.id)
   useEffect(() => {
     if (wasWaiting.current && !waitingTakeOver) setControlled(undefined)
-    wasWaiting.current = waitingTakeOver
-  }, [waitingTakeOver])
+    wasWaiting.current = waitingTakeOver?.id
+  }, [waitingTakeOver?.id])
   if (!bot) return live.bots ? <p className="m-auto text-muted-foreground">This bot doesn't exist.</p> : null
   return (
     <div className="flex min-h-0 flex-1">
@@ -55,7 +55,7 @@ function Dm() {
           }}
         />
       </div>
-      {pane === 'screen' && <ScreenPane bot={bot} control={control} onControl={setControl} />}
+      {pane === 'screen' && <ScreenPane bot={bot} control={control} onControl={setControl} takeOver={waitingTakeOver} />}
       {pane === 'profile' && (
         <ProfilePane
           bot={bot}

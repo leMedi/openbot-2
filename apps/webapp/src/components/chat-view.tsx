@@ -574,6 +574,7 @@ function Composer({
             </>
           )}
           <textarea
+            data-composer
             aria-label={label}
             placeholder={label}
             rows={2}
