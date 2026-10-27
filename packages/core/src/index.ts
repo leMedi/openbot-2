@@ -3,7 +3,7 @@ export { EventBus, type Stamp, type Stamped } from './events.ts'
 export { SecretBox } from './secret-box.ts'
 export { groupRoundRules } from './group-rules.ts'
 export { startScreen, syncScreens } from './screens.ts'
-export { createBot, deleteBot, findBotByHistory, getBot, NameTakenError, listBots, setBotHistory, updateBot, withDisplay, type BotProfile, type BotWithChat } from './bots.ts'
+export { createBot, deleteBot, findBotByHistory, findBotByName, getBot, NameTakenError, listBots, setBotHistory, updateBot, withDisplay, type BotProfile, type BotWithChat } from './bots.ts'
 export {
   ChatNotFoundError,
   createGroupChat,
@@ -15,6 +15,7 @@ export {
   listChatSummaries,
   listMessages,
   markChatRead,
+  maxBotMessageLength,
   postMessage,
   setPinnedChats,
 } from './chats.ts'

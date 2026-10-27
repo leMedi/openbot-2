@@ -262,7 +262,9 @@ function secondLine(bot: BotInfo, chat: ChatInfo | undefined, draft: string | un
   const last = chat?.lastMessage
   if (last) {
     const text = previewText(last.text) || (last.attachments.length ? summarizeAttachments(last.attachments) : '')
-    return { text: (last.author === 'owner' ? 'You: ' : '') + text, className: 'text-muted-foreground' }
+    // A message between bots shows who it went to or came from: "→ Ana: …", "← Rex: …".
+    const prefix = last.botMessage ? `${last.botMessage.direction === 'to' ? '→' : '←'} ${last.botMessage.name}: ` : last.author === 'owner' ? 'You: ' : ''
+    return { text: prefix + text, className: 'text-muted-foreground' }
   }
   return { text: bot.title ?? 'No messages yet', className: 'text-muted-foreground' }
 }

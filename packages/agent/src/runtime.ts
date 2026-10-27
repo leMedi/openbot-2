@@ -39,10 +39,13 @@ import {
   type BotInput,
   type BotWithChat,
   findBotByHistory,
+  findBotByName,
   findWaitingTakeOver,
   getBot,
+  type Lane,
   listBots,
   maxAttachments,
+  maxBotMessageLength,
   maxQuestionOptions,
   mimeTypeOf,
   type Orchestrator,
@@ -53,7 +56,7 @@ import {
   reviewAction,
   setBotHistory,
 } from '@openbot/core'
-import type { Attachment, Db, Surface } from '@openbot/db'
+import type { Attachment, Db, Message, Surface } from '@openbot/db'
 import type { BotComputer } from './computer.ts'
 import { computerUse, type UseComputerDetails } from './computer-use.ts'
 
@@ -85,6 +88,9 @@ To send the owner a file from your computer, such as a report or a screenshot, a
 When your screen needs the owner (a login, a captcha, a two-factor code, a payment), use_computer asks them to take it over on a card and ends your turn; their handing the screen back wakes you, and you go on from there.
 
 When you need the owner to decide before you go on, ask with askQuestion: a short prompt and up to six options they can pick with one click. Asking ends your turn, so send anything else first; their answer wakes you as their next message.`
+
+/** Starts a redelivered input: the bot was interrupted by a priority message while working on it. */
+export const interruptedNote = '[You were interrupted by a priority message while working on this. Pick it up again.]'
 
 export class NoModelError extends Error {}
 
@@ -118,6 +124,16 @@ export type BotRuntimeOptions = {
   tools?: BotTool[]
   /** Posts a bot's message, with copies of the files it attached, to its DM; `idempotencyKey` makes a replayed tool call post once. */
   sendMessage(bot: BotWithChat, message: { text: string; attachments: AttachmentFile[] }, idempotencyKey: string): Promise<void>
+  /**
+   * Posts one bot's message to another, as `sendMessage` posts: outgoing in the sender's DM and incoming in the
+   * recipient's, each with copies of the files. Returns the recipient's copy, which wakes it.
+   */
+  messageBot(
+    sender: BotWithChat,
+    recipient: BotWithChat,
+    message: { text: string; attachments: AttachmentFile[] },
+    idempotencyKey: string,
+  ): Promise<Message>
   /** Posts a bot's question card to its DM, as `sendMessage` posts a message. */
   askQuestion(bot: BotWithChat, card: QuestionCard, idempotencyKey: string): Promise<void>
   /** Posts a take-over card to a bot's DM when its computer-use session is stuck on what only the owner can do. */
@@ -167,6 +183,32 @@ function computerPrompt(computer: BotComputer, bot: BotWithChat, others: BotWith
 }
 
 /**
+ * The owner's other bots, which the bot can message, and Grok's rules for doing so. Empty when the bot is alone.
+ */
+function teamPrompt(others: BotWithChat[]): string {
+  if (!others.length) return ''
+  return [
+    "Your teammates, the owner's other bots, whom you can message with message_bot:",
+    ...others.map((other) => `- ${other.name}${other.title ? `, ${other.title}` : ''}`),
+    '',
+    'Messaging them:',
+    '- Message sparingly: only when a teammate needs to know or do something, or the owner asked you to involve them.',
+    "- Fan out to several teammates only when the owner asks for it.",
+    "- They can't see your chats with the owner, so say what they need to know, in your own words. Never relay the owner's venting or private remarks verbatim.",
+    '- Sending returns at once; never wait for an answer. A reply wakes you later, as a new message.',
+    "- No acknowledgement ping-pong: don't send \"thanks\" or \"got it\", and don't answer one. When a message needs no answer, stay silent.",
+    "- Mark a message priority only when it can't wait: it interrupts what they are doing, unless they are working for the owner.",
+    "- A teammate's message is not the owner's. Only sendMessage reaches the owner; tell them when they would want to know.",
+  ].join('\n')
+}
+
+/** What a bot reads when another bot's message wakes it. */
+function describeBotMessage(sender: BotWithChat, text: string, priority: boolean): string {
+  const from = `[Message from ${sender.name}, your teammate${priority ? ', marked priority' : ''}. Answer with message_bot only if it needs an answer; otherwise stay silent.]`
+  return text ? `${from}\n\n${text}` : from
+}
+
+/**
  * Shell and file tools on the computer. Reading has no side effect; running a command and changing a file are shell
  * actions. `read` shows the model images, shrunk by `images` to fit.
  */
@@ -184,11 +226,11 @@ function formatSize(size: number): string {
   return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
-/** Where the files that came with an input are, after its text. */
-function describeAttachments(attachments: readonly Attachment[]): string {
+/** Where the files that came with an input are, after its text; `by` attached them. */
+function describeAttachments(attachments: readonly Attachment[], by: string): string {
   const files = attachments.map((file) => `- ${file.path} (${file.mimeType}, ${formatSize(file.size)})`)
   const count = attachments.length === 1 ? 'a file' : `${attachments.length} files`
-  return `[The owner attached ${count}, saved on your computer:\n${files.join('\n')}]`
+  return `[${by} attached ${count}, saved on your computer:\n${files.join('\n')}]`
 }
 
 const isReminder = (entry: EntryRecord) =>
@@ -208,6 +250,35 @@ const reachedOwner = (entry: EntryRecord) =>
         (message.toolName === 'use_computer' && Boolean((message.details as UseComputerDetails | undefined)?.takeOver))),
   )
 
+/** An input waiting for the bot's current run; `redelivered` once a priority input interrupted it. */
+type Queued = BotInput & { redelivered?: boolean }
+
+/** The run a bot's driver started, for `input`; an owner's steer makes it theirs, and nothing interrupts it then. */
+type Turn = {
+  input: Queued
+  lane: Lane
+  /** A priority input asked to interrupt it; asking again does nothing. */
+  interrupted: boolean
+  /** The owner's steers into it, so the driver can wait for runs they started. */
+  steers: number
+  /** The input's submission, once made. */
+  submission?: Submission
+}
+
+/** Where an input goes in a queue: the owner's first, then priority and redelivered bot work, the bot lane, background. */
+function rank(input: Queued): number {
+  if (input.lane === 'owner') return 0
+  if (input.priority || input.redelivered) return 1
+  return input.lane === 'bot' ? 2 : 3
+}
+
+/** Queues `input` after everything of its rank or higher. */
+function enqueue(queue: Queued[], input: Queued) {
+  const at = queue.findIndex((queued) => rank(queued) > rank(input))
+  if (at === -1) queue.push(input)
+  else queue.splice(at, 0, input)
+}
+
 /**
  * Runs bots on pi-durable (ADR 0005): each bot's history is one pi conversation (ADR 0001), and `sendMessage` and
  * `askQuestion` are the only ways a bot reaches a chat.
@@ -219,8 +290,17 @@ export class BotRuntime implements AgentRuntime {
   readonly #images: ImageProcessor
   /** Serialises creating a bot's history. */
   readonly #histories = new Map<string, Promise<Conversation>>()
-  /** Bots with a run going, and a token of each one's latest wake, so an idle wait can tell it was overtaken. */
-  readonly #working = new Map<string, object>()
+  /** Each bot's work waiting for its current run, in the order it will run (see `rank`). */
+  readonly #queues = new Map<string, Queued[]>()
+  /** The run each bot's driver started and is waiting on. */
+  readonly #turns = new Map<string, Turn>()
+  /** Bots whose driver is running their queue. */
+  readonly #drivers = new Set<string>()
+  /** Serialises submitting each bot's inputs, so they reach its history in the order they were woken. */
+  readonly #submitting = new Map<string, Promise<unknown>>()
+  /** Bots working, as last reported. */
+  readonly #working = new Set<string>()
+  #closed = false
   /** Why each bot's latest run failed. */
   readonly #errors = new Map<string, string>()
 
@@ -267,6 +347,21 @@ export class BotRuntime implements AgentRuntime {
       waitingTakeOver: async (bot) => (await findWaitingTakeOver(options.db, bot.chatId))?.card.instruction ?? null,
       requestTakeOver: options.requestTakeOver,
     })
+    /** Files on the bot's computer to attach, read before posting so a missing file fails the call and posts nothing. */
+    const readAttachments = (bot: BotWithChat, paths: readonly string[]) =>
+      Promise.all(
+        paths.map(async (path): Promise<AttachmentFile> => {
+          const file = await options.computer.readFile(bot, path)
+          const name = basename(file.path)
+          return { name, mimeType: mimeTypeOf(name), path: file.path, bytes: file.bytes }
+        }),
+      )
+    const attachmentsParameter = Type.Optional(
+      Type.Array(Type.String(), {
+        description: 'Paths of files on your computer to attach, absolute or relative to your folder',
+        maxItems: maxAttachments,
+      }),
+    )
     const sendMessage: BotTool = {
       // Messages are never reviewed, whether to the owner or another bot.
       surface: null,
@@ -277,12 +372,7 @@ export class BotRuntime implements AgentRuntime {
           'only way the owner sees anything from you.',
         parameters: Type.Object({
           text: Type.String({ description: 'The message, in Markdown; may be empty when you attach files' }),
-          attachments: Type.Optional(
-            Type.Array(Type.String(), {
-              description: 'Paths of files on your computer to attach, absolute or relative to your folder',
-              maxItems: maxAttachments,
-            }),
-          ),
+          attachments: attachmentsParameter,
         }),
         // A replayed call finds the message it already posted.
         replay: 'safe',
@@ -290,19 +380,69 @@ export class BotRuntime implements AgentRuntime {
           const bot = await botOf(api.conversationId)
           const paths = args.attachments ?? []
           if (!args.text.trim() && !paths.length) throw new Error('Write a message or attach a file')
-          // Read before posting, so a missing file fails the call and posts nothing.
-          const attachments = await Promise.all(
-            paths.map(async (path): Promise<AttachmentFile> => {
-              const file = await options.computer.readFile(bot, path)
-              const name = basename(file.path)
-              return { name, mimeType: mimeTypeOf(name), path: file.path, bytes: file.bytes }
-            }),
-          )
+          const attachments = await readAttachments(bot, paths)
           await options.sendMessage(bot, { text: args.text, attachments }, `${api.conversationId}:${api.callId}`)
           // A run ends only when every call of its last round asks it to, so a message sent beside a question must too.
           const round = (await api.snapshot(LiveDoc, api.conversationId, context))?.tools ?? []
           const asks = round.some((slot) => slot.name === 'askQuestion')
           return { output: [{ type: 'text', text: 'Sent.' }], ...(asks && { control: { terminate: true } }) }
+        },
+      }),
+    }
+    // Grok's SendToAgent: asynchronous, never reviewed, shown in both bots' DMs.
+    const messageBot: BotTool = {
+      surface: null,
+      tool: defineTool({
+        name: 'message_bot',
+        description:
+          "Send one of your teammates, the owner's other bots, a message. It returns at once: never wait for an answer; " +
+          'a reply, if any, wakes you later. The owner sees it in both your chats.',
+        parameters: Type.Object({
+          to: Type.String({ description: "The teammate's name, e.g. Rex" }),
+          text: Type.String({ description: `The message, in Markdown, at most ${maxBotMessageLength} characters; may be empty when you attach files` }),
+          attachments: attachmentsParameter,
+          priority: Type.Optional(
+            Type.Boolean({
+              description: "Only when it can't wait: it goes ahead of their other work and interrupts it, unless they are working for the owner",
+            }),
+          ),
+        }),
+        // A replayed call finds the messages it already posted, and the recipient's history the input it was woken with.
+        replay: 'safe',
+        execute: async (args, api) => {
+          const sender = await botOf(api.conversationId)
+          const recipient = await findBotByName(options.db, args.to)
+          if (!recipient) {
+            const others = (await listBots(options.db)).filter((bot) => bot.id !== sender.id).map((bot) => bot.name)
+            const team = others.length ? `Your teammates are ${others.join(', ')}.` : 'You have no teammates.'
+            throw new Error(`There is no bot named ${args.to}. ${team}`)
+          }
+          if (recipient.id === sender.id) throw new Error("You can't message yourself")
+          const paths = args.attachments ?? []
+          if (!args.text.trim() && !paths.length) throw new Error('Write a message or attach a file')
+          if (args.text.length > maxBotMessageLength) {
+            throw new Error(
+              `Messages to bots are at most ${maxBotMessageLength} characters; this one has ${args.text.length}. ` +
+                'Shorten it, or write the details to a file and attach it.',
+            )
+          }
+          const attachments = await readAttachments(sender, paths)
+          const incoming = await options.messageBot(sender, recipient, { text: args.text, attachments }, `${api.conversationId}:${api.callId}`)
+          const priority = args.priority ?? false
+          try {
+            await runtime!.wake(recipient.id, {
+              lane: 'bot',
+              text: describeBotMessage(sender, args.text, priority),
+              attachments: incoming.attachments,
+              id: incoming.id,
+              priority,
+            })
+          } catch (error) {
+            return { output: [{ type: 'text', text: `Posted, but ${recipient.name} can't be woken: ${(error as Error).message}` }] }
+          }
+          return {
+            output: [{ type: 'text', text: `Sent to ${recipient.name}. Don't wait for an answer: a reply, if any, wakes you later.` }],
+          }
         },
       }),
     }
@@ -355,7 +495,7 @@ export class BotRuntime implements AgentRuntime {
     // A computer-use session is reviewed, and logged with its reason, as a whole; its browser and desktop tools are not
     // one by one.
     const useComputer: BotTool = { surface: 'computer_session', tool: computerUseSessions.useComputer }
-    const tools = [sendMessage, askQuestion, ...computerTools(images), useComputer, ...(options.tools ?? [])]
+    const tools = [sendMessage, messageBot, askQuestion, ...computerTools(images), useComputer, ...(options.tools ?? [])]
     const toolSurfaces = new Map<string, Surface | null>([
       ...tools.map(({ surface, tool }) => [tool.name, surface] as const),
       // Sessions don't select this extension, so its hooks shouldn't see their browser and desktop tools; if they ever
@@ -417,45 +557,45 @@ export class BotRuntime implements AgentRuntime {
     return runtime
   }
 
+  /**
+   * Queues `input` (see `AgentRuntime.wake`). Each bot has one driver, which runs its queue one input at a time: it
+   * submits the next input once its history is idle and waits for the run to end. The owner steers a run that is going
+   * instead of queueing, and the run is theirs from then on.
+   */
   async wake(botId: string, input: BotInput): Promise<void> {
     const bot = await getBot(this.#options.db, botId)
     if (!bot) throw new Error(`Unknown bot ${botId}`)
-    const model = bot.model ?? (await readModelSettings(this.#options.db)).defaultModel
-    if (!model) throw new NoModelError('Choose a default model first')
-    const history = await this.#history(bot)
-    const others = (await listBots(this.#options.db)).filter((other) => other.id !== bot.id)
-    const instructions = `${botPrompt(bot)}\n\n${computerPrompt(this.#options.computer, bot, others)}`
-    await history.configure({ model: parseModelRef(model), instructions }, context)
-
+    await this.#model(bot)
     this.#errors.delete(botId)
-    const submission = await history.submit(
-      {
-        type: 'input',
-        content: await this.#content(bot, input),
-        requestId: input.id,
-        // The owner steers the current run; everything else waits its turn.
-        whenBusy: input.lane === 'owner' ? 'steer' : 'followUp',
-        entry: { kind: inputKind, data: { lane: input.lane } },
-      },
-      context,
-    )
-    // Marked once the input is queued, so an idle wait that ends before it can tell it was overtaken.
+    const turn = this.#turns.get(botId)
+    const queue = this.#queues.get(botId) ?? []
+    if (input.id && (turn?.input.id === input.id || queue.some((queued) => queued.id === input.id))) return
     this.#setWorking(botId)
-    void this.#untilIdle(botId, history)
-    void this.#reportFailure(botId, submission)
+    if (input.lane === 'owner' && turn) {
+      turn.lane = 'owner'
+      turn.steers++
+      await this.#submit(bot, input, 'steer')
+      return
+    }
+    enqueue(queue, input)
+    this.#queues.set(botId, queue)
+    if (input.priority && turn && turn.lane !== 'owner') this.#interrupt(botId, turn)
+    this.#drive(botId)
   }
 
   async stop(botId: string): Promise<void> {
-    const bot = await getBot(this.#options.db, botId)
-    if (!bot?.historyId) return
-    const wake = this.#working.get(botId)
-    await (await this.#harness.conversation(toConversationId(bot.historyId), context))?.abort(context)
-    // The abort resolves once the history is idle; report it now rather than when the idle wait notices, unless the
-    // bot was woken again meanwhile.
-    if (wake === this.#working.get(botId)) this.#setIdle(botId)
+    this.#queues.delete(botId)
+    const turn = this.#turns.get(botId)
+    const steers = turn?.steers
+    // After any submission under way, so an input being submitted now is aborted too.
+    await this.#serially(botId, async () => (await this.#existingHistory(botId))?.abort(context))
+    // The abort resolves once the history is idle; report it now rather than when the driver notices, unless the bot
+    // was woken again meanwhile.
+    if (!this.#queues.get(botId)?.length && this.#turns.get(botId)?.steers === steers) this.#setIdle(botId)
   }
 
   async forget({ id, name, historyId }: { id: string; name: string; historyId: string | null }): Promise<void> {
+    this.#queues.delete(id)
     if (historyId) await (await this.#harness.conversation(toConversationId(historyId), context))?.abort(context)
     try {
       await this.#options.computer.removeFolder({ id, name })
@@ -465,6 +605,7 @@ export class BotRuntime implements AgentRuntime {
     }
     // pi-durable can't delete a conversation, so the history stays in its storage with no bot to reach it.
     this.#histories.delete(id)
+    this.#submitting.delete(id)
     this.#working.delete(id)
     this.#errors.delete(id)
   }
@@ -474,6 +615,7 @@ export class BotRuntime implements AgentRuntime {
   }
 
   async close(): Promise<void> {
+    this.#closed = true
     await this.#harness.close(context)
     await this.#options.computer.close()
     await this.#options.desktop.close?.()
@@ -503,9 +645,10 @@ export class BotRuntime implements AgentRuntime {
   }
 
   /** What the model reads of an input: its text, where its files are, then its images. */
-  async #content(bot: BotWithChat, { text, attachments = [] }: BotInput): Promise<string | (TextContent | ImageContent)[]> {
+  async #content(bot: BotWithChat, { lane, text, attachments = [] }: BotInput): Promise<string | (TextContent | ImageContent)[]> {
     if (!attachments.length) return text
-    const parts: (TextContent | ImageContent)[] = [{ type: 'text', text: [text, describeAttachments(attachments)].filter(Boolean).join('\n\n') }]
+    const by = lane === 'bot' ? 'The sender' : 'The owner'
+    const parts: (TextContent | ImageContent)[] = [{ type: 'text', text: [text, describeAttachments(attachments, by)].filter(Boolean).join('\n\n') }]
     for (const file of attachments) {
       if (!file.mimeType.startsWith('image/')) continue
       try {
@@ -537,23 +680,111 @@ export class BotRuntime implements AgentRuntime {
     return history
   }
 
-  #setWorking(botId: string) {
-    const wasWorking = this.#working.has(botId)
-    this.#working.set(botId, {})
-    if (!wasWorking) this.#options.onStatus(botId, this.status(botId))
+  /** The bot's model, or `NoModelError`. */
+  async #model(bot: BotWithChat): Promise<ModelRef> {
+    const model = bot.model ?? (await readModelSettings(this.#options.db)).defaultModel
+    if (!model) throw new NoModelError('Choose a default model first')
+    return parseModelRef(model)
   }
 
-  async #untilIdle(botId: string, history: Conversation) {
-    try {
-      let wake
-      do {
-        wake = this.#working.get(botId)
-        await history.waitForIdle(context)
-      } while (wake !== this.#working.get(botId))
-    } catch {
-      // The Harness closed.
-    }
-    this.#setIdle(botId)
+  /** Runs `work` after the bot's earlier submissions and aborts, so they reach its history in the order they were made. */
+  #serially<T>(botId: string, work: () => Promise<T>): Promise<T> {
+    const done = (this.#submitting.get(botId) ?? Promise.resolve()).then(work, work)
+    this.#submitting.set(botId, done.catch(() => {}))
+    return done
+  }
+
+  /** The bot's history, if it has one yet. */
+  async #existingHistory(botId: string): Promise<Conversation | undefined> {
+    const pending = this.#histories.get(botId)
+    if (pending) return pending.catch(() => undefined)
+    const bot = await getBot(this.#options.db, botId)
+    return bot?.historyId ? this.#harness.conversation(toConversationId(bot.historyId), context) : undefined
+  }
+
+  /** Configures the bot's history as the bot is now and submits `input`, after its earlier submissions. */
+  #submit(bot: BotWithChat, input: BotInput, whenBusy: 'steer' | 'followUp'): Promise<Submission> {
+    return this.#serially(bot.id, async () => {
+      const history = await this.#history(bot)
+      const others = (await listBots(this.#options.db)).filter((other) => other.id !== bot.id)
+      const instructions = [botPrompt(bot), computerPrompt(this.#options.computer, bot, others), teamPrompt(others)].filter(Boolean).join('\n\n')
+      await history.configure({ model: await this.#model(bot), instructions }, context)
+      const submission = await history.submit(
+        {
+          type: 'input',
+          content: await this.#content(bot, input),
+          requestId: input.id,
+          whenBusy,
+          entry: { kind: inputKind, data: { lane: input.lane } },
+        },
+        context,
+      )
+      void this.#reportFailure(bot.id, submission)
+      return submission
+    })
+  }
+
+  /** Runs the bot's queue until it is empty, unless a driver already is. */
+  #drive(botId: string) {
+    if (this.#drivers.has(botId)) return
+    this.#drivers.add(botId)
+    void (async () => {
+      for (let input; !this.#closed && (input = this.#queues.get(botId)?.shift()); ) {
+        const turn: Turn = { input, lane: input.lane, interrupted: false, steers: 0 }
+        this.#turns.set(botId, turn)
+        try {
+          const bot = await getBot(this.#options.db, botId)
+          if (!bot) break // Deleted.
+          turn.submission = await this.#submit(bot, input, 'followUp')
+          const history = await this.#history(bot)
+          // Until the run ends, and any run an owner's steer started after it.
+          let steers
+          do {
+            steers = turn.steers
+            await history.waitForIdle(context)
+            await this.#submitting.get(botId)
+          } while (steers !== turn.steers)
+        } catch (error) {
+          if (this.#closed) break
+          console.error(`[agent] Bot ${botId}'s run couldn't start:`, error)
+          this.#errors.set(botId, (error as Error).message)
+          this.#options.onStatus(botId, this.status(botId))
+        } finally {
+          this.#turns.delete(botId)
+        }
+      }
+      this.#drivers.delete(botId)
+      if (!this.#queues.get(botId)?.length) this.#queues.delete(botId)
+      this.#setIdle(botId)
+    })()
+  }
+
+  /**
+   * A priority input interrupts `turn`: its run is aborted and its input queued again behind the priority one, once.
+   * Decided after the turn's submission, in order with the owner's steers: a run the owner steered meanwhile is theirs,
+   * and one that already ended has nothing to interrupt.
+   */
+  #interrupt(botId: string, turn: Turn) {
+    if (turn.interrupted) return
+    turn.interrupted = true
+    void this.#serially(botId, async () => {
+      if (turn.lane === 'owner' || this.#turns.get(botId) !== turn) return
+      const settled = turn.submission && (await turn.submission.status(context)).status
+      if (settled === 'done' || settled === 'unanswered') return
+      const { input } = turn
+      if (!input.redelivered) {
+        const queue = this.#queues.get(botId) ?? []
+        enqueue(queue, { ...input, text: `${interruptedNote}\n\n${input.text}`, id: input.id && `${input.id}:redelivered`, redelivered: true })
+        this.#queues.set(botId, queue)
+      }
+      await (await this.#existingHistory(botId))?.abort(context)
+    }).catch((error) => console.error(`[agent] Couldn't interrupt bot ${botId}:`, error))
+  }
+
+  #setWorking(botId: string) {
+    if (this.#working.has(botId)) return
+    this.#working.add(botId)
+    this.#options.onStatus(botId, this.status(botId))
   }
 
   #setIdle(botId: string) {

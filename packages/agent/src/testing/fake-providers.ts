@@ -165,6 +165,10 @@ export function createFakeProviders() {
   })
 
   const requests: { model: string; messages: Message[]; tools: string[] }[] = []
+  /** Turns scripted for one bot, by name; see `scriptFor`. */
+  const botTurns = new Map<string, (AssistantMessage | HeldTurn)[]>()
+  const answer = (turn: AssistantMessage | HeldTurn, signal: AbortSignal | undefined) =>
+    turn instanceof HeldTurn ? turn.answer(signal) : turn
 
   return {
     providers: [fake.provider, fakeDevice.provider] as Provider[],
@@ -177,7 +181,24 @@ export function createFakeProviders() {
             messages: [...context.messages],
             tools: toolNames(context.messages),
           })
-          return turn instanceof HeldTurn ? turn.answer(options?.signal) : turn
+          return answer(turn, options?.signal)
+        }),
+      )
+    },
+    /**
+     * Queues responses for the bot named `name` alone, one per request of its own in order, so bots working at once
+     * each get theirs whichever asks first. A request goes to the bot whose prompt says "You are <name>".
+     */
+    scriptFor(name: string, ...turns: (AssistantMessage | HeldTurn)[]) {
+      botTurns.set(name, [...(botTurns.get(name) ?? []), ...turns])
+      fake.faux.appendResponses(
+        turns.map(() => (context, options, _state, model) => {
+          const text = JSON.stringify(context.messages)
+          const bot = [...botTurns.keys()].find((candidate) => text.includes(`You are ${candidate},`) || text.includes(`You are ${candidate}.`))
+          const turn = bot && botTurns.get(bot)!.shift()
+          if (!turn) throw new Error(`No turn scripted for this request (${bot ?? 'no scripted bot'})`)
+          requests.push({ model: `${model.provider}/${model.id}`, messages: [...context.messages], tools: toolNames(context.messages) })
+          return answer(turn, options?.signal)
         }),
       )
     },
