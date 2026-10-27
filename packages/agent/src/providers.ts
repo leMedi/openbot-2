@@ -164,6 +164,8 @@ export class Providers {
     const reply = await this.models.completeSimple(
       model,
       { systemPrompt, messages: [{ role: 'user', content: prompt, timestamp: Date.now() }] },
+      // A fresh session per request: some providers (OpenCode Go) refuse requests without one.
+      { sessionId: crypto.randomUUID() },
     )
     if (reply.stopReason === 'error' || reply.stopReason === 'aborted') throw new Error(reply.errorMessage ?? `${ref} failed the request`)
     return reply.content.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('')
