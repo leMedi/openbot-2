@@ -9,4 +9,4 @@ export {
   type SignInMethod,
   type SignInStep,
 } from './providers.ts'
-export { BotRuntime, type BotStatus, NoModelError, replyReminder, steerPending, type BotRuntimeOptions } from './runtime.ts'
+export { BotRuntime, type BotStatus, type BotTool, NoModelError, replyReminder, steerPending, type BotRuntimeOptions } from './runtime.ts'

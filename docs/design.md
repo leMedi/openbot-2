@@ -167,7 +167,7 @@ interface Orchestrator {
 type Verdict = { decision: 'allow' } | { decision: 'deny'; reason: string } | { decision: 'ask'; reason: string; proposedRule?: string }
 ```
 
-- Called from one `beforeTool` hook. Each tool declares its surface; read-only tools declare `none`.
+- Called from one `beforeTool` hook. Each tool declares its surface; read-only tools declare none (`null`), and so does messaging.
 - Modes per surface: `off | shadow | enforce`, set globally and overridable per bot.
 - **P0:** `AllowAllOrchestrator`, still writing every proposed action and verdict to the audit log.
 - **P1:** `LlmOrchestrator` (Grok's recipe): the redacted action, the bot's instructions, last 2 user + 4 bot messages, and global + per-bot natural-language rules (≤ 20 each, "ask first" wins). Returns allow / deny / ask with a proposed rule. Errors or a 10 s timeout fall back to `ask` in enforce and `allow` in shadow. Ships in **shadow** everywhere.

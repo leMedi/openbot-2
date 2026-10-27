@@ -5,15 +5,20 @@ import {
   getBot,
   getChat,
   NameTakenError,
+  listAuditEntries,
   listBots,
   listMessages,
   postMessage,
+  readBotOrchestratorModes,
   readModelSettings,
+  readOrchestratorModes,
+  writeBotOrchestratorModes,
   writeModelSettings,
+  writeOrchestratorModes,
 } from '@openbot/core'
 import { implement, ORPCError } from '@orpc/server'
 import type { ServerContext } from './context.ts'
-import { toBotInfo, toMessageInfo } from './views.ts'
+import { toAuditEntryInfo, toBotInfo, toMessageInfo } from './views.ts'
 
 const os = implement(contract).$context<ServerContext>()
 
@@ -70,6 +75,23 @@ export const router = os.router({
     stop: os.bots.stop.handler(async ({ context, input }) => {
       if (!(await getBot(context.db, input.botId))) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
       await context.runtime.stop(input.botId)
+    }),
+
+    getOrchestratorModes: os.bots.getOrchestratorModes.handler(async ({ context, input }) => {
+      const modes = await readBotOrchestratorModes(context.db, input.botId)
+      if (!modes) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
+      return modes
+    }),
+
+    updateOrchestratorModes: os.bots.updateOrchestratorModes.handler(async ({ context, input }) => {
+      const modes = await writeBotOrchestratorModes(context.db, input.botId, input.overrides)
+      if (!modes) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
+      return modes
+    }),
+
+    audit: os.bots.audit.handler(async ({ context, input }) => {
+      if (!(await getBot(context.db, input.botId))) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
+      return (await listAuditEntries(context.db, input.botId)).map(toAuditEntryInfo)
     }),
   },
 
@@ -140,6 +162,12 @@ export const router = os.router({
       }
       return writeModelSettings(context.db, input)
     }),
+  },
+
+  orchestrator: {
+    getModes: os.orchestrator.getModes.handler(({ context }) => readOrchestratorModes(context.db)),
+
+    updateModes: os.orchestrator.updateModes.handler(({ context, input }) => writeOrchestratorModes(context.db, input)),
   },
 })
 

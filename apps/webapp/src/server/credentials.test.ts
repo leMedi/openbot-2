@@ -1,4 +1,4 @@
-import { callsTools, endsSilently } from '@openbot/agent/testing'
+import { callsTools, endsSilently, recordingTool } from '@openbot/agent/testing'
 import { contract } from '@openbot/api-contract'
 import { systemCredentials } from '@openbot/db'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -36,7 +36,7 @@ function procedurePaths(node: object, prefix = ''): string[] {
 
 describe('system credentials', () => {
   it('are never returned by any procedure', async () => {
-    const server = await createTestServer()
+    const server = await createTestServer({ tools: [recordingTool('runShell', 'shell').tool] })
     servers.push(server)
 
     // The subscription sign-in mints `access-1` / `refresh-1`, then the API key replaces it.
@@ -55,7 +55,7 @@ describe('system credentials', () => {
       avatarColor: 'red',
       model: null,
     })
-    server.providers.script(callsTools(['sendMessage', { text: 'Hi' }]), endsSilently())
+    server.providers.script(callsTools(['runShell', { command: 'ls' }], ['sendMessage', { text: 'Hi' }]), endsSilently())
     const sent = await server.client.chats.send({ chatId: bot.chatId, text: 'Hello' })
     await expect.poll(async () => (await server.client.chats.messages({ chatId: bot.chatId })).length).toBe(2)
 
@@ -74,6 +74,11 @@ describe('system credentials', () => {
       'bots.list': await server.client.bots.list(),
       'bots.create': bot,
       'bots.stop': null,
+      'bots.getOrchestratorModes': await server.client.bots.getOrchestratorModes({ botId: bot.id }),
+      'bots.updateOrchestratorModes': await server.client.bots.updateOrchestratorModes({ botId: bot.id, overrides: { shell: 'enforce' } }),
+      'bots.audit': await server.client.bots.audit({ botId: bot.id }),
+      'orchestrator.getModes': await server.client.orchestrator.getModes(),
+      'orchestrator.updateModes': await server.client.orchestrator.updateModes({ vault: 'enforce' }),
       'chats.messages': await server.client.chats.messages({ chatId: bot.chatId }),
       'chats.send': sent,
       events: null,

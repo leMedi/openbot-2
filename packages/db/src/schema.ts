@@ -35,6 +35,26 @@ export const systemCredentials = sqliteTable('system_credentials', {
   updatedAt: updatedAt(),
 })
 
+/** Kinds of side effect the orchestrator reviews. Messages between bots are not one. */
+export const surfaces = [
+  'shell',
+  'computer_session',
+  'mcp',
+  'vault',
+  'plugin_request',
+  'routine_change',
+  'memory_global_write',
+] as const
+export type Surface = (typeof surfaces)[number]
+
+export const orchestratorModes = ['off', 'shadow', 'enforce'] as const
+export type OrchestratorMode = (typeof orchestratorModes)[number]
+
+export type Verdict =
+  | { decision: 'allow' }
+  | { decision: 'deny'; reason: string }
+  | { decision: 'ask'; reason: string; proposedRule?: string }
+
 export const avatarShapes = ['blob', 'pebble', 'squircle', 'tablet', 'wedge', 'hex', 'cloud', 'teardrop'] as const
 export type AvatarShape = (typeof avatarShapes)[number]
 
@@ -56,6 +76,11 @@ export const bots = sqliteTable(
     historyId: text('history_id').unique(),
     /** X display of the bot's screen; stable for the bot's lifetime. */
     displayNumber: integer('display_number').unique(),
+    /** Orchestrator modes overriding the global ones in settings, for this bot only. */
+    orchestratorModes: text('orchestrator_modes', { mode: 'json' })
+      .$type<Partial<Record<Surface, OrchestratorMode>>>()
+      .notNull()
+      .default(sql`'{}'`),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -136,25 +161,6 @@ export const messages = sqliteTable(
   (table) => [index('messages_chat_idx').on(table.chatId, table.id)],
 )
 
-export const surfaces = [
-  'shell',
-  'computer_session',
-  'mcp',
-  'vault',
-  'plugin_request',
-  'routine_change',
-  'memory_global_write',
-] as const
-export type Surface = (typeof surfaces)[number]
-
-export const orchestratorModes = ['off', 'shadow', 'enforce'] as const
-export type OrchestratorMode = (typeof orchestratorModes)[number]
-
-export type Verdict =
-  | { decision: 'allow' }
-  | { decision: 'deny'; reason: string }
-  | { decision: 'ask'; reason: string; proposedRule?: string }
-
 export const auditLog = sqliteTable(
   'audit_log',
   {
@@ -163,7 +169,9 @@ export const auditLog = sqliteTable(
       .notNull()
       .references(() => bots.id, { onDelete: 'cascade' }),
     surface: text('surface', { enum: surfaces }).notNull(),
-    /** The proposed action with secrets redacted. */
+    /** The tool the bot called. */
+    tool: text('tool').notNull(),
+    /** The tool call's input, with secrets redacted. */
     action: text('action', { mode: 'json' }).$type<unknown>().notNull(),
     verdict: text('verdict', { mode: 'json' }).$type<Verdict>().notNull(),
     mode: text('mode', { enum: orchestratorModes }).notNull(),

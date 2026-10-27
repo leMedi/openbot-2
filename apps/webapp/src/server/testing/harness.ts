@@ -1,7 +1,9 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { BotTool } from '@openbot/agent'
 import { createFakeModel, createFakeProviders } from '@openbot/agent/testing'
+import type { Orchestrator } from '@openbot/core'
 import { createFakeComputer } from '@openbot/core/testing'
 import { openDb } from '@openbot/db'
 import { createRouterClient } from '@orpc/server'
@@ -11,15 +13,22 @@ import { router } from '../router.ts'
 
 const testSecretKey = 'test-secret-key-that-is-long-enough'
 
+export type TestServerOptions = {
+  /** Replaces the allow-all orchestrator, e.g. with one that denies. */
+  orchestrator?: Orchestrator
+  /** Tools bots get beyond the built-in ones. */
+  tools?: BotTool[]
+}
+
 /**
  * Seam 1: the router called in-process over a temporary database, with scripted model providers and an in-memory
  * computer.
  */
-export async function createTestServer() {
-  return open(await mkdtemp(join(tmpdir(), 'openbot-test-')))
+export async function createTestServer(options: TestServerOptions = {}) {
+  return open(await mkdtemp(join(tmpdir(), 'openbot-test-')), testSecretKey, options)
 }
 
-async function open(dir: string, secretKey = testSecretKey) {
+async function open(dir: string, secretKey: string, options: TestServerOptions) {
   const db = await openDb(join(dir, 'openbot.db'))
   const providers = createFakeProviders()
   const context = await createServerContext({
@@ -27,6 +36,7 @@ async function open(dir: string, secretKey = testSecretKey) {
     secretKey,
     providers: providers.providers,
     agentStoragePath: join(dir, 'agent.sqlite'),
+    ...options,
   })
   const client = createRouterClient(router, { context })
 
@@ -72,7 +82,10 @@ export type TestServer = Awaited<ReturnType<typeof open>>
  * Simulates a server restart: closes `server` without deleting its data and starts a new one on it, optionally with
  * another secret key (as when the owner loses theirs).
  */
-export async function restartTestServer(server: TestServer, { secretKey }: { secretKey?: string } = {}): Promise<TestServer> {
+export async function restartTestServer(
+  server: TestServer,
+  { secretKey = testSecretKey, ...options }: TestServerOptions & { secretKey?: string } = {},
+): Promise<TestServer> {
   await server.shutdown()
-  return open(server.dataDir, secretKey)
+  return open(server.dataDir, secretKey, options)
 }

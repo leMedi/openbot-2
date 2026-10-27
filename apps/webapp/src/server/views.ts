@@ -1,7 +1,7 @@
-import type { BotInfo, MessageInfo } from '@openbot/api-contract'
+import type { AuditEntryInfo, BotInfo, MessageInfo } from '@openbot/api-contract'
 import type { BotStatus } from '@openbot/agent'
 import type { BotWithChat } from '@openbot/core'
-import type { Message } from '@openbot/db'
+import type { AuditEntry, Message } from '@openbot/db'
 
 /** What the API shows of a message: never its tool call's idempotency key. */
 export function toMessageInfo(message: Message): MessageInfo {
@@ -28,5 +28,18 @@ export function toBotInfo(bot: BotWithChat, { working, error }: BotStatus): BotI
     chatId: bot.chatId,
     working,
     error,
+  }
+}
+
+export function toAuditEntryInfo(entry: AuditEntry): AuditEntryInfo {
+  return {
+    id: entry.id,
+    botId: entry.botId,
+    surface: entry.surface,
+    tool: entry.tool,
+    input: entry.action,
+    verdict: entry.verdict,
+    mode: entry.mode,
+    createdAt: entry.createdAt.getTime(),
   }
 }

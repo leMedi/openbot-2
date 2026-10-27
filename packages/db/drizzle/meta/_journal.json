@@ -15,6 +15,13 @@
       "when": 1793057968374,
       "tag": "0001_bot_instructions",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793058956856,
+      "tag": "0002_orchestrator_modes",
+      "breakpoints": true
     }
   ]
 }

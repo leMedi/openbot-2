@@ -1,6 +1,6 @@
-import { BotRuntime, type ModelProvider, Providers } from '@openbot/agent'
+import { BotRuntime, type BotTool, type ModelProvider, Providers } from '@openbot/agent'
 import type { LiveEvent } from '@openbot/api-contract'
-import { EventBus, postMessage, SecretBox } from '@openbot/core'
+import { AllowAllOrchestrator, EventBus, type Orchestrator, postMessage, SecretBox } from '@openbot/core'
 import type { Db } from '@openbot/db'
 import { toMessageInfo } from './views.ts'
 
@@ -17,6 +17,8 @@ export async function createServerContext({
   secretKey,
   providers: modelProviders,
   agentStoragePath,
+  orchestrator = new AllowAllOrchestrator(),
+  tools,
 }: {
   db: Db
   /** Encrypts system credentials. */
@@ -25,6 +27,10 @@ export async function createServerContext({
   providers: readonly ModelProvider[]
   /** pi-durable's storage file; in memory when absent. */
   agentStoragePath?: string
+  /** Reviews bots' side-effecting actions; allows everything in P0. */
+  orchestrator?: Orchestrator
+  /** Tools beyond the built-in ones, e.g. a test's. */
+  tools?: BotTool[]
 }): Promise<ServerContext> {
   const bus = new EventBus<LiveEvent>()
   const providers = new Providers({ db, box: new SecretBox(secretKey), providers: modelProviders })
@@ -32,6 +38,8 @@ export async function createServerContext({
     db,
     models: providers.models,
     storagePath: agentStoragePath,
+    orchestrator,
+    tools,
     async sendMessage(bot, text, idempotencyKey) {
       const { message, created } = await postMessage(db, {
         chatId: bot.chatId,

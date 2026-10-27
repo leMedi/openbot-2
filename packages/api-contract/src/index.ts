@@ -160,6 +160,54 @@ export const modelSettings = z.object({
 })
 export type ModelSettings = z.infer<typeof modelSettings>
 
+/** Kinds of side effect the orchestrator reviews. Messages between bots are not one. */
+export const surfaces = [
+  'shell',
+  'computer_session',
+  'mcp',
+  'vault',
+  'plugin_request',
+  'routine_change',
+  'memory_global_write',
+] as const
+const surface = z.enum(surfaces)
+/** off: not reviewed; shadow: reviewed and logged, never blocked; enforce: a deny blocks the action. */
+const orchestratorMode = z.enum(['off', 'shadow', 'enforce'])
+
+/** The mode of every surface. */
+export const orchestratorModes = z.record(surface, orchestratorMode)
+export type OrchestratorModes = z.infer<typeof orchestratorModes>
+
+export const botOrchestratorModes = z.object({
+  /** The bot's own modes, for some surfaces. */
+  overrides: z.partialRecord(surface, orchestratorMode),
+  /** The modes the bot is reviewed in: its override where it has one, else the global mode. */
+  modes: orchestratorModes,
+})
+export type BotOrchestratorModes = z.infer<typeof botOrchestratorModes>
+
+export const verdict = z.discriminatedUnion('decision', [
+  z.object({ decision: z.literal('allow') }),
+  z.object({ decision: z.literal('deny'), reason: z.string() }),
+  z.object({ decision: z.literal('ask'), reason: z.string(), proposedRule: z.string().optional() }),
+])
+
+/** One orchestrator review of a bot's tool call. */
+export const auditEntry = z.object({
+  id: z.string(),
+  botId: z.string(),
+  surface,
+  tool: z.string(),
+  /** The tool call's input, with secrets redacted. */
+  input: z.unknown(),
+  verdict,
+  /** The surface's mode for the bot when reviewed. */
+  mode: orchestratorMode,
+  /** Milliseconds since the epoch. */
+  createdAt: z.number(),
+})
+export type AuditEntryInfo = z.infer<typeof auditEntry>
+
 export const contract = {
   health: oc
     .route({ method: 'GET', path: '/health', summary: 'Liveness, used by the installer and the updater' })
@@ -187,6 +235,22 @@ export const contract = {
       .route({ method: 'POST', path: '/bots/{botId}/stop', summary: "Abort the bot's current run; returns once it is idle" })
       .input(z.object({ botId: z.string() }))
       .output(z.void()),
+    getOrchestratorModes: oc
+      .route({ method: 'GET', path: '/bots/{botId}/orchestrator', summary: "The bot's orchestrator modes" })
+      .input(z.object({ botId: z.string() }))
+      .output(botOrchestratorModes),
+    updateOrchestratorModes: oc
+      .route({
+        method: 'PATCH',
+        path: '/bots/{botId}/orchestrator',
+        summary: "Override orchestrator modes for the bot only; null makes a surface follow the global mode again",
+      })
+      .input(z.object({ botId: z.string(), overrides: z.partialRecord(surface, orchestratorMode.nullable()) }))
+      .output(botOrchestratorModes),
+    audit: oc
+      .route({ method: 'GET', path: '/bots/{botId}/audit', summary: "The bot's audit log: every orchestrator review, oldest first" })
+      .input(z.object({ botId: z.string() }))
+      .output(z.array(auditEntry)),
   },
   chats: {
     messages: oc
@@ -234,6 +298,15 @@ export const contract = {
       })
       .input(modelSettings.partial())
       .output(modelSettings),
+  },
+  orchestrator: {
+    getModes: oc
+      .route({ method: 'GET', path: '/settings/orchestrator', summary: 'The global orchestrator mode of every surface' })
+      .output(orchestratorModes),
+    updateModes: oc
+      .route({ method: 'PATCH', path: '/settings/orchestrator', summary: 'Set global orchestrator modes; bots may override them' })
+      .input(z.partialRecord(surface, orchestratorMode))
+      .output(orchestratorModes),
   },
 }
 

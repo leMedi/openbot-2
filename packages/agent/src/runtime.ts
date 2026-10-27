@@ -16,11 +16,22 @@ import {
   defineTool,
   hook,
   section,
+  type ToolRegistration,
   ToolTask,
 } from '@earendil-works/pi-durable'
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node'
-import { type AgentRuntime, type BotInput, type BotWithChat, findBotByHistory, getBot, readModelSettings, setBotHistory } from '@openbot/core'
-import type { Db } from '@openbot/db'
+import {
+  type AgentRuntime,
+  type BotInput,
+  type BotWithChat,
+  findBotByHistory,
+  getBot,
+  type Orchestrator,
+  readModelSettings,
+  reviewAction,
+  setBotHistory,
+} from '@openbot/core'
+import type { Db, Surface } from '@openbot/db'
 
 const context = BACKGROUND_CONTEXT
 
@@ -53,12 +64,22 @@ export type BotStatus = {
   error: string | null
 }
 
+/** A bot's tool and the surface the orchestrator reviews its calls under; null for tools without side effects. */
+export type BotTool = {
+  surface: Surface | null
+  tool: ToolRegistration<any, any>
+}
+
 export type BotRuntimeOptions = {
   db: Db
   /** pi's model collection, with credentials resolved through our store. */
   models: Models
   /** pi-durable's SQLite file; in memory when absent. */
   storagePath?: string
+  /** Reviews every call of a tool with a surface before it runs. */
+  orchestrator: Orchestrator
+  /** Tools beyond the built-in ones, e.g. a test's. */
+  tools?: BotTool[]
   /** Posts a bot's message to its DM; `idempotencyKey` makes a replayed tool call post once. */
   sendMessage(bot: BotWithChat, text: string, idempotencyKey: string): Promise<void>
   /** A bot's status changed: it started or finished working, or a run failed. */
@@ -112,25 +133,34 @@ export class BotRuntime implements AgentRuntime {
     const registry = createRegistry()
     // The hook needs the Harness, which needs the registry; it only runs once the Harness is open.
     let runtime: BotRuntime | undefined
+    const botOf = async (conversationId: ConversationId) => {
+      const bot = await findBotByHistory(options.db, toHistoryId(conversationId))
+      if (!bot) throw new Error('This history belongs to no bot')
+      return bot
+    }
+    const sendMessage: BotTool = {
+      // Messages are never reviewed, whether to the owner or another bot.
+      surface: null,
+      tool: defineTool({
+        name: 'sendMessage',
+        description: 'Send the owner one chat message, in Markdown. This is the only way the owner sees anything from you.',
+        parameters: Type.Object({ text: Type.String({ description: 'The message, in Markdown' }) }),
+        // A replayed call finds the message it already posted.
+        replay: 'safe',
+        execute: async (args, api) => {
+          const bot = await botOf(api.conversationId)
+          await options.sendMessage(bot, args.text, `${api.conversationId}:${api.callId}`)
+          return { output: [{ type: 'text', text: 'Sent.' }] }
+        },
+      }),
+    }
+    const tools = [sendMessage, ...(options.tools ?? [])]
+    const toolSurfaces = new Map(tools.map(({ surface, tool }) => [tool.name, surface]))
     registry.install(
       defineExtension({
         name: 'openbot',
         sections: [section('voice', () => voice, { tag: false })],
-        tools: [
-          defineTool({
-            name: 'sendMessage',
-            description: 'Send the owner one chat message, in Markdown. This is the only way the owner sees anything from you.',
-            parameters: Type.Object({ text: Type.String({ description: 'The message, in Markdown' }) }),
-            // A replayed call finds the message it already posted.
-            replay: 'safe',
-            execute: async (args, api) => {
-              const bot = await findBotByHistory(options.db, toHistoryId(api.conversationId))
-              if (!bot) throw new Error('This history belongs to no bot')
-              await options.sendMessage(bot, args.text, `${api.conversationId}:${api.callId}`)
-              return { output: [{ type: 'text', text: 'Sent.' }] }
-            },
-          }),
-        ],
+        tools: tools.map(({ tool }) => tool),
         hooks: [
           hook(GenerationTask, { onYield: (_answer, api) => runtime?.remindIfOwed(api.conversationId) }),
           // A steer joins the run after this tool round; until then the bot can't answer the request it replaces.
@@ -139,6 +169,23 @@ export class BotRuntime implements AgentRuntime {
               if (call.name !== 'sendMessage') return
               const inbox = await api.snapshot(InboxDoc, api.conversationId, context)
               return inbox?.items.some((item) => item.mode === 'steer') ? { block: steerPending } : undefined
+            },
+          }),
+          // The orchestrator hook: every call of a tool with a side effect is reviewed before it runs. It stays last, so
+          // it reviews the arguments the call will run with, and no other hook may rewrite arguments after it.
+          hook(ToolTask, {
+            beforeTool: async (call, api) => {
+              const surface = toolSurfaces.get(call.name)
+              if (surface === null) return
+              // Fails closed: a tool that never declared its surface can't run unreviewed.
+              if (surface === undefined) return { block: `${call.name} declares no surface, so it can't be reviewed` }
+              const bot = await botOf(api.conversationId)
+              const blocked = await reviewAction(options.db, options.orchestrator, bot.id, {
+                surface,
+                tool: call.name,
+                input: call.arguments,
+              })
+              return blocked ? { block: blocked } : undefined
             },
           }),
         ],
