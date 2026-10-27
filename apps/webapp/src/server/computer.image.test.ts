@@ -2,9 +2,9 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { request } from 'node:http'
 import { join } from 'node:path'
 import { botUser, openBotComputer, userExists } from '@openbot/agent'
-import { callsTools, endsSilently, says } from '@openbot/agent/testing'
+import { callsTools, endsSilently, held, says } from '@openbot/agent/testing'
 import type { BotInfo, NewBot } from '@openbot/api-contract'
-import { connectBrowser, connectScreens, defaultDaemonSocket } from '@openbot/computer'
+import { connectBrowser, connectDesktop, connectScreens, defaultDaemonSocket } from '@openbot/computer'
 import { describeComputerContract, servePages } from '@openbot/core/testing'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createTestServer, type TestServer } from './testing/harness.ts'
@@ -28,8 +28,8 @@ function screenPids(botId: string): Promise<Record<string, number>> {
   })
 }
 
-// Seam 2 on the real computer: the screen daemon running as openbot under supervisord, the bots' shell, and each
-// screen's Chromium over CDP, loading pages this test serves on localhost.
+// Seam 2 on the real computer: the screen daemon running as openbot under supervisord, the bots' shell, each screen's
+// Chromium over CDP, loading pages this test serves on localhost, and each screen's cua-driver driving Mousepad.
 describe.skipIf(!inRuntimeImage)('the real computer', () => {
   describeComputerContract(
     'the real computer',
@@ -37,9 +37,12 @@ describe.skipIf(!inRuntimeImage)('the real computer', () => {
       const home = process.env.OPENBOT_HOME!
       const computer = openBotComputer({ home })
       const pages = await servePages()
+      const desktops: { close(): Promise<void> }[] = []
       const client = () => {
         const screens = connectScreens({ socketPath })
-        return { screens, shell: { exec: computer.exec.bind(computer) }, browser: connectBrowser({ screens }) }
+        const desktop = connectDesktop({ screens, runAs: botUser })
+        desktops.push(desktop)
+        return { screens, shell: { exec: computer.exec.bind(computer) }, browser: connectBrowser({ screens }), desktop }
       }
       return {
         computer: client(),
@@ -52,7 +55,9 @@ describe.skipIf(!inRuntimeImage)('the real computer', () => {
         user: botUser,
         folder: (bot) => computer.folder(bot.id),
         page: pages.page,
+        editor: 'mousepad',
         close: async () => {
+          await Promise.all(desktops.map((desktop) => desktop.close()))
           await pages.close()
           await computer.exec({ id: 'contract', name: 'Contract' }, `rm -rf ${join(home, 'bots')}/contract-*`)
           await computer.close()
@@ -256,6 +261,42 @@ describe.skipIf(!inRuntimeImage)('bots on the real computer', () => {
     } finally {
       await pages.close()
     }
+  })
+
+  it('operate a desktop app on their screen through use_computer, each action reporting its effect', { timeout: 120_000 }, async () => {
+    const server = await start()
+    const rex = await server.client.bots.create(newBot('Rex'))
+    await expect.poll(async () => (await server.client.screens.status({ botId: rex.id })).state, { timeout: 60_000 }).toBe('running')
+    // The window's id is only known once Mousepad is open, so the rest of the session is scripted then.
+    const opened = held(callsTools(['desktop_windows', {}]))
+    server.providers.script(
+      callsTools(['use_computer', { goal: 'Write "Milk, eggs" in Mousepad', reason: 'Testing the desktop' }]),
+      callsTools(['desktop_open', { app: 'mousepad' }]),
+      opened,
+    )
+
+    await server.client.chats.send({ chatId: rex.chatId, text: 'Write my shopping list' })
+    await opened.requested
+    const open = JSON.stringify(server.providers.requests.at(-1)!.messages.at(-1))
+    const window = Number(open.match(/- (\d+): Mousepad/)?.[1])
+    server.providers.script(
+      callsTools(['desktop_type', { windowId: window, text: 'Milk, eggs' }]),
+      callsTools(['desktop_snapshot', { windowId: window }]),
+      says('Mousepad now reads "Milk, eggs".'),
+      callsTools(['sendMessage', { text: 'Done' }]),
+      endsSilently(),
+    )
+    opened.release()
+    await expect.poll(async () => (await server.client.bots.list()).find((entry) => entry.id === rex.id)?.working, { timeout: 60_000 }).toBe(false)
+
+    // Each request's last message is the result of the call before it.
+    const [, , , windows, typed, snapshot, answered] = server.providers.requests.map((request) => JSON.stringify(request.messages.at(-1)))
+    expect(window).toBeGreaterThan(0)
+    expect(windows).toMatch(/Mousepad/)
+    expect(typed).toMatch(/Effect: (confirmed|unverifiable)\./)
+    expect(snapshot).toMatch(/\[ref=d\d+\] text \\"Milk, eggs/)
+    expect(answered).toContain('Mousepad now reads')
+    expect(statSync(answered!.match(/saved at (\S+\.png)/)![1]!).size).toBeGreaterThan(1000)
   })
 
   it('lose their folder when deleted', async () => {

@@ -6,6 +6,13 @@ import {
   BrowserUnavailableError,
   type Computer,
   type ComputerBot,
+  type Desktop,
+  type DesktopActionResult,
+  type DesktopElement,
+  type DesktopPoint,
+  DesktopUnavailableError,
+  type DesktopWindow,
+  type DesktopWindowTarget,
   type ExecResult,
   type ScreenStatus,
   StaleRefError,
@@ -22,6 +29,12 @@ export type ComputerCall =
   | { bot: string; kind: 'browser.type'; ref: string; text: string; submit?: true }
   | { bot: string; kind: 'browser.newTab'; url?: string }
   | { bot: string; kind: 'browser.selectTab' | 'browser.closeTab'; tabId: string }
+  | { bot: string; kind: 'desktop.open'; app: string }
+  | { bot: string; kind: 'desktop.snapshot' | 'desktop.screenshot'; window?: number }
+  | { bot: string; kind: 'desktop.click'; at: DesktopElement | DesktopPoint; button?: 'right'; count?: 2 }
+  | { bot: string; kind: 'desktop.type'; into: DesktopElement | DesktopWindowTarget; text: string }
+  | { bot: string; kind: 'desktop.press'; window: number; keys: string }
+  | { bot: string; kind: 'desktop.scroll'; at: DesktopElement | DesktopWindowTarget; direction: string; amount?: number }
 
 export type FakeComputerScript = {
   /** Result for a command; `undefined` falls back to an empty success. */
@@ -48,6 +61,20 @@ type FakeTab = { id: string; url: string; values: Map<number, string> }
 /** A bot's browser: its tabs, and the references of its latest snapshot to elements of the page it was taken on. */
 type FakeBrowserState = { tabs: FakeTab[]; active: string; refs: Map<string, { tabId: string; url: string; index: number }> }
 
+/** What opens the fake's text editor, the one desktop app it has: a `text` element and a "New" button that adds a tab. */
+export const fakeEditor = 'editor'
+
+/** An editor window: its documents (one per tab, the last one shown) and whether all of the shown one is selected. */
+type FakeEditorWindow = DesktopWindow & { documents: string[]; allSelected: boolean }
+
+/** A bot's desktop: its open windows, and the references of its latest snapshot to elements of one of them. */
+type FakeDesktopState = { windows: FakeEditorWindow[]; refs: Map<string, { window: number; element: 'new' | 'save' | 'text' }> }
+
+const stale = (ref: string): DesktopActionResult => ({
+  effect: 'refused',
+  summary: `${ref} isn't on the latest snapshot; take a new snapshot and use its references`,
+})
+
 /** A 1×1 PNG. */
 export const fakeScreenshot = Uint8Array.from(
   Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64'),
@@ -71,6 +98,7 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
   const screens = new Map<string, FakeScreen>()
   const pages = new Map(Object.entries(script.pages ?? {}))
   const browsers = new Map<string, FakeBrowserState>()
+  const desktops = new Map<string, FakeDesktopState>()
   // Strictly increasing, so a restarted screen's start time always differs.
   let clock = Date.now()
   const now = () => (clock = Math.max(clock + 1, Date.now()))
@@ -84,8 +112,9 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
   async function stop(botId: string) {
     const screen = screens.get(botId)
     screens.delete(botId)
-    // Its browser goes with it, as its profile does.
+    // Its browser goes with it, as its profile does, and so do its apps.
     browsers.delete(botId)
+    desktops.delete(botId)
     if (screen) await closeStream(screen.stream)
   }
 
@@ -187,6 +216,118 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
     },
   }
 
+  let nextWindow = 1
+  let nextDesktopRef = 1
+
+  /** The bot's desktop, which only runs while its screen does. */
+  function desktopOf(bot: ComputerBot): FakeDesktopState {
+    if (!screens.has(bot.id)) throw new DesktopUnavailableError(`${bot.name}'s screen isn't running`)
+    let state = desktops.get(bot.id)
+    if (!state) desktops.set(bot.id, (state = { windows: [], refs: new Map() }))
+    return state
+  }
+
+  function windowOf(state: FakeDesktopState, id: number): FakeEditorWindow {
+    const window = state.windows.find((each) => each.id === id)
+    if (!window) throw new Error(`There's no window ${id} on the screen`)
+    return window
+  }
+
+  const listed = ({ documents: _, allSelected: __, ...window }: FakeEditorWindow): DesktopWindow => window
+
+  /** Types into the shown document: replacing it when all of it is selected, else adding to it. */
+  function typeInto(window: FakeEditorWindow, text: string) {
+    const shown = window.documents.length - 1
+    window.documents[shown] = window.allSelected ? text : window.documents[shown] + text
+    window.allSelected = false
+  }
+
+  const desktop: Desktop = {
+    async windows(bot) {
+      return desktopOf(bot).windows.map(listed)
+    },
+    async open(bot, app) {
+      calls.push({ bot: bot.name, kind: 'desktop.open', app })
+      const state = desktopOf(bot)
+      if (app !== fakeEditor) throw new Error(`There's no app called ${app}`)
+      const id = nextWindow++
+      const window = { id, app: 'Editor', title: `Untitled ${id} - Editor`, x: 320, y: 166, width: 640, height: 480, documents: [''], allSelected: false }
+      state.windows.push(window)
+      return [listed(window)]
+    },
+    async snapshot(bot, windowId) {
+      calls.push({ bot: bot.name, kind: 'desktop.snapshot', window: windowId })
+      const state = desktopOf(bot)
+      const window = windowOf(state, windowId)
+      state.refs = new Map()
+      const ref = (element: 'new' | 'save' | 'text') => {
+        const name = `d${nextDesktopRef++}`
+        state.refs.set(name, { window: windowId, element })
+        return `[ref=${name}]`
+      }
+      const lines = [
+        `- frame "${window.title}"`,
+        `  - ${ref('new')} push button "New"`,
+        `  - ${ref('save')} push button "Save"`,
+        ...window.documents.flatMap((document, index) =>
+          index === window.documents.length - 1 ? [`  - page tab ""`, `    - ${ref('text')} text ${JSON.stringify(document)}`] : [`  - page tab ""`],
+        ),
+      ]
+      return { window: listed(window), tree: lines.join('\n') }
+    },
+    async click(bot, at, options) {
+      calls.push({ bot: bot.name, kind: 'desktop.click', at, ...(options?.button === 'right' && { button: 'right' as const }), ...(options?.count === 2 && { count: 2 as const }) })
+      const state = desktopOf(bot)
+      if ('ref' in at) {
+        const target = state.refs.get(at.ref)
+        if (!target) return stale(at.ref)
+        const window = windowOf(state, target.window)
+        if (target.element === 'new') {
+          window.documents.push('')
+          window.allSelected = false
+          return { effect: 'confirmed', summary: 'Clicked push button "New"; a new tab opened.' }
+        }
+        return { effect: 'unverifiable', summary: `Clicked ${target.element}; look to see what changed.` }
+      }
+      windowOf(state, at.window)
+      return { effect: 'unverifiable', summary: `Clicked at (${at.x}, ${at.y}); not verified, look to see what changed.` }
+    },
+    async type(bot, into, text) {
+      calls.push({ bot: bot.name, kind: 'desktop.type', into, text })
+      const state = desktopOf(bot)
+      if ('ref' in into) {
+        const target = state.refs.get(into.ref)
+        if (!target) return stale(into.ref)
+        if (target.element !== 'text') return { effect: 'refused', summary: `${into.ref} is a push button, not a field you can type into` }
+        const window = windowOf(state, target.window)
+        typeInto(window, text)
+        return { effect: 'confirmed', summary: `Typed ${text.length} character(s); it reads back '${window.documents.at(-1)}'.` }
+      }
+      typeInto(windowOf(state, into.window), text)
+      return { effect: 'unverifiable', summary: `Typed ${text.length} character(s) as key events; not verified, look before typing again.` }
+    },
+    async press(bot, windowId, keys) {
+      calls.push({ bot: bot.name, kind: 'desktop.press', window: windowId, keys })
+      const window = windowOf(desktopOf(bot), windowId)
+      if (keys === 'ctrl+a') window.allSelected = true
+      else if (keys === 'Return') typeInto(window, '\n')
+      return { effect: 'unverifiable', summary: `Pressed ${keys}; not verified, look to see what changed.` }
+    },
+    async scroll(bot, at, direction, amount) {
+      calls.push({ bot: bot.name, kind: 'desktop.scroll', at, direction, ...(amount !== undefined && { amount }) })
+      const state = desktopOf(bot)
+      if ('ref' in at && !state.refs.has(at.ref)) return stale(at.ref)
+      if ('window' in at) windowOf(state, at.window)
+      return { effect: 'unverifiable', summary: `Scrolled ${direction}; not verified, look to see what moved.` }
+    },
+    async screenshot(bot, windowId) {
+      calls.push({ bot: bot.name, kind: 'desktop.screenshot', ...(windowId !== undefined && { window: windowId }) })
+      const state = desktopOf(bot)
+      if (windowId !== undefined) windowOf(state, windowId)
+      return fakeScreenshot
+    },
+  }
+
   return {
     calls,
     pages,
@@ -216,6 +357,8 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
       const screen = screens.get(bot.id)
       if (!screen) return
       await closeStream(screen.stream)
+      // Its apps die with its display.
+      desktops.delete(bot.id)
       screens.set(bot.id, { display: screen.display, startedAt: now(), ...(await openStream()) })
     },
     async close() {
@@ -228,5 +371,6 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
       },
     },
     browser,
+    desktop,
   }
 }

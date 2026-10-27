@@ -3,9 +3,9 @@ import { createServer as createHttpServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { type BotTool, openBotComputer } from '@openbot/agent'
+import { botUser, type BotTool, openBotComputer } from '@openbot/agent'
 import { createFakeModel, createFakeProviders, fakeBotComputer } from '@openbot/agent/testing'
-import { connectBrowser, connectScreens, defaultDaemonSocket } from '@openbot/computer'
+import { connectBrowser, connectDesktop, connectScreens, defaultDaemonSocket } from '@openbot/computer'
 import type { Orchestrator, Screens, ScreenStatus } from '@openbot/core'
 import { createFakeComputer, type FakeComputer, type FakeComputerScript } from '@openbot/core/testing'
 import { openDb } from '@openbot/db'
@@ -74,6 +74,7 @@ async function open(dir: string, secretKey: string, { shell, pages, realComputer
     agentStoragePath: join(dir, 'agent.sqlite'),
     computer: realComputer ? openBotComputer({ home }) : fakeBotComputer(computer, home),
     browser: realScreens ? connectBrowser({ screens: realScreens }) : computer.browser,
+    desktop: realScreens ? connectDesktop({ screens: realScreens, runAs: botUser }) : computer.desktop,
     attachmentsDir: join(dir, 'attachments'),
     screens: realScreens ? testScreens(realScreens) : computer.screens,
     screenTickets,

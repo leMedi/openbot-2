@@ -13,6 +13,11 @@ export const streamPort = (display: number) => 5900 + display
 /** The screen's browser's DevTools protocol, on this machine only; the browser tools drive it. */
 export const browserDebugPort = (display: number) => 9222 + display
 
+/** The screen's desktop driver (cua-driver), on this machine only; the desktop tools drive it. */
+export const desktopDriverSocket = (display: number) => `/tmp/openbot-cua-driver-${display}.sock`
+/** The screen's own D-Bus session, which carries its accessibility bus (AT-SPI) for the desktop driver to read. */
+const sessionBusSocket = (display: number) => `/tmp/openbot-dbus-${display}`
+
 export const profileFolder = (home: string, botId: string) => join(home, 'bots', botId, 'chromium')
 
 async function until(check: () => Promise<boolean>, what: string, timeoutMs = 15_000): Promise<void> {
@@ -39,13 +44,22 @@ export const listening = (port: number) =>
     socket.once('error', () => resolve(false))
   })
 
+/** Runs `command` after removing `socket`, which a crashed run of it may have left behind. */
+const freshSocket = (socket: string, command: string[]) => ({
+  command: 'sh',
+  args: ['-c', 'rm -f "$0" && exec "$@"', socket, ...command],
+})
+
 /**
- * A bot's screen: Xvfb at 1280×800, Openbox, the bot's own Chromium profile in its folder, and x11vnc serving the
- * stream on localhost.
+ * A bot's screen: Xvfb at 1280×800, its own D-Bus session with an accessibility bus, Openbox, the bot's own Chromium
+ * profile in its folder, x11vnc serving the stream on localhost, and cua-driver for the desktop tools.
  */
 export function screenPrograms(home: string): (screen: ScreenSpec) => Program[] {
   return ({ botId, display }) => {
-    const env = { DISPLAY: `:${display}`, HOME: home }
+    const bus = sessionBusSocket(display)
+    // Every program after the bus is in the screen's session, so apps on it (and Chromium) show up on its AT-SPI bus.
+    const env = { DISPLAY: `:${display}`, HOME: home, DBUS_SESSION_BUS_ADDRESS: `unix:path=${bus}` }
+    const driver = desktopDriverSocket(display)
     return [
       {
         name: 'xvfb',
@@ -53,6 +67,14 @@ export function screenPrograms(home: string): (screen: ScreenSpec) => Program[] 
         args: [`:${display}`, '-screen', '0', `${width}x${height}x24`, '-nolisten', 'tcp'],
         ready: () => until(() => exists(`/tmp/.X11-unix/X${display}`), `display :${display}`),
       },
+      {
+        name: 'dbus',
+        ...freshSocket(bus, ['dbus-daemon', '--session', `--address=unix:path=${bus}`, '--nofork', '--nopidfile']),
+        env,
+        ready: () => until(() => exists(bus), 'the session bus'),
+      },
+      // Starts the accessibility bus now and publishes it on the display (AT_SPI_BUS), where apps and cua-driver find it.
+      { name: 'at-spi', command: '/usr/libexec/at-spi-bus-launcher', args: ['--launch-immediately'], env },
       { name: 'openbox', command: 'openbox', args: [], env },
       {
         name: 'chromium',
@@ -86,11 +108,19 @@ export function screenPrograms(home: string): (screen: ScreenSpec) => Program[] 
         env,
         ready: () => until(() => listening(streamPort(display)), 'the stream'),
       },
+      {
+        // One driver per screen, as openbot like the apps it drives (it checks who connects, so the server reaches it
+        // through `sudo -u openbot cua-driver mcp`). Its agent cursor shows the owner where it acts.
+        name: 'cua-driver',
+        ...freshSocket(driver, ['cua-driver', 'serve', '--socket', driver, '--pid-file', `/tmp/openbot-cua-driver-${display}.pid`]),
+        env,
+        ready: () => until(() => exists(driver), 'the desktop driver'),
+      },
     ]
   }
 }
 
-/** Removes the display's lock and socket, killing an Xvfb left from a daemon that died without stopping it. */
+/** Removes the display's lock and sockets, killing an Xvfb left from a daemon that died without stopping it. */
 export async function clearDisplay(display: number): Promise<void> {
   const lock = `/tmp/.X${display}-lock`
   try {
@@ -115,4 +145,6 @@ export async function clearDisplay(display: number): Promise<void> {
   }
   await rm(lock, { force: true })
   await rm(`/tmp/.X11-unix/X${display}`, { force: true })
+  await rm(sessionBusSocket(display), { force: true })
+  await rm(desktopDriverSocket(display), { force: true })
 }

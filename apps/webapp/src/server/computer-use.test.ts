@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { callsTools, endsSilently, says } from '@openbot/agent/testing'
 import type { BotInfo, NewBot } from '@openbot/api-contract'
 import type { Orchestrator } from '@openbot/core'
-import type { TestPage } from '@openbot/core/testing'
+import { fakeEditor, type TestPage } from '@openbot/core/testing'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createTestServer, type TestServer, type TestServerOptions } from './testing/harness.ts'
 
@@ -28,6 +28,16 @@ const pages: Record<string, TestPage> = {
 }
 
 const browserTools = ['browser_snapshot', 'browser_navigate', 'browser_click', 'browser_type', 'browser_tabs', 'browser_screenshot']
+const desktopTools = [
+  'desktop_windows',
+  'desktop_open',
+  'desktop_snapshot',
+  'desktop_click',
+  'desktop_type',
+  'desktop_key',
+  'desktop_scroll',
+  'desktop_screenshot',
+]
 
 /** Rex on a server whose default model can't see images, with a computer-use model that can. */
 async function startWithRex(options: TestServerOptions = {}) {
@@ -78,8 +88,9 @@ describe('computer-use sessions', () => {
       { bot: 'Rex', kind: 'browser.snapshot' },
       { bot: 'Rex', kind: 'browser.click', ref: 'e2' },
       { bot: 'Rex', kind: 'browser.snapshot' },
-      { bot: 'Rex', kind: 'browser.screenshot' },
     ])
+    // The final screenshot is of the whole screen.
+    expect(server.computer.calls.at(-1)).toEqual({ bot: 'Rex', kind: 'desktop.screenshot' })
     // The session saw the socks page after its click.
     expect(JSON.stringify(server.providers.requests[3]!.messages.at(-1))).toContain('Wool socks: $5')
     const result = server.providers.requests[4]!.messages.at(-1)!
@@ -92,7 +103,7 @@ describe('computer-use sessions', () => {
     expect(existsSync(saved)).toBe(true)
   })
 
-  it('run on the computer-use model, with only the browser tools; the bot never has them', async () => {
+  it('run on the computer-use model, with only the browser and desktop tools; the bot never has them', async () => {
     const { server, bot } = await startWithRex()
 
     await shopForSocks(server, bot)
@@ -104,11 +115,11 @@ describe('computer-use sessions', () => {
     expect(first!.tools).toContain('use_computer')
     for (const request of [first!, ...after]) {
       expect(request.model).toBe('fake/fake-mini')
-      expect(request.tools.filter((tool) => tool.startsWith('browser_'))).toEqual([])
+      expect(request.tools.filter((tool) => tool.startsWith('browser_') || tool.startsWith('desktop_'))).toEqual([])
     }
     for (const request of session) {
       expect(request.model).toBe('fake/fake-model')
-      expect(request.tools.sort()).toEqual([...browserTools].sort())
+      expect(request.tools.sort()).toEqual([...browserTools, ...desktopTools].sort())
     }
   })
 
@@ -144,6 +155,66 @@ describe('computer-use sessions', () => {
     expect(JSON.stringify(stale)).toContain("e2 isn't on the latest snapshot")
     expect(fresh).toMatchObject({ role: 'toolResult', toolName: 'browser_click', isError: false })
     expect(JSON.stringify(fresh)).toContain('Wool socks: $5')
+  })
+
+  it('operate a desktop app by reference, each action reporting its effect', async () => {
+    const { server, bot } = await startWithRex()
+    const goal = { goal: 'Write "Milk, eggs" in a new text document', reason: 'Testing the desktop' }
+    server.providers.script(
+      callsTools(['use_computer', goal]),
+      callsTools(['desktop_open', { app: fakeEditor }]),
+      callsTools(['desktop_snapshot', { windowId: 1 }]),
+      // The editor's snapshot: New is d1, Save d2, the document's text d3.
+      callsTools(['desktop_type', { ref: 'd3', text: 'Milk, eggs' }]),
+      callsTools(['desktop_key', { windowId: 1, keys: 'Return' }]),
+      callsTools(['desktop_snapshot', { windowId: 1 }]),
+      says('The document now reads "Milk, eggs".'),
+      callsTools(['sendMessage', { text: 'Done' }]),
+      endsSilently(),
+    )
+
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Write my shopping list' })
+    await untilIdle(server, bot)
+
+    const results = server.providers.requests.slice(2, 7).map((request) => JSON.stringify(request.messages.at(-1)))
+    expect(results[0]).toContain('Opened editor:\\n- 1: Editor — Untitled 1 - Editor')
+    expect(results[1]).toContain('- [ref=d3] text \\"\\"')
+    expect(results[2]).toContain("Effect: confirmed. Typed 10 character(s); it reads back 'Milk, eggs'.")
+    expect(results[3]).toContain('Effect: unverifiable. Pressed Return')
+    expect(results[4]).toContain('text \\"Milk, eggs\\\\n\\"')
+    expect(server.computer.calls.filter((call) => call.kind.startsWith('desktop.') && call.kind !== 'desktop.screenshot')).toEqual([
+      { bot: 'Rex', kind: 'desktop.open', app: fakeEditor },
+      { bot: 'Rex', kind: 'desktop.snapshot', window: 1 },
+      { bot: 'Rex', kind: 'desktop.type', into: { ref: 'd3' }, text: 'Milk, eggs' },
+      { bot: 'Rex', kind: 'desktop.press', window: 1, keys: 'Return' },
+      { bot: 'Rex', kind: 'desktop.snapshot', window: 1 },
+    ])
+    // Reviewed and logged as one session.
+    expect((await server.client.bots.audit({ botId: bot.id })).map(({ tool }) => tool)).toEqual(['use_computer'])
+  })
+
+  it('report a stale desktop reference as a refused action, not an error', async () => {
+    const { server, bot } = await startWithRex()
+    server.providers.script(
+      callsTools(['use_computer', { goal: 'Start a new document', reason: 'Testing the desktop' }]),
+      callsTools(['desktop_open', { app: fakeEditor }]),
+      callsTools(['desktop_snapshot', { windowId: 1 }]),
+      callsTools(['desktop_snapshot', { windowId: 1 }]),
+      // d1 was New on the first snapshot; the second gave it d4.
+      callsTools(['desktop_click', { ref: 'd1' }]),
+      callsTools(['desktop_click', { ref: 'd4' }]),
+      says('A new document is open.'),
+      callsTools(['sendMessage', { text: 'Done' }]),
+      endsSilently(),
+    )
+
+    await server.client.chats.send({ chatId: bot.chatId, text: 'New document please' })
+    await untilIdle(server, bot)
+
+    const [stale, fresh] = [server.providers.requests[5]!, server.providers.requests[6]!].map((request) => request.messages.at(-1)!)
+    expect(stale).toMatchObject({ role: 'toolResult', toolName: 'desktop_click', isError: false })
+    expect(JSON.stringify(stale)).toContain("Effect: refused. d1 isn't on the latest snapshot")
+    expect(JSON.stringify(fresh)).toContain('Effect: confirmed. Clicked push button \\"New\\"')
   })
 
   it('are written to the audit log with their reason', async () => {
