@@ -66,6 +66,8 @@ COPY supervisord.conf /etc/supervisor/supervisord.conf
 COPY openbot.conf /etc/supervisor/conf.d/openbot.conf
 COPY entrypoint.sh /usr/local/bin/openbot-entrypoint
 COPY start-server.sh /usr/local/bin/openbot-server
+COPY desktopd.conf /etc/supervisor/conf.d/desktopd.conf
+COPY start-desktopd.sh /usr/local/bin/openbot-desktopd
 RUN mkdir -p /etc/openbot/entrypoint.d
 
 EXPOSE 3000
@@ -88,6 +90,7 @@ RUN apt-get update \
 COPY dev/openbot.conf /etc/supervisor/conf.d/openbot.conf
 COPY dev/setup.sh /etc/openbot/entrypoint.d/dev.sh
 COPY dev/start-server.sh /usr/local/bin/openbot-server
+COPY dev/start-desktopd.sh /usr/local/bin/openbot-desktopd
 
 # The repo is bind-mounted here; its node_modules folders are named volumes, with pnpm's store inside the root one so
 # installs can hard-link.

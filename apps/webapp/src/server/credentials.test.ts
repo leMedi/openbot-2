@@ -84,6 +84,8 @@ describe('system credentials', () => {
       'bots.getOrchestratorModes': await server.client.bots.getOrchestratorModes({ botId: bot.id }),
       'bots.updateOrchestratorModes': await server.client.bots.updateOrchestratorModes({ botId: bot.id, overrides: { shell: 'enforce' } }),
       'bots.audit': await server.client.bots.audit({ botId: bot.id }),
+      'screens.status': await server.client.screens.status({ botId: bot.id }),
+      'screens.ticket': await server.client.screens.ticket({ botId: bot.id }),
       'orchestrator.getModes': await server.client.orchestrator.getModes(),
       'orchestrator.updateModes': await server.client.orchestrator.updateModes({ vault: 'enforce' }),
       'bots.delete': null,

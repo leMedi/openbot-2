@@ -51,7 +51,7 @@ describe('bots on the computer', () => {
 
     const [result] = await work(server, bot, ['bash', { command: 'whoami' }])
 
-    expect(server.computer.calls).toEqual([{ bot: 'Rex', kind: 'shell.exec', command: 'whoami' }])
+    expect(server.computer.calls.filter((call) => call.kind === 'shell.exec')).toEqual([{ bot: 'Rex', kind: 'shell.exec', command: 'whoami' }])
     expect(result).toContain('openbot')
   })
 

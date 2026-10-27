@@ -12,8 +12,10 @@
     "seed": "pnpm with-env node scripts/seed.ts"
   },
   "dependencies": {
+    "@novnc/novnc": "^1.7.0",
     "@openbot/agent": "workspace:*",
     "@openbot/api-contract": "workspace:*",
+    "@openbot/computer": "workspace:*",
     "@openbot/core": "workspace:*",
     "@openbot/db": "workspace:*",
     "@openbot/ui": "workspace:*",
@@ -27,6 +29,7 @@
     "react-dom": "^19.3.1",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "ws": "^8.22.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -34,6 +37,7 @@
     "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.1.2",
     "dotenv-cli": "^11.0.0",
     "tailwindcss": "^4.3.3",

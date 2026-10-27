@@ -39,8 +39,8 @@ Not planned: bots creating bots, bot-written or user-written skills (all skills 
 - One instance belongs to one person. There are no user rows; the server has a `getOwner(request)` seam so auth can be added later in one place.
 - **No auth for now.** The host is private and reached over Tailscale. The compose sample includes an optional Tailscale sidecar (`tailscale serve`) for HTTPS on the tailnet, which the browser needs for clipboard and microphone.
 - One container runs everything under supervisord:
-  - `openbot` server (TanStack Start): UI, `/api/*`, SSE, `/vnc/:botId` proxy, agent runtime, scheduler, MCP manager. Runs as user `openbot-server`.
-  - `openbot-desktopd`: owns every bot's Xvfb, Openbox, Chromium, websockify and cua-driver. Runs as user `openbot`. Talks to the server over a Unix socket. Displays survive server restarts.
+  - `openbot` server (TanStack Start): UI, `/api/*`, SSE, the screen-stream proxy (`/api/screens/:botId/stream`), agent runtime, scheduler, MCP manager. Runs as user `openbot-server`.
+  - `openbot-desktopd`: owns every bot's Xvfb, Openbox, Chromium, x11vnc and cua-driver. Runs as user `openbot`. Talks to the server over a Unix socket. Displays survive server restarts.
   - pi-env daemons, spawned by the server as user `openbot`, run bots' shell and file tools.
 - Bots have **full passwordless sudo**: it is their computer.
 
@@ -142,7 +142,7 @@ Grok's rules: at most 3 rounds and 10 member turns per human message, speaker or
 ## 4. The bot's computer
 
 - **One X display per bot, always on.** Xvfb at 1280×800 + Openbox + its own Chromium profile at `$OPENBOT_HOME/bots/<id>/chromium` (logins are not shared between bots). Display numbers are stable per bot.
-- **noVNC** per display, proxied at `/vnc/:botId`. The Screen pane shows a view-only preview; ✋ switches to interactive with "Hand back"; ⤢ opens fullscreen.
+- **noVNC** per display, proxied at `/api/screens/:botId/stream`. The Screen pane shows a view-only preview; ✋ switches to interactive with "Hand back"; ⤢ opens fullscreen.
 - **Tool priority**, stated in the prompt: plugin/MCP → shell and web fetch → browser → desktop.
 - Browser and desktop tools live only in a **computerUse subagent** (a pi-durable task-owned conversation running `computerUseModel`). The main bot calls `use_computer({ goal, reason, startUrl? })`; the reason is logged and scored by evals. Its activity is hidden in the chat, like Grok's.
   - **Browser:** our own CDP tools (`browser_snapshot` with `[ref=eN]`, click, type, navigate, tabs, screenshot).
@@ -155,6 +155,15 @@ As built (#11), shell and files:
 - The prompt tells each bot it works as `openbot` with sudo, and where its folder, `shared/` and every other bot's folder are.
 - `bash`, `write` and `edit` are reviewed under the `shell` surface and written to the audit log; `read` declares none. Deleting a bot deletes its folder.
 - `BotComputer` (`@openbot/agent`) is the seam: Seam 1 uses `fakeBotComputer`, with files in a temporary home and commands sent to the fake `Computer`'s `shell.exec`, so tests script and see them. `computer.image.test.ts` runs the same scenarios on the real computer inside the runtime image (skipped elsewhere).
+
+As built (#13), screens:
+
+- **Screen daemon** (`apps/desktopd`, run by supervisord as `openbot`, `docker/desktopd.conf`): one screen per bot, each Xvfb `:N` at 1280×800, Openbox, Chromium with `--user-data-dir=$OPENBOT_HOME/bots/<id>/chromium` and DevTools on `127.0.0.1:9222+N`, and x11vnc on `127.0.0.1:5900+N`. It answers JSON over HTTP on a Unix socket (`OPENBOT_DESKTOPD_SOCKET`, default `/run/openbot/desktopd.sock`, mode 0666), and writes the screens it keeps to `$OPENBOT_HOME/.openbot/screens.json`, restoring them when it starts. It imports nothing at runtime (Node's type stripping), so it starts before installs.
+- **Crashes:** when a screen's Xvfb dies the whole screen restarts (new `startedAt`); when another of its programs dies only that one restarts. Delays grow from 250 ms to 10 s while it keeps crashing. A leftover Xvfb lock is cleared before a display starts.
+- **Server:** `bots.displayNumber` is given at creation (highest + 1; bots made earlier get one on first use). Creating a bot starts its screen, deleting it stops the screen and deletes its profile, and on start the server syncs: every bot's screen started, screens of bots it no longer has stopped, retrying in the background while the daemon is not up. Neither create nor delete fails when the daemon can't be reached.
+- **Streams:** `POST /api/bots/{botId}/screen/tickets` gives a random, single-use ticket valid for 30 s, kept in the server's memory. A WebSocket to `/api/screens/:botId/stream?ticket=…` is bridged byte for byte to the screen's x11vnc by the server itself (with `ws`), not by websockify; the Vite plugin in `vite.config.ts` attaches that upgrade handler in dev and preview. VNC ports listen on localhost only, so streams reach the owner only through the one port.
+- **Screen pane** (the DM's default pane): noVNC, scaled to fit, view-only; **✋ Take over** turns on mouse and keyboard until **Hand back**; **⤢ Open** shows it fullscreen. View-only is enforced by the client (noVNC's `viewOnly`), not the server.
+- **Seam 2:** `describeComputerContract` (`@openbot/core/testing`) runs against the fake (`fake-computer.test.ts`), against the daemon with stand-in programs on any machine (`apps/desktopd/src/daemon.test.ts`), and against the real daemon and shell in the runtime image (`computer.image.test.ts`). The browser joins the contract with its tools (#14).
 
 ---
 
@@ -237,7 +246,7 @@ The UI copies Grok Bot's; the full spec is [`grok-bot/05-ui.md`](grok-bot/05-ui.
 
 ```
 apps/
-  webapp/        TanStack Start: UI, /api/* (oRPC), /api/events (SSE), /vnc proxy; starts the runtime
+  webapp/        TanStack Start: UI, /api/* (oRPC), /api/events (SSE), screen-stream proxy; starts the runtime
   desktopd/      Display manager daemon (runs as openbot)
   mobile/        Expo app (P2)
   site/          Astro marketing site

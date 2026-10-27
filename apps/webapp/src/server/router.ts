@@ -1,6 +1,7 @@
 import { basename } from 'node:path'
 import { SignInNotFoundError } from '@openbot/agent'
 import { contract } from '@openbot/api-contract'
+import { ScreenDaemonError } from '@openbot/computer'
 import {
   answerQuestion,
   type AttachmentFile,
@@ -28,6 +29,8 @@ import {
   readBotOrchestratorModes,
   readModelSettings,
   readOrchestratorModes,
+  screenSize,
+  startScreen,
   writeBotOrchestratorModes,
   updateBot,
   writeModelSettings,
@@ -36,6 +39,7 @@ import {
 import { implement, ORPCError } from '@orpc/server'
 import { generateContentDisposition } from '@orpc/standard-server'
 import { publishChat, type ServerContext } from './context.ts'
+import { screenStreamUrl } from './screen-stream.ts'
 import { toAuditEntryInfo, toBotInfo, toChatInfo, toMessageInfo } from './views.ts'
 
 const os = implement(contract).$context<ServerContext>()
@@ -56,6 +60,25 @@ async function chatMustExist<T>(work: Promise<T>): Promise<T> {
   } catch (error) {
     if (error instanceof ChatNotFoundError) throw new ORPCError('NOT_FOUND', { message: error.message })
     throw error
+  }
+}
+
+/** The bot, or NOT_FOUND. */
+async function botMustExist(context: ServerContext, botId: string): Promise<BotWithChat> {
+  const bot = await getBot(context.db, botId)
+  if (!bot) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
+  return bot
+}
+
+/** The bot's screen, started if the computer isn't keeping it; SERVICE_UNAVAILABLE when the computer can't be reached. */
+async function ensureScreen(context: ServerContext, bot: BotWithChat) {
+  try {
+    const status = await context.screens.status(bot)
+    return status.state === 'stopped' ? await startScreen(context.db, context.screens, bot) : status
+  } catch (error) {
+    if (!(error instanceof ScreenDaemonError)) throw error
+    console.error(`[screens] Can't reach ${bot.name}'s screen:`, error.message)
+    throw new ORPCError('SERVICE_UNAVAILABLE', { message: `Can't reach ${bot.name}'s screen` })
   }
 }
 
@@ -100,7 +123,12 @@ export const router = os.router({
         throw new ORPCError('BAD_REQUEST', { message: `${input.model} is not a model of a connected provider` })
       }
       try {
-        const bot = toBotInfo(await createBot(context.db, input), { working: false, error: null })
+        const created = await createBot(context.db, input)
+        // The bot exists whether or not the computer can be reached; its screen starts with the server otherwise.
+        await startScreen(context.db, context.screens, created).catch((error) =>
+          console.error(`[screens] Couldn't start ${created.name}'s screen:`, error),
+        )
+        const bot = toBotInfo(created, { working: false, error: null })
         context.bus.publish({ type: 'bot.created', bot })
         await publishChat(context, bot.chatId)
         return bot
@@ -130,6 +158,9 @@ export const router = os.router({
       // Deleted first, so nothing can wake the bot while its run is aborted.
       const bot = await deleteBot(context.db, input.botId)
       if (!bot) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
+      // Its screen stops before its folder, with the browser profile in it, goes. If the computer can't be reached, the
+      // screen is stopped when the server next starts.
+      await context.screens.stop(bot).catch((error) => console.error(`[screens] Couldn't stop ${bot.name}'s screen:`, error))
       // Its pi history stays orphaned in pi-durable's storage, which can't delete a conversation yet; no bot reaches it.
       await context.runtime.forget(bot)
       await context.attachments.removeChat(bot.chatId)
@@ -302,6 +333,24 @@ export const router = os.router({
         }
       }
       return writeModelSettings(context.db, input)
+    }),
+  },
+
+  screens: {
+    status: os.screens.status.handler(async ({ context, input }) => {
+      const bot = await botMustExist(context, input.botId)
+      const { state, startedAt } = await ensureScreen(context, bot)
+      return { state, startedAt, ...screenSize }
+    }),
+
+    ticket: os.screens.ticket.handler(async ({ context, input }) => {
+      const bot = await botMustExist(context, input.botId)
+      const status = await ensureScreen(context, bot)
+      if (status.state !== 'running' || status.streamPort === null) {
+        throw new ORPCError('PRECONDITION_FAILED', { message: `${bot.name}'s screen is ${status.state === 'crashed' ? 'restarting' : 'starting'}` })
+      }
+      const { ticket, expiresAt } = context.screenTickets.issue(bot.id, status.streamPort)
+      return { url: screenStreamUrl(bot.id, ticket), expiresAt }
     }),
   },
 

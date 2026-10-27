@@ -29,8 +29,10 @@ services:
       # One volume per workspace package's node_modules, so the host's (macOS) installs are never touched.
       - node-modules:/opt/openbot/current/node_modules
       - webapp-node-modules:/opt/openbot/current/apps/webapp/node_modules
+      - desktopd-node-modules:/opt/openbot/current/apps/desktopd/node_modules
       - agent-node-modules:/opt/openbot/current/packages/agent/node_modules
       - api-contract-node-modules:/opt/openbot/current/packages/api-contract/node_modules
+      - computer-node-modules:/opt/openbot/current/packages/computer/node_modules
       - core-node-modules:/opt/openbot/current/packages/core/node_modules
       - db-node-modules:/opt/openbot/current/packages/db/node_modules
       - ui-node-modules:/opt/openbot/current/packages/ui/node_modules
@@ -42,8 +44,10 @@ volumes:
   home:
   node-modules:
   webapp-node-modules:
+  desktopd-node-modules:
   agent-node-modules:
   api-contract-node-modules:
+  computer-node-modules:
   core-node-modules:
   db-node-modules:
   ui-node-modules:

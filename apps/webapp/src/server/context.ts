@@ -1,7 +1,18 @@
 import { type BotComputer, BotRuntime, type BotTool, type ModelProvider, Providers } from '@openbot/agent'
 import type { ChatInfo, LiveEvent } from '@openbot/api-contract'
-import { AllowAllOrchestrator, AttachmentStore, EventBus, getChatSummary, type Orchestrator, postMessage, SecretBox } from '@openbot/core'
+import {
+  AllowAllOrchestrator,
+  AttachmentStore,
+  EventBus,
+  getChatSummary,
+  type Orchestrator,
+  postMessage,
+  type Screens,
+  SecretBox,
+  syncScreens,
+} from '@openbot/core'
 import type { Db } from '@openbot/db'
+import type { ScreenTickets } from './screen-stream.ts'
 import { toChatInfo, toMessageInfo } from './views.ts'
 
 /** What every procedure runs against; built once per server start, or per test by the harness. */
@@ -14,6 +25,12 @@ export type ServerContext = {
   computer: BotComputer
   /** The copies of messages' files the owner downloads. */
   attachments: AttachmentStore
+  /** Every bot's screen on the computer. */
+  screens: Screens
+  /** Tickets to screens' streams, redeemed by the stream proxy. */
+  screenTickets: ScreenTickets
+  /** Settles once the computer's screens first match the bots (or the computer couldn't be reached at all). */
+  screensSynced: Promise<void>
 }
 
 /** Tells every tab how a chat now looks in the sidebar, after a message, a read or a pin; returns that. */
@@ -33,6 +50,8 @@ export async function createServerContext({
   orchestrator = new AllowAllOrchestrator(),
   computer,
   attachmentsDir,
+  screens,
+  screenTickets,
   tools,
 }: {
   db: Db
@@ -48,6 +67,9 @@ export async function createServerContext({
   computer: BotComputer
   /** Where the server keeps copies of messages' files, in its data dir. */
   attachmentsDir: string
+  /** Every bot's screen: the screen daemon's, or the fake's in tests. */
+  screens: Screens
+  screenTickets: ScreenTickets
   /** Tools beyond the built-in ones, e.g. a test's. */
   tools?: BotTool[]
 }): Promise<ServerContext> {
@@ -101,5 +123,25 @@ export async function createServerContext({
     },
     onStatus: (botId, status) => bus.publish({ type: 'bot.status', botId, ...status }),
   })
-  return { db, bus, providers, runtime, computer, attachments }
+  const screensSynced = keepScreensInSync(db, screens)
+  return { db, bus, providers, runtime, computer, attachments, screens, screenTickets, screensSynced }
+}
+
+const syncRetryMs = [1_000, 2_000, 5_000, 10_000, 30_000]
+
+/**
+ * Makes the computer's screens match the bots when the server starts, retrying while the screen daemon isn't up yet
+ * (e.g. both just started). Settles after the first attempt either way; retries go on in the background.
+ */
+function keepScreensInSync(db: Db, screens: Screens): Promise<void> {
+  return new Promise((settle) => {
+    let attempt = 0
+    const sync = () =>
+      syncScreens(db, screens).then(settle, (error: Error) => {
+        if (attempt === 0) console.warn(`[screens] Couldn't start the bots' screens; retrying: ${error.message}`)
+        settle()
+        setTimeout(sync, syncRetryMs[Math.min(attempt++, syncRetryMs.length - 1)]).unref()
+      })
+    void sync()
+  })
 }

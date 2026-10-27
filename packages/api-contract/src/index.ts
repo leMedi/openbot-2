@@ -299,6 +299,27 @@ export const auditEntry = z.object({
 })
 export type AuditEntryInfo = z.infer<typeof auditEntry>
 
+export const screenStates = ['stopped', 'starting', 'running', 'crashed'] as const
+
+/** A bot's screen on the computer. */
+export const screen = z.object({
+  /** `starting` until it is up; `crashed` while it is being restarted; `stopped` when the computer can't keep it. */
+  state: z.enum(screenStates),
+  width: z.number().int(),
+  height: z.number().int(),
+  /** When its display last (re)started, in ms since the epoch. */
+  startedAt: z.number().nullable(),
+})
+export type ScreenInfo = z.infer<typeof screen>
+
+/** A short-lived, single-use ticket to watch or take over a bot's screen. */
+export const screenTicket = z.object({
+  /** The screen's live stream: a WebSocket path on this server, ticket included. */
+  url: z.string(),
+  expiresAt: z.number(),
+})
+export type ScreenTicket = z.infer<typeof screenTicket>
+
 export const contract = {
   health: oc
     .route({ method: 'GET', path: '/health', summary: 'Liveness, used by the installer and the updater' })
@@ -451,6 +472,22 @@ export const contract = {
       })
       .input(modelSettings.partial())
       .output(modelSettings),
+  },
+  screens: {
+    status: oc
+      .route({ method: 'GET', path: '/bots/{botId}/screen', summary: "The bot's screen; one that isn't running is started" })
+      .input(z.object({ botId: z.string() }))
+      .output(screen),
+    ticket: oc
+      .route({
+        method: 'POST',
+        path: '/bots/{botId}/screen/tickets',
+        summary:
+          "A ticket to stream the bot's running screen: open its url as a WebSocket within 30 seconds, once. The stream " +
+          'speaks the VNC protocol (RFB) and is the only way to reach the screen from outside the computer',
+      })
+      .input(z.object({ botId: z.string() }))
+      .output(screenTicket),
   },
   orchestrator: {
     getModes: oc

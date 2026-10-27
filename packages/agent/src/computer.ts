@@ -4,7 +4,7 @@ import { extname, isAbsolute, join, resolve } from 'node:path'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { type ExecutionEnv, getOrThrow } from '@earendil-works/pi-durable/env'
 import { Connection, localDaemon, RemoteExecutionEnv } from '@earendil-works/pi-env'
-import { type ComputerBot, maxAttachmentBytes, safeFileName } from '@openbot/core'
+import { type ComputerBot, type ExecResult, maxAttachmentBytes, safeFileName } from '@openbot/core'
 
 const context = BACKGROUND_CONTEXT
 
@@ -97,6 +97,26 @@ export class BotComputer {
     const env = this.#options.env(bot, folder)
     getOrThrow(await env.createDir(folder, { recursive: true }, context))
     return env
+  }
+
+  /** Runs a command for `bot` as the bots' user, in its folder: the `Computer` port's `shell`. */
+  async exec(bot: ComputerBot, command: string): Promise<ExecResult> {
+    const env = await this.env(bot)
+    let stdout = ''
+    let stderr = ''
+    const { exitCode } = getOrThrow(
+      await env.exec(
+        command,
+        {
+          onOutput: (text, _context, { stream }) => {
+            if (stream === 'stderr') stderr += text
+            else stdout += text
+          },
+        },
+        context,
+      ),
+    )
+    return { stdout, stderr, exitCode }
   }
 
   /** Deletes a deleted bot's folder and everything in it. */

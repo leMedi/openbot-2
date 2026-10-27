@@ -7,6 +7,7 @@ import { BotAvatar } from '../../components/bot-avatar.tsx'
 import { Markdown } from '../../components/markdown.tsx'
 import { ProfilePane } from '../../components/profile-pane.tsx'
 import { QuestionCard } from '../../components/question-card.tsx'
+import { ScreenPane } from '../../components/screen-pane.tsx'
 import { api, errorMessage } from '../../lib/api.ts'
 import { useLive } from '../../lib/live.tsx'
 
@@ -53,21 +54,25 @@ function addFiles(files: File[], added: File[]): { files: File[]; notice?: strin
   return { files: next }
 }
 
-/** The DM between the owner and one bot, in Grok Bot's layout, with its Profile pane beside it when open. */
+/** The right-hand pane beside a DM: one at a time, the bot's screen by default. */
+type Pane = 'screen' | 'profile'
+
+/** The DM between the owner and one bot, in Grok Bot's layout, with its Screen or Profile pane beside it. */
 function Dm() {
   const { botId } = Route.useParams()
   const live = useLive()
   const navigate = useNavigate()
-  const [profileOpen, setProfileOpen] = useState(false)
+  const [pane, setPane] = useState<Pane | null>('screen')
   const bot = live.bots?.find((entry) => entry.id === botId)
   if (!bot) return live.bots ? <p className="m-auto text-muted-foreground">This bot doesn't exist.</p> : null
   return (
     <div className="flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Keyed, so loading state, scroll position and sends in flight belong to one chat. */}
-        <Chat key={bot.chatId} bot={bot} profileOpen={profileOpen} onToggleProfile={() => setProfileOpen((open) => !open)} />
+        <Chat key={bot.chatId} bot={bot} pane={pane} onTogglePane={(next) => setPane((open) => (open === next ? null : next))} />
       </div>
-      {profileOpen && (
+      {pane === 'screen' && <ScreenPane bot={bot} />}
+      {pane === 'profile' && (
         <ProfilePane
           bot={bot}
           onSaved={(saved) => live.updateBot(saved)}
@@ -81,7 +86,7 @@ function Dm() {
   )
 }
 
-function Chat({ bot, profileOpen, onToggleProfile }: { bot: BotInfo; profileOpen: boolean; onToggleProfile: () => void }) {
+function Chat({ bot, pane, onTogglePane }: { bot: BotInfo; pane: Pane | null; onTogglePane: (pane: Pane) => void }) {
   const live = useLive()
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string>()
@@ -247,14 +252,19 @@ function Chat({ bot, profileOpen, onToggleProfile }: { bot: BotInfo; profileOpen
             <BotAvatar shape={bot.avatarShape} color={bot.avatarColor} />
             <span className="font-semibold">{bot.name}</span>
             {bot.working && <span className="animate-fade-in text-sm text-muted-foreground">Working</span>}
-            <button
-              type="button"
-              aria-pressed={profileOpen}
-              onClick={onToggleProfile}
-              className={cn('pressable ml-auto rounded-md px-2 py-1 text-base hover:bg-secondary-hover', profileOpen && 'bg-selected')}
-            >
-              Profile
-            </button>
+            <span className="ml-auto flex gap-1">
+              {(['screen', 'profile'] as const).map((choice) => (
+                <button
+                  key={choice}
+                  type="button"
+                  aria-pressed={pane === choice}
+                  onClick={() => onTogglePane(choice)}
+                  className={cn('pressable rounded-md px-2 py-1 text-base hover:bg-secondary-hover', pane === choice && 'bg-selected')}
+                >
+                  {choice === 'screen' ? 'Screen' : 'Profile'}
+                </button>
+              ))}
+            </span>
           </header>
           <MessageList
             bot={bot}

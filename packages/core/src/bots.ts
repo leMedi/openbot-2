@@ -18,11 +18,23 @@ async function assertNameFree(tx: Pick<Db, 'select'>, name: string, exceptId?: s
 /** A bot with the id of its DM. */
 export type BotWithChat = Bot & { chatId: string }
 
-/** Creates a bot and its DM in one transaction. Throws `NameTakenError` when another bot has the name, ignoring case. */
+/** The display after the highest one taken; screens start at display 1. */
+async function nextDisplay(tx: Pick<Db, 'select'>): Promise<number> {
+  const [row] = await tx.select({ highest: sql<number | null>`max(${bots.displayNumber})` }).from(bots)
+  return (row?.highest ?? 0) + 1
+}
+
+/**
+ * Creates a bot and its DM in one transaction, giving it the display its screen runs on. Throws `NameTakenError` when
+ * another bot has the name, ignoring case.
+ */
 export async function createBot(db: Db, values: BotProfile): Promise<BotWithChat> {
   return db.transaction(async (tx) => {
     await assertNameFree(tx, values.name)
-    const [bot] = await tx.insert(bots).values(values).returning()
+    const [bot] = await tx
+      .insert(bots)
+      .values({ ...values, displayNumber: await nextDisplay(tx) })
+      .returning()
     const [chat] = await tx.insert(chats).values({ kind: 'dm', botId: bot!.id }).returning()
     return { ...bot!, chatId: chat!.id }
   })
@@ -66,6 +78,19 @@ export async function deleteBot(db: Db, id: string): Promise<BotWithChat | undef
     await tx.delete(bots).where(eq(bots.id, id))
   })
   return bot
+}
+
+/** The bot with its screen's display, given one if it has none (bots made before screens). */
+export async function withDisplay(db: Db, bot: BotWithChat): Promise<BotWithChat & { displayNumber: number }> {
+  if (bot.displayNumber !== null) return { ...bot, displayNumber: bot.displayNumber }
+  const displayNumber = await db.transaction(async (tx) => {
+    const [row] = await tx.select({ displayNumber: bots.displayNumber }).from(bots).where(eq(bots.id, bot.id))
+    if (row?.displayNumber != null) return row.displayNumber
+    const next = await nextDisplay(tx)
+    await tx.update(bots).set({ displayNumber: next }).where(eq(bots.id, bot.id))
+    return next
+  })
+  return { ...bot, displayNumber }
 }
 
 export async function listBots(db: Db): Promise<BotWithChat[]> {
