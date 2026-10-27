@@ -4,7 +4,7 @@ import { interruptedNote, supersededNote } from '@openbot/agent'
 import { callsTools, endsSilently, held, says } from '@openbot/agent/testing'
 import type { BotInfo, NewBot } from '@openbot/api-contract'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createTestServer, type TestServer } from './testing/harness.ts'
+import { createTestServer, type TestServer, type TestServerOptions } from './testing/harness.ts'
 
 const servers: TestServer[] = []
 afterEach(async () => {
@@ -21,8 +21,8 @@ const profile = (name: string, title: string | null = null): NewBot => ({
 })
 
 /** Rex and Ana, ready to run on the fake model. */
-async function startWithTeam() {
-  const server = await createTestServer()
+async function startWithTeam(options: TestServerOptions = {}) {
+  const server = await createTestServer(options)
   servers.push(server)
   await server.connectProvider()
   await server.client.models.updateSettings({ defaultModel: 'fake/fake-model' })
@@ -51,6 +51,16 @@ const requestsOf = (server: TestServer, name: string) =>
 
 /** The newest message a request ends with: the input or tool results the model answers. */
 const lastMessage = (request: { messages: unknown[] }) => JSON.stringify(request.messages.at(-1))
+
+const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64')
+
+/** The web, for bots' downloads: `pages` by URL, anything else not found. */
+const web =
+  (pages: Record<string, { type: string; body: BodyInit }>): typeof fetch =>
+  async (input) => {
+    const page = pages[String(input)]
+    return page ? new Response(page.body, { headers: { 'content-type': page.type } }) : new Response('Not found', { status: 404 })
+  }
 
 describe('a bot messaging another bot', () => {
   it('shows the message in both DMs and wakes the recipient, who may stay silent', async () => {
@@ -145,29 +155,91 @@ describe('a bot messaging another bot', () => {
     expect(requestsOf(server, 'Ana')).toEqual([])
   })
 
-  it('carries files from the sender\'s computer, shown in both DMs and told to the recipient', async () => {
+  it("leaves both DMs read: messages between bots aren't for the owner", async () => {
     const { server, rex, ana } = await startWithTeam()
+    server.providers.scriptFor('Rex', callsTools(['message_bot', { to: 'Ana', text: 'Lunch?' }]), endsSilently())
+    server.providers.scriptFor('Ana', callsTools(['message_bot', { to: 'Rex', text: 'Sure, noon.' }]), endsSilently(), endsSilently())
+
+    await server.runtime.wake(rex.id, { lane: 'bot', text: 'Ask Ana about lunch', id: 'lunch-1' })
+    await untilIdle(server, rex, ana, rex)
+
+    expect(await transcript(server, ana)).toEqual([
+      ['Rex', '← Rex', 'Lunch?'],
+      ['Ana', '→ Rex', 'Sure, noon.'],
+    ])
+    const chats = await server.client.chats.list()
+    expect(chats.map((chat) => [chat.botId, chat.unread])).toEqual([
+      [rex.id, false],
+      [ana.id, false],
+    ])
+  })
+
+  it("carries images, from the sender's computer and the web, shown in both DMs and seen by the recipient", async () => {
+    const { server, rex, ana } = await startWithTeam({ fetch: web({ 'https://example.com/chart': { type: 'image/png', body: pixel } }) })
     await mkdir(join(server.home, 'bots', rex.id), { recursive: true })
-    await writeFile(join(server.home, 'bots', rex.id, 'diff.txt'), 'fix: pin pnpm\n')
+    await writeFile(join(server.home, 'bots', rex.id, 'screen.png'), pixel)
     server.providers.scriptFor(
       'Rex',
-      callsTools(['message_bot', { to: 'Ana', text: 'Here is the diff', attachments: ['diff.txt'] }]),
-      callsTools(['sendMessage', { text: 'Sent Ana the diff.' }]),
+      callsTools(['message_bot', { to: 'Ana', text: 'The page and the chart', images: ['screen.png', 'https://example.com/chart'] }]),
+      callsTools(['sendMessage', { text: 'Sent Ana both.' }]),
       endsSilently(),
     )
     server.providers.scriptFor('Ana', endsSilently())
 
-    await server.client.chats.send({ chatId: rex.chatId, text: 'Send Ana the diff' })
+    await server.client.chats.send({ chatId: rex.chatId, text: 'Show Ana' })
     await untilIdle(server, rex, ana)
 
-    const path = join(server.home, 'bots', rex.id, 'diff.txt')
+    const screen = join(server.home, 'bots', rex.id, 'screen.png')
+    // Downloaded where the files the owner sends Ana go.
+    const chart = join(server.home, 'bots', ana.id, 'uploads', 'chart.png')
+    const files = [
+      { name: 'screen.png', mimeType: 'image/png', path: screen },
+      { name: 'chart.png', mimeType: 'image/png', path: chart },
+    ]
     const [incoming] = await server.client.chats.messages({ chatId: ana.chatId })
-    expect(incoming!.attachments).toMatchObject([{ name: 'diff.txt', mimeType: 'text/plain', path }])
-    const outgoing = (await server.client.chats.messages({ chatId: rex.chatId }))[1]!
-    expect(outgoing.attachments).toMatchObject([{ name: 'diff.txt', path }])
-    const download = await server.fetch(`/api/messages/${incoming!.id}/attachments/${incoming!.attachments[0]!.id}`)
-    expect(await download.text()).toBe('fix: pin pnpm\n')
-    expect(lastMessage(requestsOf(server, 'Ana')[0]!)).toContain(`The sender attached a file, saved on your computer:\\n- ${path}`)
+    expect(incoming!.attachments).toMatchObject(files)
+    expect((await server.client.chats.messages({ chatId: rex.chatId }))[1]!.attachments).toMatchObject(files)
+    const download = await server.fetch(`/api/messages/${incoming!.id}/attachments/${incoming!.attachments[1]!.id}`)
+    expect(Buffer.from(await download.arrayBuffer())).toEqual(pixel)
+    const input = requestsOf(server, 'Ana')[0]!.messages.at(-1)!
+    const images = (input.content as Exclude<typeof input.content, string>).filter((part) => part.type === 'image')
+    expect(images).toEqual([
+      { type: 'image', mimeType: 'image/png', data: pixel.toString('base64') },
+      { type: 'image', mimeType: 'image/png', data: pixel.toString('base64') },
+    ])
+  })
+
+  it('refuses anything but images, and downloads that fail, posting nothing', async () => {
+    const { server, rex, ana } = await startWithTeam({ fetch: web({ 'https://example.com/page': { type: 'text/html', body: '<p>Hi</p>' } }) })
+    await mkdir(join(server.home, 'bots', rex.id), { recursive: true })
+    await writeFile(join(server.home, 'bots', rex.id, 'diff.txt'), 'fix: pin pnpm\n')
+    server.providers.scriptFor(
+      'Rex',
+      callsTools(
+        ['message_bot', { to: 'Ana', text: 'The diff', images: ['diff.txt'] }],
+        ['message_bot', { to: 'Ana', text: 'The page', images: ['https://example.com/page'] }],
+        ['message_bot', { to: 'Ana', text: 'The chart', images: ['https://example.com/gone.png'] }],
+        ['message_bot', { to: 'Ana', text: 'Over HTTP', images: ['http://example.com/chart.png'] }],
+      ),
+      callsTools(['sendMessage', { text: 'Could not send Ana anything.' }]),
+      endsSilently(),
+    )
+
+    await server.client.chats.send({ chatId: rex.chatId, text: 'Send Ana the diff' })
+    await untilIdle(server, rex)
+
+    const results = JSON.stringify(requestsOf(server, 'Rex')[1]!.messages.slice(-4))
+    expect(results).toContain("diff.txt isn't an image: message_bot only carries images")
+    expect(results).toContain(join(server.home, 'shared'))
+    expect(results).toContain("https://example.com/page isn't an image (text/html)")
+    expect(results).toContain("Couldn't download https://example.com/gone.png: HTTP 404")
+    expect(results).toContain('an image is a file on your computer or an https:// URL')
+    expect(await transcript(server, rex)).toEqual([
+      ['You', null, 'Send Ana the diff'],
+      ['Rex', null, 'Could not send Ana anything.'],
+    ])
+    expect(await transcript(server, ana)).toEqual([])
+    expect(requestsOf(server, 'Ana')).toEqual([])
   })
 
   it('lists the teammates in the prompt, with the rules for messaging them', async () => {

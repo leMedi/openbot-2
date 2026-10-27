@@ -54,6 +54,8 @@ export type TestServerOptions = {
   modelProviders?: readonly ModelProvider[]
   /** Shorter watchdog timings than Grok's 120 s and 30 s. */
   watchdog?: Watchdog
+  /** Answers bots' downloads, e.g. of the https:// images they send each other. */
+  fetch?: typeof fetch
 }
 
 /**
