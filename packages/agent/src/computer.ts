@@ -8,6 +8,9 @@ import { type ComputerBot, type ExecResult, maxAttachmentBytes, safeFileName } f
 
 const context = BACKGROUND_CONTEXT
 
+/** Who the server's own file operations run for, such as saving the owner's files in a group chat's folder. */
+const serverWork: ComputerBot = { id: 'openbot', name: 'OpenBot' }
+
 /** The bots' Unix user on the computer, with passwordless sudo (design §2.1). */
 export const botUser = 'openbot'
 
@@ -30,7 +33,7 @@ export class BotComputer {
   readonly home: string
   readonly user: string
   readonly #options: BotComputerOptions
-  /** Each bot's latest upload; the next waits for it, so two uploads can't both take a free name. */
+  /** Each folder's latest upload; the next waits for it, so two uploads can't both take a free name. */
   readonly #uploads = new Map<string, Promise<unknown>>()
 
   constructor(options: BotComputerOptions) {
@@ -54,20 +57,38 @@ export class BotComputer {
     return join(this.folder(botId), 'uploads')
   }
 
+  /** Where the files the owner sends a group chat are saved: in the shared folder, so every member reads them. */
+  groupFolder(chatId: string): string {
+    return join(this.sharedFolder, 'groups', chatId)
+  }
+
   /**
    * Saves a file the owner sent `bot` to its uploads folder, as the bots' user; returns its path there. A name already
    * taken gets a number, `notes-2.txt`, so an earlier upload is never overwritten.
    */
-  saveUpload(bot: ComputerBot, name: string, bytes: Uint8Array): Promise<string> {
-    const saved = (this.#uploads.get(bot.id) ?? Promise.resolve()).catch(() => {}).then(() => this.#saveUpload(bot, name, bytes))
-    this.#uploads.set(bot.id, saved)
-    void saved.finally(() => this.#uploads.get(bot.id) === saved && this.#uploads.delete(bot.id)).catch(() => {})
+  async saveUpload(bot: ComputerBot, name: string, bytes: Uint8Array): Promise<string> {
+    return this.#saveIn(await this.env(bot), this.uploadsFolder(bot.id), name, bytes)
+  }
+
+  /** Saves a file the owner sent group chat `chatId` to its folder, as `saveUpload` does; returns its path there. */
+  saveGroupUpload(chatId: string, name: string, bytes: Uint8Array): Promise<string> {
+    return this.#saveIn(this.#serverEnv(), this.groupFolder(chatId), name, bytes)
+  }
+
+  /** Deletes a deleted group chat's folder and the owner's files in it. */
+  async removeGroupFolder(chatId: string): Promise<void> {
+    getOrThrow(await this.#serverEnv().remove(this.groupFolder(chatId), { recursive: true, force: true }, context))
+  }
+
+  /** Saves a file in `folder` under a free name; uploads to one folder go one at a time, so two can't take one name. */
+  #saveIn(env: ExecutionEnv, folder: string, name: string, bytes: Uint8Array): Promise<string> {
+    const saved = (this.#uploads.get(folder) ?? Promise.resolve()).catch(() => {}).then(() => this.#save(env, folder, name, bytes))
+    this.#uploads.set(folder, saved)
+    void saved.finally(() => this.#uploads.get(folder) === saved && this.#uploads.delete(folder)).catch(() => {})
     return saved
   }
 
-  async #saveUpload(bot: ComputerBot, name: string, bytes: Uint8Array): Promise<string> {
-    const env = await this.env(bot)
-    const folder = this.uploadsFolder(bot.id)
+  async #save(env: ExecutionEnv, folder: string, name: string, bytes: Uint8Array): Promise<string> {
     getOrThrow(await env.createDir(folder, { recursive: true }, context))
     const safe = safeFileName(name)
     const ext = extname(safe)
@@ -76,6 +97,11 @@ export class BotComputer {
     for (let n = 2; getOrThrow(await env.exists(path, context)); n++) path = join(folder, `${stem}-${n}${ext}`)
     getOrThrow(await env.writeFile(path, bytes, context))
     return path
+  }
+
+  /** An environment for the server's own work on the bots' files, as the bots' user but for no one bot. */
+  #serverEnv(): ExecutionEnv {
+    return this.#options.env(serverWork, this.home)
   }
 
   /**

@@ -1,10 +1,11 @@
 import { type BotInfo, type ChatInfo, maxGroupMembers, minGroupMembers } from '@openbot/api-contract'
 import { cn } from '@openbot/ui/lib/utils'
-import { Link, createFileRoute } from '@tanstack/react-router'
+import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { BotAvatar, GroupAvatar } from '../../components/bot-avatar.tsx'
 import { Field, inputClass } from '../../components/bot-fields.tsx'
 import { ChatView } from '../../components/chat-view.tsx'
+import { ConfirmDeleteGroup } from '../../components/confirm-delete.tsx'
 import { api, errorMessage } from '../../lib/api.ts'
 import { membersOf } from '../../lib/groups.ts'
 import { useLive } from '../../lib/live.tsx'
@@ -48,7 +49,7 @@ function Group() {
           composerLabel={`Message ${chat.name}`}
           emptyText="Say hi to the group. Mention @name to ask one member, or @everyone."
           typing={speaking}
-          allowFiles={false}
+          allowFiles
           showAuthors
         />
       </div>
@@ -57,10 +58,12 @@ function Group() {
   )
 }
 
-/** The group's name and members, Grok's Members pane: rename, open a member's DM, remove one, add another. */
+/** The group's name and members, Grok's Members pane: rename, open a member's DM, remove one, add another, delete the group. */
 function MembersPane({ chat, members }: { chat: ChatInfo; members: BotInfo[] }) {
   const live = useLive()
+  const navigate = useNavigate()
   const [title, setTitle] = useState(chat.title ?? '')
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string>()
   // Renamed elsewhere: show the new name.
@@ -157,6 +160,27 @@ function MembersPane({ chat, members }: { chat: ChatInfo; members: BotInfo[] }) 
       </Field>
 
       {error && <p className="text-sm text-destructive-foreground">{error}</p>}
+
+      <footer className="mt-auto border-t border-border-subtle pt-4">
+        <button
+          type="button"
+          onClick={() => setConfirmingDelete(true)}
+          className="rounded-md px-3 py-1.5 text-base text-destructive-foreground hover:bg-secondary"
+        >
+          Delete group chat
+        </button>
+      </footer>
+
+      {confirmingDelete && (
+        <ConfirmDeleteGroup
+          chat={chat}
+          onCancel={() => setConfirmingDelete(false)}
+          onDeleted={() => {
+            live.removeChat(chat.id)
+            navigate({ to: '/', replace: true })
+          }}
+        />
+      )}
     </aside>
   )
 }

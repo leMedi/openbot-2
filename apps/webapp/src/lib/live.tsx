@@ -163,6 +163,21 @@ export class LiveStore {
     })
   }
 
+  /** Forgets a deleted group chat, its messages and any draft. */
+  removeChat(chatId: string) {
+    this.#update(() => {
+      const chats = new Map(this.chats)
+      chats.delete(chatId)
+      this.chats = chats
+      const messages = new Map(this.messages)
+      messages.delete(chatId)
+      this.messages = messages
+      const drafts = new Map(this.drafts)
+      drafts.delete(chatId)
+      this.drafts = drafts
+    })
+  }
+
   async #apply({ epoch, seq, event }: StampedEvent) {
     const stamp = this.#stamp
     if (event.type !== 'hello' && stamp?.epoch === epoch && seq <= stamp.seq) return // already applied
@@ -192,6 +207,8 @@ export class LiveStore {
         return
       case 'chat.updated':
         return this.setChat(event.chat)
+      case 'chat.deleted':
+        return this.removeChat(event.chatId)
     }
   }
 

@@ -111,6 +111,7 @@ describe('system credentials', () => {
       'chats.handBack': await server.client.chats.handBack({ messageId: takeOver.id, outcome: 'done' }),
       'groups.create': group,
       'groups.update': await server.client.groups.update({ chatId: group.chat.id, title: 'Team' }),
+      'groups.delete': null,
       events: null,
       openapi: await (await server.fetch('/api/openapi.json')).json(),
     }

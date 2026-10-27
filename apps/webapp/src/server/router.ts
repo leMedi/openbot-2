@@ -8,6 +8,7 @@ import {
   type BotWithChat,
   ChatNotFoundError,
   createGroup,
+  deleteGroup,
   getGroup,
   GroupMembersError,
   listGroups,
@@ -89,10 +90,10 @@ async function publishGroupsOf(context: ServerContext, botId: string) {
 }
 
 /**
- * Posts the owner's message in a group chat and starts the members' rounds answering it. Throws unless every member can
- * run, so the message is never left without members to answer it.
+ * Posts the owner's message in a group chat, with their files saved in the group's shared folder, and starts the members'
+ * rounds answering it. Throws unless every member can run, so the message is never left without members to answer it.
  */
-async function sendToGroup(context: ServerContext, chatId: string, text: string) {
+async function sendToGroup(context: ServerContext, chatId: string, text: string, uploads: readonly File[] = []) {
   const group = await getGroup(context.db, chatId)
   if (!group) throw new ORPCError('NOT_FOUND', { message: 'No such chat' })
   if (!group.members.length) throw new ORPCError('PRECONDITION_FAILED', { message: 'Add members to this group chat first' })
@@ -100,7 +101,19 @@ async function sendToGroup(context: ServerContext, chatId: string, text: string)
     const bot = await getBot(context.db, member)
     if (bot) await assertCanRun(context, bot)
   }
-  const { message } = await postMessage(context.db, { chatId, author: 'owner', authorName: 'You', text })
+  // Saved one at a time, so two files of one name get distinct names.
+  const files: AttachmentFile[] = []
+  for (const file of uploads) {
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const path = await context.computer.saveGroupUpload(chatId, file.name, bytes)
+    files.push({ name: basename(path), mimeType: file.type || mimeTypeOf(file.name), path, bytes })
+  }
+  const attachments = await context.attachments.save(chatId, files)
+  const { message } = await postMessage(context.db, { chatId, author: 'owner', authorName: 'You', text, attachments }).catch(async (error) => {
+    // The files stay in the shared folder; only the copies of a message never posted go.
+    await context.attachments.discard(chatId, attachments)
+    throw error
+  })
   const info = toMessageInfo(message)
   context.bus.publish({ type: 'message.created', message: info })
   await publishChat(context, chatId)
@@ -264,11 +277,7 @@ export const router = os.router({
 
     send: os.chats.send.handler(async ({ context, input }) => {
       const chat = await getChat(context.db, input.chatId)
-      if (chat?.kind === 'group') {
-        // Where an owner's file in a group would go is not decided yet (#28).
-        if (input.files.length) throw new ORPCError('BAD_REQUEST', { message: "Files can't be sent to a group chat yet" })
-        return sendToGroup(context, chat.id, input.text)
-      }
+      if (chat?.kind === 'group') return sendToGroup(context, chat.id, input.text, input.files)
       const bot = chat?.botId ? await getBot(context.db, chat.botId) : undefined
       if (!bot) throw new ORPCError('NOT_FOUND', { message: 'No such chat' })
       await assertCanRun(context, bot)
@@ -392,6 +401,21 @@ export const router = os.router({
     update: os.groups.update.handler(async ({ context, input }) => {
       await chatMustExist(membersMustFit(updateGroup(context.db, input.chatId, { title: input.title, memberIds: input.memberIds })))
       return (await publishChat(context, input.chatId))!
+    }),
+
+    delete: os.groups.delete.handler(async ({ context, input }) => {
+      // Deleted first, so no turn can start or post in it while its rounds end.
+      const chat = await deleteGroup(context.db, input.chatId)
+      if (!chat) throw new ORPCError('NOT_FOUND', { message: 'No such group chat' })
+      const ended = context.rounds.end(chat.id)
+      await context.runtime.endGroupTurns(chat.id)
+      await ended
+      // Members keep what they said in their own histories (ADR 0001); only the chat's files go.
+      await context.attachments.removeChat(chat.id)
+      await context.computer
+        .removeGroupFolder(chat.id)
+        .catch((error) => console.error(`[groups] Couldn't delete the folder of group chat ${chat.id}:`, error))
+      context.bus.publish({ type: 'chat.deleted', chatId: chat.id })
     }),
   },
 

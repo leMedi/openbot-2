@@ -141,4 +141,20 @@ describe('live sync', () => {
       { event: { type: 'bot.deleted', botId: bot.id, chatId: bot.chatId } },
     ])
   })
+
+  it('tells every tab a group chat was deleted', async () => {
+    const { server, bot } = await startWithRex()
+    const ana = await server.client.bots.create({ ...rex, name: 'Ana' })
+    server.providers.scriptFor('Rex', endsSilently())
+    server.providers.scriptFor('Ana', endsSilently())
+    const { chat } = await server.client.groups.create({ memberIds: [bot.id, ana.id], text: 'Hi' })
+    await server.rounds.idle(chat.id)
+    const tab = await subscribe(server)
+
+    await server.client.groups.delete({ chatId: chat.id })
+
+    expect((await tab.read((event) => event.event.type === 'chat.deleted')).at(-1)).toMatchObject({
+      event: { type: 'chat.deleted', chatId: chat.id },
+    })
+  })
 })

@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { callsTools, endsSilently, held } from '@openbot/agent/testing'
 import { type BotInfo, type ChatInfo, maxGroupMembers, minGroupMembers, type NewBot } from '@openbot/api-contract'
 import { groupRoundRules } from '@openbot/core'
@@ -29,6 +32,8 @@ async function startWith(...names: string[]) {
   for (const name of names) bots.push(await server.client.bots.create(profile(name)))
   return { server, bots }
 }
+
+const textFile = (name: string, content: string) => new File([content], name, { type: 'text/plain' })
 
 /** A member's turn in which it posts `text`. */
 const posts = (text: string) => [callsTools(['sendMessage', { text }]), endsSilently()]
@@ -266,16 +271,125 @@ describe('rounds', () => {
     expect(await transcript(server, chat.id)).toEqual(['You: Hi'])
     expect(JSON.stringify(requestsOf(server, 'Rex')[1]!.messages.at(-1))).toContain('no longer in this group chat')
   })
+})
 
-  it('refuses files, which have nowhere to go yet', async () => {
+describe("the owner's files in a group chat", () => {
+  it('are saved in the group\'s shared folder, and every member\'s turn lists where', async () => {
     const { server, bots: [rex, ana] } = await startWith('Rex', 'Ana')
     server.providers.scriptFor('Rex', ...passes())
     server.providers.scriptFor('Ana', ...passes())
     const chat = await createGroup(server, [rex!, ana!], 'Hi')
+    server.providers.scriptFor('Rex', ...passes())
+    server.providers.scriptFor('Ana', ...passes())
 
-    await expect(server.client.chats.send({ chatId: chat.id, text: 'See this', files: [new File(['x'], 'x.txt')] })).rejects.toThrow(
-      /Files can't be sent to a group chat/,
-    )
+    const sent = await server.client.chats.send({ chatId: chat.id, text: 'Plan attached', files: [textFile('plan.md', '# Ship Friday\n')] })
+    await server.rounds.idle(chat.id)
+
+    const folder = join(server.home, 'shared', 'groups', chat.id)
+    expect(sent.attachments).toMatchObject([{ name: 'plan.md', mimeType: 'text/plain', size: 14, path: join(folder, 'plan.md') }])
+    expect(await readFile(join(folder, 'plan.md'), 'utf8')).toBe('# Ship Friday\n')
+    for (const name of ['Rex', 'Ana']) {
+      const turn = lastMessage(requestsOf(server, name)[1]!)
+      expect(turn).toContain('The owner: Plan attached')
+      expect(turn).toContain(`${join(folder, 'plan.md')} (text/plain)`)
+    }
+    // The owner downloads the copy kept on the server, as in a DM.
+    const download = await server.fetch(`/api/messages/${sent.id}/attachments/${sent.attachments[0]!.id}`)
+    expect(await download.text()).toBe('# Ship Friday\n')
+  })
+
+  it('never overwrite an earlier file of the same name, nor leave the folder', async () => {
+    const { server, bots: [rex, ana] } = await startWith('Rex', 'Ana')
+    server.providers.scriptFor('Rex', ...passes(), ...passes())
+    server.providers.scriptFor('Ana', ...passes(), ...passes())
+    const { chat } = await server.client.groups.create({ memberIds: [rex!.id, ana!.id], text: 'Hi' })
+    await server.rounds.idle(chat.id)
+
+    const sent = await server.client.chats.send({
+      chatId: chat.id,
+      text: '',
+      files: [textFile('notes.txt', 'one'), textFile('../../notes.txt', 'two')],
+    })
+    await server.rounds.idle(chat.id)
+
+    const folder = join(server.home, 'shared', 'groups', chat.id)
+    expect(sent.attachments.map((file) => file.path)).toEqual([join(folder, 'notes.txt'), join(folder, 'notes-2.txt')])
+    expect(await readFile(join(folder, 'notes-2.txt'), 'utf8')).toBe('two')
+  })
+})
+
+describe('deleting a group chat', () => {
+  it('removes it, its messages and its files, and keeps its members and what they said in their histories', async () => {
+    const { server, bots: [rex, ana] } = await startWith('Rex', 'Ana')
+    server.providers.scriptFor('Rex', ...posts('Build is green.'), ...passes())
+    server.providers.scriptFor('Ana', ...passes())
+    const { chat } = await server.client.groups.create({ memberIds: [rex!.id, ana!.id], text: 'Status?' })
+    await server.rounds.idle(chat.id)
+    server.providers.scriptFor('Rex', ...passes())
+    server.providers.scriptFor('Ana', ...passes())
+    await server.client.chats.send({ chatId: chat.id, text: 'Plan', files: [textFile('plan.md', 'x')] })
+    await server.rounds.idle(chat.id)
+
+    await server.client.groups.delete({ chatId: chat.id })
+
+    expect((await server.client.chats.list()).map((entry) => entry.id)).not.toContain(chat.id)
+    await expect(server.client.chats.messages({ chatId: chat.id })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect((await server.db.select().from(messages)).filter((message) => message.chatId === chat.id)).toEqual([])
+    expect(existsSync(join(server.dataDir, 'attachments', chat.id))).toBe(false)
+    expect(existsSync(join(server.home, 'shared', 'groups', chat.id))).toBe(false)
+    expect((await server.client.bots.list()).map((bot) => bot.name)).toEqual(['Rex', 'Ana'])
+
+    // Rex's one history still has its turn (ADR 0001).
+    server.providers.scriptFor('Rex', ...posts('I said the build is green.'))
+    await server.client.chats.send({ chatId: rex!.chatId, text: 'What did you say in the group?' })
+    await expect.poll(async () => (await transcript(server, rex!.chatId)).length).toBe(2)
+    expect(JSON.stringify(requestsOf(server, 'Rex').at(-2)!.messages)).toContain('Build is green.')
+  })
+
+  it('ends the rounds going on and the turn in progress, posting nothing more', async () => {
+    const { server, bots: [rex, ana] } = await startWith('Rex', 'Ana')
+    const turn = held(callsTools(['sendMessage', { text: 'Still here?' }]))
+    server.providers.scriptFor('Rex', turn, endsSilently())
+    server.providers.scriptFor('Ana', ...posts('Me too.'))
+
+    const { chat } = await server.client.groups.create({ memberIds: [rex!.id, ana!.id], text: 'Hi' })
+    await turn.requested
+    await server.client.groups.delete({ chatId: chat.id })
+    turn.release()
+
+    await server.rounds.idle(chat.id)
+    await expect.poll(async () => (await server.client.bots.list()).some((bot) => bot.working)).toBe(false)
+    expect(requestsOf(server, 'Ana')).toEqual([])
+    expect((await server.db.select().from(messages)).filter((message) => message.chatId === chat.id)).toEqual([])
+    expect(await chatInfo(server, chat.id)).toBeUndefined()
+  })
+
+  it("drops a member's turn waiting behind its DM work", async () => {
+    const { server, bots: [rex, ana] } = await startWith('Rex', 'Ana')
+    const dmWork = held(callsTools(['sendMessage', { text: 'Report done.' }]))
+    server.providers.scriptFor('Rex', dmWork, endsSilently())
+
+    await server.client.chats.send({ chatId: rex!.chatId, text: 'Write the report' })
+    await dmWork.requested
+    const { chat } = await server.client.groups.create({ memberIds: [rex!.id, ana!.id], text: 'Anyone there?' })
+    await server.client.groups.delete({ chatId: chat.id })
+    dmWork.release()
+
+    await server.rounds.idle(chat.id)
+    await expect.poll(async () => (await server.client.bots.list()).some((bot) => bot.working)).toBe(false)
+    expect(await transcript(server, rex!.chatId)).toEqual(['You: Write the report', 'Rex: Report done.'])
+    // Rex's two requests were its DM work; its group turn never ran.
+    expect(requestsOf(server, 'Rex')).toHaveLength(2)
+    expect(requestsOf(server, 'Ana')).toEqual([])
+    expect(server.providers.pendingTurns).toBe(0)
+  })
+
+  it('deletes only group chats', async () => {
+    const { server, bots: [rex] } = await startWith('Rex')
+
+    await expect(server.client.groups.delete({ chatId: rex!.chatId })).rejects.toThrow(/No such group chat/)
+    await expect(server.client.groups.delete({ chatId: 'nothing' })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(await server.client.bots.list()).toHaveLength(1)
   })
 })
 

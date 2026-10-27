@@ -67,6 +67,14 @@ export class GroupRounds {
     return this.#playing.has(chatId) ? this.idle(chatId) : this.start(chatId, trigger)
   }
 
+  /** Ends the chat's rounds after the turn in progress, e.g. as the group is deleted; resolves once they have ended. */
+  end(chatId: string): Promise<void> {
+    const playing = this.#playing.get(chatId)
+    // A newer generation with nothing to play: the rounds going on are superseded.
+    if (playing) this.#playing.set(chatId, { generation: playing.generation + 1, done: playing.done })
+    return this.idle(chatId)
+  }
+
   /** Ends every chat's rounds after the turn in progress. */
   close() {
     this.#closed = true

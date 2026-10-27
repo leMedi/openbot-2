@@ -221,6 +221,8 @@ export const liveEvent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('bot.updated'), bot }),
   /** The bot and its DM are gone for good. */
   z.object({ type: z.literal('bot.deleted'), botId: z.string(), chatId: z.string() }),
+  /** The group chat, its messages and its files are gone for good. */
+  z.object({ type: z.literal('chat.deleted'), chatId: z.string() }),
   z.object({ type: z.literal('bot.status'), botId: z.string(), working: z.boolean(), error: z.string().nullable() }),
   z.object({ type: z.literal('message.created'), message }),
   /** A chat's sidebar state changed: a message, a read, a pin; `chat` is all of it as it is now. */
@@ -522,6 +524,16 @@ export const contract = {
       })
       .input(z.object({ chatId: z.string(), title: groupTitle.optional(), memberIds: groupMembers.optional() }))
       .output(chat),
+    delete: oc
+      .route({
+        method: 'DELETE',
+        path: '/groups/{chatId}',
+        summary:
+          'Delete a group chat for good: ends its rounds, then deletes its messages and files. Its members stay, and what they ' +
+          'said stays in their histories',
+      })
+      .input(z.object({ chatId: z.string() }))
+      .output(z.void()),
   },
   providers: {
     list: oc
