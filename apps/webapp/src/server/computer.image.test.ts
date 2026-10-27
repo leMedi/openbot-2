@@ -1,7 +1,8 @@
+import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { request } from 'node:http'
 import { join } from 'node:path'
-import { botUser, openBotComputer, userExists } from '@openbot/agent'
+import { botUser, userExists } from '@openbot/agent'
 import { callsTools, endsSilently, held, says } from '@openbot/agent/testing'
 import type { BotInfo, NewBot } from '@openbot/api-contract'
 import { connectBrowser, connectDesktop, connectScreens, defaultDaemonSocket } from '@openbot/computer'
@@ -28,21 +29,20 @@ function screenPids(botId: string): Promise<Record<string, number>> {
   })
 }
 
-// Seam 2 on the real computer: the screen daemon running as openbot under supervisord, the bots' shell, each screen's
-// Chromium over CDP, loading pages this test serves on localhost, and each screen's cua-driver driving Mousepad.
+// Seam 2 on the real computer: the screen daemon running as openbot under supervisord, each screen's Chromium over
+// CDP, loading pages this test serves on localhost, and each screen's cua-driver driving Mousepad.
 describe.skipIf(!inRuntimeImage)('the real computer', () => {
   describeComputerContract(
     'the real computer',
     async () => {
       const home = process.env.OPENBOT_HOME!
-      const computer = openBotComputer({ home })
       const pages = await servePages()
       const desktops: { close(): Promise<void> }[] = []
       const client = () => {
         const screens = connectScreens({ socketPath })
         const desktop = connectDesktop({ screens, runAs: botUser })
         desktops.push(desktop)
-        return { screens, shell: { exec: computer.exec.bind(computer) }, browser: connectBrowser({ screens }), desktop }
+        return { screens, browser: connectBrowser({ screens }), desktop }
       }
       return {
         computer: client(),
@@ -50,17 +50,14 @@ describe.skipIf(!inRuntimeImage)('the real computer', () => {
         // Every process of the screen, killed as openbot (who owns them), each with its process group.
         crash: async (bot) => {
           const pids = Object.values(await screenPids(bot.id))
-          await computer.exec(bot, `kill -KILL ${pids.map((pid) => `-${pid}`).join(' ')}`)
+          execFileSync('sudo', ['--non-interactive', `--user=${botUser}`, 'kill', '-KILL', ...pids.map((pid) => `-${pid}`)])
         },
-        user: botUser,
-        folder: (bot) => computer.folder(bot.id),
         page: pages.page,
         editor: 'mousepad',
         close: async () => {
           await Promise.all(desktops.map((desktop) => desktop.close()))
           await pages.close()
-          await computer.exec({ id: 'contract', name: 'Contract' }, `rm -rf ${join(home, 'bots')}/contract-*`)
-          await computer.close()
+          execFileSync('sudo', ['--non-interactive', `--user=${botUser}`, 'sh', '-c', `rm -rf ${join(home, 'bots')}/contract-*`])
         },
       }
     },

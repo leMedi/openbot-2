@@ -43,6 +43,7 @@ Not planned: bots creating bots, bot-written or user-written skills (all skills 
   - `openbot-desktopd`: owns every bot's Xvfb, Openbox, Chromium, x11vnc and cua-driver. Runs as user `openbot`. Talks to the server over a Unix socket. Displays survive server restarts.
   - pi-env daemons, spawned by the server as user `openbot`, run bots' shell and file tools.
 - Bots have **full passwordless sudo**: it is their computer.
+- **Container only.** Bots run only in the runtime image; other platforms aren't planned. A server started outside it (no `openbot` user, or no pi-env daemon for the machine) still serves the UI but refuses to run bots, with an error saying so, rather than running their commands as its own user (#47). Develop with `pnpm dev:up`.
 
 ### 2.2 Known risks (accepted for now)
 
@@ -210,10 +211,10 @@ As built (#17):
 
 As built (#11), shell and files:
 
-- Every bot has pi-durable's `bash`, `read`, `write` and `edit` tools. They run in a `RemoteExecutionEnv` on one pi-env daemon (`localDaemon()`), which the server starts as `openbot` with `sudo --non-interactive --set-home --user=openbot`, started on the first tool call and stopped with the runtime. A bot's environment starts in `$OPENBOT_HOME/bots/<id>/`, made on first use; it reaches the whole computer. Where there is no `openbot` user (the server running straight on a developer's machine) the daemon runs as the server's user.
+- Every bot has pi-durable's `bash`, `read`, `write` and `edit` tools. They run in a `RemoteExecutionEnv` on one pi-env daemon (`localDaemon()`), which the server starts as `openbot` with `sudo --non-interactive --set-home --user=openbot`, started on the first tool call and stopped with the runtime. A bot's environment starts in `$OPENBOT_HOME/bots/<id>/`, made on first use; it reaches the whole computer. This is the bots' one shell: core's `Computer` port has none (#47). Outside the runtime image `openBotComputer` refuses: sending a bot a message fails with `PRECONDITION_FAILED`, other runs fail before starting, and every environment throws `ComputerUnavailableError`.
 - The prompt tells each bot it works as `openbot` with sudo, and where its folder, `shared/` and every other bot's folder are.
 - `bash`, `write` and `edit` are reviewed under the `shell` surface and written to the audit log; `read` declares none. Deleting a bot deletes its folder.
-- `BotComputer` (`@openbot/agent`) is the seam: Seam 1 uses `fakeBotComputer`, with files in a temporary home and commands sent to the fake `Computer`'s `shell.exec`, so tests script and see them. `computer.image.test.ts` runs the same scenarios on the real computer inside the runtime image (skipped elsewhere).
+- `BotComputer` (`@openbot/agent`) is the seam: Seam 1 uses `fakeBotComputer`, with files in a temporary home and commands answered from a script and recorded instead of run (`server.commands`), so tests script and see them. `computer.image.test.ts` runs the same scenarios on the real computer inside the runtime image (skipped elsewhere).
 
 As built (#13), screens:
 

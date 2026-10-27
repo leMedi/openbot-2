@@ -59,6 +59,7 @@ const os = implement(contract).$context<ServerContext>()
 
 /** Throws unless the bot's model can run, so the owner's input is never left without a bot to answer it. */
 async function assertCanRun(context: ServerContext, bot: BotWithChat) {
+  if (context.computer.unavailable) throw new ORPCError('PRECONDITION_FAILED', { message: context.computer.unavailable })
   const model = bot.model ?? (await readModelSettings(context.db)).defaultModel
   if (!model) throw new ORPCError('PRECONDITION_FAILED', { message: 'Choose a default model first' })
   if (!(await context.providers.findModel(model))) {
