@@ -14,6 +14,7 @@ import {
   syncScreens,
 } from '@openbot/core'
 import type { Db } from '@openbot/db'
+import { ScreenHolds } from './screen-holds.ts'
 import type { ScreenTickets } from './screen-stream.ts'
 import { toChatInfo, toMessageInfo } from './views.ts'
 
@@ -31,6 +32,8 @@ export type ServerContext = {
   screens: Screens
   /** Tickets to screens' streams, redeemed by the stream proxy. */
   screenTickets: ScreenTickets
+  /** Screens the owner has taken over; computer-use sessions wait while one is held. */
+  screenHolds: ScreenHolds
   /** Settles once the computer's screens first match the bots (or the computer couldn't be reached at all). */
   screensSynced: Promise<void>
 }
@@ -82,6 +85,7 @@ export async function createServerContext({
   tools?: BotTool[]
 }): Promise<ServerContext> {
   const bus = new EventBus<LiveEvent>()
+  const screenHolds = new ScreenHolds()
   const attachments = new AttachmentStore(attachmentsDir)
   const providers = new Providers({ db, box: new SecretBox(secretKey), providers: modelProviders })
   const runtime = await BotRuntime.open({
@@ -131,10 +135,26 @@ export async function createServerContext({
       bus.publish({ type: 'message.created', message: toMessageInfo(message) })
       await publishChat({ db, bus }, bot.chatId)
     },
+    async requestTakeOver(bot, card, idempotencyKey) {
+      const { message, created } = await postMessage(db, {
+        chatId: bot.chatId,
+        author: 'bot',
+        authorBotId: bot.id,
+        authorName: bot.name,
+        // The instruction doubles as the message's text, e.g. for previews.
+        text: card.instruction,
+        card,
+        idempotencyKey,
+      })
+      if (!created) return
+      bus.publish({ type: 'message.created', message: toMessageInfo(message) })
+      await publishChat({ db, bus }, bot.chatId)
+    },
+    screenFree: (botId) => screenHolds.whenFree(botId),
     onStatus: (botId, status) => bus.publish({ type: 'bot.status', botId, ...status }),
   })
   const screensSynced = keepScreensInSync(db, screens)
-  return { db, bus, providers, runtime, computer, attachments, screens, screenTickets, screensSynced }
+  return { db, bus, providers, runtime, computer, attachments, screens, screenTickets, screenHolds, screensSynced }
 }
 
 const syncRetryMs = [1_000, 2_000, 5_000, 10_000, 30_000]

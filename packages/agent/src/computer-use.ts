@@ -1,13 +1,16 @@
-import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
+import { awaitWithContext, BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { type ImageContent, type TextContent, Type } from '@earendil-works/pi-ai'
 import {
   configure,
   type ConversationId,
+  type Cursor,
   defineExtension,
+  type EntryId,
   defineTool,
   type Extension,
   type ModelRef,
   section,
+  type ToolExecutionApi,
   type ToolRegistration,
 } from '@earendil-works/pi-durable'
 import { DEFAULT_IMAGE_LIMITS, type ImageProcessor } from '@earendil-works/pi-durable/tools'
@@ -22,6 +25,7 @@ import type {
   DesktopSnapshot,
   DesktopWindow,
   DesktopWindowTarget,
+  TakeOverCard,
 } from '@openbot/core'
 import type { BotComputer } from './computer.ts'
 
@@ -45,7 +49,7 @@ Desktop apps (anything that isn't a web page; the browser is a desktop window to
 2. Act by reference: desktop_click, desktop_type (into an element, or into what has focus in a window), desktop_scroll; desktop_key presses a key or combination in a window, e.g. "Return" or "ctrl+s". When an app shows no tree, look with desktop_screenshot of its window and act on a point of that screenshot (x, y in its pixels).
 3. Verify: each desktop action reports its effect. "confirmed" means it was read back. "unverifiable" means it was sent but its effect couldn't be seen, "suspected_noop" that nothing seems to have changed, "partial" that only part of it landed: take a new snapshot (or screenshot) and check before going on, and never repeat such an action without looking first, or you may do it twice. "refused" means nothing was sent; its summary says why.
 
-Never type passwords, card numbers or other secrets, and don't buy, send, post, delete or accept anything unless the goal says to. If a login, captcha or two-factor prompt blocks you, stop and start your summary with "Needs help:" and what the owner should do, so they can take over the screen.`
+Never type passwords, card numbers or other secrets, and don't buy, send, post, delete or accept anything unless the goal says to. When something only the owner can do blocks you (a login, a captcha, a two-factor code, a payment), call needs_help with one line telling them what to do on the screen, e.g. "Sign in to shop.test"; that ends your work, and the owner takes over the screen.`
 
 /** A snapshot as the model reads it. */
 export function formatSnapshot({ url, title, tree }: BrowserSnapshot): string {
@@ -68,6 +72,12 @@ export function formatWindows(windows: DesktopWindow[]): string {
 /** A desktop action's effect as the model reads it. */
 export const formatEffect = ({ effect, summary }: DesktopActionResult) => `Effect: ${effect}. ${summary}`
 
+/** What a session's `needs_help` call leaves in its result's details, for `use_computer` to find. */
+type NeedsHelpDetails = { needsHelp: string }
+
+/** What `use_computer`'s result keeps in its details: its session and, when it got stuck, the take-over it asked for. */
+export type UseComputerDetails = { conversationId: number; takeOver?: { instruction: string } }
+
 /** The latest snapshot after an action, so the model verifies what it did and gets fresh references. */
 async function afterAction(browser: Browser, bot: BotWithChat, done: string) {
   return { output: [text(`${done}\n\n${formatSnapshot(await browser.snapshot(bot))}`)] }
@@ -82,6 +92,12 @@ export type ComputerUseOptions = {
   botOf(conversationId: ConversationId): Promise<BotWithChat>
   /** The model computer-use sessions run on: the computer-use model, else the default. */
   model(): Promise<ModelRef>
+  /** Resolves once the owner isn't holding the bot's screen, so a session never fights them for its input. */
+  screenFree(bot: BotWithChat): Promise<void>
+  /** The instruction of the bot's take-over card still waiting for the owner, or null. */
+  waitingTakeOver(bot: BotWithChat): Promise<string | null>
+  /** Posts a take-over card to the bot's DM; `idempotencyKey` makes a replayed call post once. */
+  requestTakeOver(bot: BotWithChat, card: TakeOverCard, idempotencyKey: string): Promise<void>
 }
 
 /**
@@ -275,7 +291,32 @@ export function computerUse(options: ComputerUseOptions) {
     }),
   ]
 
-  const tools = [...browserTools, ...desktopTools]
+  const needsHelp = defineTool({
+    name: 'needs_help',
+    description:
+      'Stop and ask the owner to take over the screen, for what only they can do: a login, a captcha, a two-factor code, ' +
+      'a payment. Ends your work.',
+    parameters: Type.Object({
+      instruction: Type.String({ description: 'One line telling the owner what to do on the screen, e.g. "Sign in to shop.test"' }),
+    }),
+    execute: async (args) => ({
+      output: [text('The owner is asked to take over the screen. Stop here.')],
+      details: { needsHelp: args.instruction.trim() || 'Help on the screen' } satisfies NeedsHelpDetails,
+      control: { terminate: true },
+    }),
+  })
+
+  // Every screen tool first waits while the owner holds the screen: a session's input would fight theirs.
+  const pausable = [...browserTools, ...desktopTools].map(
+    (tool): ToolRegistration<any, any> => ({
+      ...tool,
+      execute: async (args: unknown, api: any, ctx: any) => {
+        await awaitWithContext(options.screenFree(await botOf(api.conversationId)), ctx)
+        return tool.execute(args as never, api, ctx)
+      },
+    }),
+  )
+  const tools = [...pausable, needsHelp]
   const extension: Extension = defineExtension({
     name: 'computer-use',
     sections: [section('computer-use', () => computerUseVoice, { tag: false })],
@@ -298,8 +339,16 @@ export function computerUse(options: ComputerUseOptions) {
     replay: 'safe',
     // A bot has one screen: two sessions at once would fight over it and invalidate each other's references.
     executionMode: 'sequential',
-    execute: async (args, api) => {
+    execute: async (args, api, ctx) => {
       const bot = await botOf(api.conversationId)
+      // Checked once: a rerun after a restart may find the card this very call posted.
+      const waiting = (await api.memo<boolean>('started', context)) ? null : await options.waitingTakeOver(bot)
+      if (waiting) {
+        throw new Error(
+          `The owner hasn't handed your screen back yet; you asked them: "${waiting}". Wait: handing it back wakes you.`,
+        )
+      }
+      await api.memo('started', true, context)
       const model = await options.model()
       const session = await api.commit(async (tx) => {
         const existing = (await tx.scanConversations({ ownerTaskId: api.taskId }, 1)).items[0]
@@ -312,11 +361,12 @@ export function computerUse(options: ComputerUseOptions) {
         })
         return created.id
       }, context)
-      await api.details({ conversationId: session }, context)
+      await api.details({ conversationId: session } satisfies UseComputerDetails, context)
 
       // Opened once: a rerun after a restart finds the session mid-way and leaves its page alone.
       let start = (await api.memo<string>('start', context)) ?? ''
       if (args.startUrl && !start) {
+        await awaitWithContext(options.screenFree(bot), ctx)
         try {
           await browser.navigate(bot, args.startUrl)
           start = `\n\nThe browser has opened ${args.startUrl}.`
@@ -334,7 +384,24 @@ export function computerUse(options: ComputerUseOptions) {
         void handle.abort(context)
       }, sessionTimeoutMs)
       const settled = await submission.wait(context).finally(() => clearTimeout(timer))
+      const instruction = await neededHelp(api, session, settled.entry)
       const answerId = settled.status === 'done' ? settled.answer : undefined
+      if (instruction) {
+        // Stuck on what only the owner can do: they're asked on a card, and this run ends until they hand the screen back.
+        const card: TakeOverCard = { type: 'take_over', instruction, goal: args.goal }
+        await options.requestTakeOver(bot, card, `${api.conversationId}:${api.callId}`)
+        return {
+          output: [
+            text(
+              `The helper is stuck and needs the owner: ${instruction}\n\n` +
+                'A take-over card now asks them to do it on your screen. Your turn ends here; when they hand the screen back, ' +
+                'that wakes you with what they did.',
+            ),
+          ],
+          details: { conversationId: session, takeOver: { instruction } } satisfies UseComputerDetails,
+          control: { terminate: true },
+        }
+      }
       if (answerId === undefined) {
         const why = timedOut ? `it ran for more than ${sessionTimeoutMs / 60_000} minutes` : (settled.reason ?? 'it gave no answer')
         throw new Error(`The computer-use session stopped before finishing: ${why}`)
@@ -361,4 +428,23 @@ export function computerUse(options: ComputerUseOptions) {
   })
 
   return { extension, useComputer, sessionToolNames: tools.map((tool) => tool.name) }
+}
+
+/** The instruction of a `needs_help` call the session made after its input `from`, or undefined when it made none. */
+async function neededHelp(api: ToolExecutionApi, session: ConversationId, from: EntryId | undefined): Promise<string | undefined> {
+  if (from === undefined) return undefined
+  // Newest first: needs_help ends the session, so its result is among the last entries.
+  let cursor: Cursor | undefined
+  do {
+    const page = await api.commit((tx) => tx.scanEntries({ conversationId: session, minEntryId: from }, 200, cursor), context)
+    for (const entry of page.items) {
+      for (const message of entry.model ?? []) {
+        if (message.role !== 'toolResult' || message.toolName !== 'needs_help' || message.isError) continue
+        const details = message.details as NeedsHelpDetails | undefined
+        if (details?.needsHelp) return details.needsHelp
+      }
+    }
+    cursor = page.next
+  } while (cursor)
+  return undefined
 }

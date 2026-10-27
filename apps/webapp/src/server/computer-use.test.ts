@@ -119,7 +119,7 @@ describe('computer-use sessions', () => {
     }
     for (const request of session) {
       expect(request.model).toBe('fake/fake-model')
-      expect(request.tools.sort()).toEqual([...browserTools, ...desktopTools].sort())
+      expect(request.tools.sort()).toEqual([...browserTools, ...desktopTools, 'needs_help'].sort())
     }
   })
 
@@ -261,7 +261,7 @@ describe('computer-use sessions', () => {
     server.providers.script(
       callsTools(['use_computer', { goal: 'Look at the shop', reason: 'Needs JavaScript' }]),
       callsTools(['browser_snapshot', {}]),
-      says('Needs help: the screen is off.'),
+      says('The screen is off.'),
       callsTools(['sendMessage', { text: 'My screen is off' }]),
       endsSilently(),
     )
@@ -271,7 +271,7 @@ describe('computer-use sessions', () => {
 
     expect(JSON.stringify(server.providers.requests[2]!.messages.at(-1))).toContain("Rex's screen isn't running")
     const result = JSON.stringify(server.providers.requests[3]!.messages.at(-1))
-    expect(result).toContain('Needs help: the screen is off.')
+    expect(result).toContain('The screen is off.')
     expect(result).toContain('No final screenshot')
   })
 

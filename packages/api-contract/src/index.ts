@@ -82,8 +82,26 @@ export const questionCard = z.object({
 })
 export type QuestionCardInfo = z.infer<typeof questionCard>
 
+/** How the owner handed a bot's screen back: they did the step, or skipped it without doing it. */
+export const handBackOutcomes = ['done', 'skipped'] as const
+export const handBackOutcome = z.enum(handBackOutcomes)
+export type HandBackOutcome = z.infer<typeof handBackOutcome>
+
+/**
+ * A bot stuck on its screen on something only the owner can do (a login, a captcha, two-factor, a payment): they take
+ * the screen over, then hand it back, which wakes the bot.
+ */
+export const takeOverCard = z.object({
+  type: z.literal('take_over'),
+  /** One line telling the owner what to do on the screen. */
+  instruction: z.string(),
+  /** Null while it waits for the owner; once handed back, it can't be handed back again. */
+  outcome: handBackOutcome.nullable(),
+})
+export type TakeOverCardInfo = z.infer<typeof takeOverCard>
+
 /** An interactive item in a chat that asks the owner for something. */
-export const card = z.discriminatedUnion('type', [questionCard])
+export const card = z.discriminatedUnion('type', [questionCard, takeOverCard])
 export type CardInfo = z.infer<typeof card>
 
 /** At most this many files go with one message (Grok's composer limit); the server enforces the same. */
@@ -139,7 +157,10 @@ export const chat = z.object({
   pinnedPosition: z.number().int().nonnegative().nullable(),
   /** A bot posted since the owner last opened the chat. */
   unread: z.boolean(),
-  /** The prompt of the newest question card still open: the chat needs the owner. Null when nothing waits. */
+  /**
+   * The prompt of the newest question card still open, or the instruction of a take-over card still waiting: the chat
+   * needs the owner. Null when nothing waits.
+   */
   waitingFor: z.string().nullable(),
   /** The newest message, for the sidebar's preview line; null when the chat is empty. */
   lastMessage: message.pick({ author: true, authorName: true, text: true, attachments: true, createdAt: true }).nullable(),
@@ -435,6 +456,16 @@ export const contract = {
       })
       .input(z.object({ messageId: z.string(), answer: questionAnswer }))
       .output(message),
+    handBack: oc
+      .route({
+        method: 'POST',
+        path: '/messages/{messageId}/hand-back',
+        summary:
+          "Hand a bot's screen back after its take-over card, once: `done` when the owner did the step, `skipped` when they " +
+          "didn't. Ends the owner's hold on the screen and wakes the bot with the outcome",
+      })
+      .input(z.object({ messageId: z.string(), outcome: handBackOutcome }))
+      .output(message),
   },
   providers: {
     list: oc
@@ -488,6 +519,20 @@ export const contract = {
       })
       .input(z.object({ botId: z.string() }))
       .output(screenTicket),
+    hold: oc
+      .route({
+        method: 'PUT',
+        path: '/bots/{botId}/screen/hold',
+        summary:
+          "Take over the bot's screen, or renew the hold: the bot's computer-use sessions pause until it is handed back. A " +
+          'hold not renewed by `expiresAt` ends by itself',
+      })
+      .input(z.object({ botId: z.string() }))
+      .output(z.object({ expiresAt: z.number() })),
+    release: oc
+      .route({ method: 'DELETE', path: '/bots/{botId}/screen/hold', summary: "Hand the bot's screen back; its sessions go on" })
+      .input(z.object({ botId: z.string() }))
+      .output(z.void()),
   },
   orchestrator: {
     getModes: oc

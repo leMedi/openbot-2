@@ -299,6 +299,44 @@ describe.skipIf(!inRuntimeImage)('bots on the real computer', () => {
     expect(statSync(answered!.match(/saved at (\S+\.png)/)![1]!).size).toBeGreaterThan(1000)
   })
 
+  it('ask the owner to take over when stuck, wait while they hold the screen, and go on once handed back', { timeout: 120_000 }, async () => {
+    const pages = await servePages()
+    try {
+      const signIn = pages.page('sign-in', { title: 'Sign in', elements: [{ role: 'heading', name: 'Sign in' }, { role: 'textbox', name: 'Password' }] })
+      const server = await start()
+      const rex = await server.client.bots.create(newBot('Rex'))
+      await expect.poll(async () => (await server.client.screens.status({ botId: rex.id })).state, { timeout: 60_000 }).toBe('running')
+      const goal = { goal: 'Open my orders', reason: 'Testing take-over', startUrl: signIn }
+      server.providers.script(
+        callsTools(['use_computer', goal]),
+        callsTools(['browser_snapshot', {}]),
+        callsTools(['needs_help', { instruction: 'Sign in to the shop' }]),
+      )
+      await server.client.chats.send({ chatId: rex.chatId, text: 'What did I order?' })
+      await expect.poll(async () => (await server.client.bots.list()).find((entry) => entry.id === rex.id)?.working, { timeout: 60_000 }).toBe(false)
+      const card = (await server.client.chats.messages({ chatId: rex.chatId })).at(-1)!
+      expect(card.card).toEqual({ type: 'take_over', instruction: 'Sign in to the shop', outcome: null })
+
+      // The owner takes over, then is done: the screen is handed back and Rex's next session runs on it.
+      await server.client.screens.hold({ botId: rex.id })
+      server.providers.script(
+        callsTools(['use_computer', { goal: 'Open my orders', reason: 'Testing take-over' }]),
+        callsTools(['browser_snapshot', {}]),
+        says('Still the sign-in page.'),
+        callsTools(['sendMessage', { text: 'Done' }]),
+        endsSilently(),
+      )
+      await server.client.chats.handBack({ messageId: card.id, outcome: 'done' })
+      await expect.poll(async () => (await server.client.bots.list()).find((entry) => entry.id === rex.id)?.working, { timeout: 60_000 }).toBe(false)
+
+      const resumed = server.providers.requests.map((request) => JSON.stringify(request.messages.at(-1)))
+      expect(resumed[3]).toContain('they did what you asked')
+      expect(resumed[5]).toContain('- heading \\"Sign in\\"')
+    } finally {
+      await pages.close()
+    }
+  })
+
   it('lose their folder when deleted', async () => {
     const server = await start()
     const rex = await server.client.bots.create(newBot('Rex'))

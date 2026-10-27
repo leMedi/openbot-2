@@ -45,6 +45,19 @@ export {
   questionOptionStyles,
   type QuestionOptionStyle,
 } from './questions.ts'
+export {
+  describeHandBack,
+  findWaitingTakeOver,
+  handBack,
+  HandedBackError,
+  type HandBackOutcome,
+  handBackOutcomeOf,
+  handBackOutcomes,
+  isTakeOverCard,
+  reopenTakeOver,
+  type TakeOverCard,
+  TakeOverNotFoundError,
+} from './take-overs.ts'
 export { readModelSettings, writeModelSettings, type ModelSettings } from './settings.ts'
 export { lanes, type AgentRuntime, type BotInput, type Lane } from './ports/agent-runtime.ts'
 export {

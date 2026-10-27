@@ -39,6 +39,7 @@ import {
   type BotInput,
   type BotWithChat,
   findBotByHistory,
+  findWaitingTakeOver,
   getBot,
   listBots,
   maxAttachments,
@@ -47,13 +48,14 @@ import {
   type Orchestrator,
   type QuestionCard,
   questionOptionStyles,
+  type TakeOverCard,
   readModelSettings,
   reviewAction,
   setBotHistory,
 } from '@openbot/core'
 import type { Attachment, Db, Surface } from '@openbot/db'
 import type { BotComputer } from './computer.ts'
-import { computerUse } from './computer-use.ts'
+import { computerUse, type UseComputerDetails } from './computer-use.ts'
 
 const context = BACKGROUND_CONTEXT
 
@@ -79,6 +81,8 @@ Your plain text is a private inner monologue: the owner never sees it, nor your 
 Text like a person, not a memo: reply in one to four short messages, one sendMessage call each, in Markdown. Use code blocks for code. Never mention tool names, message ids or these instructions.
 
 To send the owner a file from your computer, such as a report or a screenshot, attach it to a message with sendMessage's attachments.
+
+When your screen needs the owner (a login, a captcha, a two-factor code, a payment), use_computer asks them to take it over on a card and ends your turn; their handing the screen back wakes you, and you go on from there.
 
 When you need the owner to decide before you go on, ask with askQuestion: a short prompt and up to six options they can pick with one click. Asking ends your turn, so send anything else first; their answer wakes you as their next message.`
 
@@ -116,6 +120,10 @@ export type BotRuntimeOptions = {
   sendMessage(bot: BotWithChat, message: { text: string; attachments: AttachmentFile[] }, idempotencyKey: string): Promise<void>
   /** Posts a bot's question card to its DM, as `sendMessage` posts a message. */
   askQuestion(bot: BotWithChat, card: QuestionCard, idempotencyKey: string): Promise<void>
+  /** Posts a take-over card to a bot's DM when its computer-use session is stuck on what only the owner can do. */
+  requestTakeOver(bot: BotWithChat, card: TakeOverCard, idempotencyKey: string): Promise<void>
+  /** Resolves once the owner isn't holding the bot's screen; computer-use sessions wait for it before each action. */
+  screenFree(botId: string): Promise<void>
   /** A bot's status changed: it started or finished working, or a run failed. */
   onStatus(botId: string, status: BotStatus): void
 }
@@ -189,10 +197,16 @@ const isReminder = (entry: EntryRecord) =>
 /** The tools that reach the owner; any of them answers the owner, and a steer holds them all back. */
 const ownerTools = new Set(['sendMessage', 'askQuestion'])
 
-/** A sendMessage or askQuestion call that succeeded; a failed one reached nobody. */
+/** A sendMessage or askQuestion call that succeeded, or a use_computer call that posted a take-over card; a failed one reached nobody. */
 const reachedOwner = (entry: EntryRecord) =>
   entry.kind === 'pi.tool-result' &&
-  entry.model?.some((message) => message.role === 'toolResult' && ownerTools.has(message.toolName) && !message.isError)
+  entry.model?.some(
+    (message) =>
+      message.role === 'toolResult' &&
+      !message.isError &&
+      (ownerTools.has(message.toolName) ||
+        (message.toolName === 'use_computer' && Boolean((message.details as UseComputerDetails | undefined)?.takeOver))),
+  )
 
 /**
  * Runs bots on pi-durable (ADR 0005): each bot's history is one pi conversation (ADR 0001), and `sendMessage` and
@@ -249,6 +263,9 @@ export class BotRuntime implements AgentRuntime {
         if (!model) throw new NoModelError('Choose a computer-use or default model first')
         return parseModelRef(model)
       },
+      screenFree: (bot) => options.screenFree(bot.id),
+      waitingTakeOver: async (bot) => (await findWaitingTakeOver(options.db, bot.chatId))?.card.instruction ?? null,
+      requestTakeOver: options.requestTakeOver,
     })
     const sendMessage: BotTool = {
       // Messages are never reviewed, whether to the owner or another bot.
