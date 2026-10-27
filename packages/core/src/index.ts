@@ -4,6 +4,7 @@ export { SecretBox } from './secret-box.ts'
 export { groupRoundRules } from './group-rules.ts'
 export {
   createGroup,
+  deleteGroup,
   describeTurn,
   findGroupByName,
   getGroup,

@@ -8,7 +8,7 @@ import { membersOf } from '../lib/groups.ts'
 import { summarizeAttachments } from './attachments.tsx'
 import { BotAvatar, GroupAvatar } from './bot-avatar.tsx'
 import { NewBotDialog } from './new-bot-dialog.tsx'
-import { ConfirmDelete } from './profile-pane.tsx'
+import { ConfirmDeleteBot, ConfirmDeleteGroup } from './confirm-delete.tsx'
 
 /** Grok Bot's sidebar bounds, in px. */
 const sidebarWidth = { initial: 280, min: 240, max: 400 }
@@ -68,7 +68,7 @@ export function Sidebar() {
   const [preview, setPreview] = useState<number>()
   const [menu, setMenu] = useState<{ chatId: string; x: number; y: number }>()
   const [renaming, setRenaming] = useState<string>()
-  const [deleting, setDeleting] = useState<BotInfo>()
+  const [deleting, setDeleting] = useState<Row>()
   const [error, setError] = useState<string>()
   const [dragging, setDragging] = useState<string>()
   const [dropTarget, setDropTarget] = useState<{ chatId: string; after: boolean }>()
@@ -209,12 +209,23 @@ export function Sidebar() {
         />
       )}
 
-      {deleting && (
-        <ConfirmDelete
-          bot={deleting}
+      {deleting?.bot && (
+        <ConfirmDeleteBot
+          bot={deleting.bot}
           onCancel={() => setDeleting(undefined)}
           onDeleted={() => {
-            live.removeBot(deleting.id, deleting.chatId)
+            live.removeBot(deleting.bot!.id, deleting.chatId)
+            if (deleting.chatId === activeChatId) navigate({ to: '/', replace: true })
+            setDeleting(undefined)
+          }}
+        />
+      )}
+      {deleting?.chat && !deleting.bot && (
+        <ConfirmDeleteGroup
+          chat={deleting.chat}
+          onCancel={() => setDeleting(undefined)}
+          onDeleted={() => {
+            live.removeChat(deleting.chatId)
             if (deleting.chatId === activeChatId) navigate({ to: '/', replace: true })
             setDeleting(undefined)
           }}
@@ -549,7 +560,7 @@ function RenameRow({ row, avatar, onDone }: { row: Row; avatar: ReactNode; onDon
   )
 }
 
-/** A row's context menu, after Grok's: Pin / Unpin, reorder pinned chats, Mark as read, Rename, Delete (bots only). */
+/** A row's context menu, after Grok's: Pin / Unpin, reorder pinned chats, Mark as read, Rename, Delete. */
 function RowMenu({
   row,
   x,
@@ -569,7 +580,7 @@ function RowMenu({
   onPin: (chatIds: string[]) => void
   onMarkRead: (chatId: string) => void
   onRename: (row: Row) => void
-  onDelete: (bot: BotInfo) => void
+  onDelete: (row: Row) => void
 }) {
   const { bot, chat, pinned, chatId } = row
   const ref = useRef<HTMLDivElement>(null)
@@ -592,7 +603,7 @@ function RowMenu({
     ...(pinned && place < pinnedIds.length - 1 ? [{ label: 'Move down', run: () => move(1) }] : []),
     ...(chat?.unread ? [{ label: 'Mark as Read', run: () => onMarkRead(chatId) }] : []),
     { label: 'Rename', run: () => onRename(row) },
-    ...(bot ? [{ label: 'Delete', danger: true, run: () => onDelete(bot) }] : []),
+    ...(bot || chat ? [{ label: 'Delete', danger: true, run: () => onDelete(row) }] : []),
   ]
 
   // Kept inside the window, and focused so the keyboard works at once.

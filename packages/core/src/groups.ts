@@ -74,6 +74,15 @@ export async function updateGroup(
   })
 }
 
+/** Deletes a group chat with its messages and turn cursors; returns it, or undefined when there is no such group chat. */
+export async function deleteGroup(db: Db, chatId: string): Promise<Chat | undefined> {
+  const [chat] = await db
+    .delete(chats)
+    .where(and(eq(chats.id, chatId), eq(chats.kind, 'group')))
+    .returning()
+  return chat
+}
+
 /** The group chat with its name and members' names, or undefined when there is no such group chat. */
 export async function getGroup(db: Db, chatId: string): Promise<Group | undefined> {
   const [chat] = await db.select().from(chats).where(and(eq(chats.id, chatId), eq(chats.kind, 'group')))

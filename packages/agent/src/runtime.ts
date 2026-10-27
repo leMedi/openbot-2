@@ -731,6 +731,25 @@ export class BotRuntime implements AgentRuntime {
     if (!this.#queues.get(botId)?.length && this.#turns.get(botId)?.steers === steers) this.#setIdle(botId)
   }
 
+  async endGroupTurns(groupChatId: string): Promise<void> {
+    for (const [botId, queue] of this.#queues) {
+      const dropped = queue.filter((input) => input.groupChatId === groupChatId)
+      if (!dropped.length) continue
+      this.#queues.set(botId, queue.filter((input) => input.groupChatId !== groupChatId))
+      for (const input of dropped) input.settle?.()
+    }
+    // A turn's run is only the turn's: neither the owner's DM input nor anything else joins it.
+    const going = [...this.#turns].filter(([, turn]) => turn.input.groupChatId === groupChatId)
+    await Promise.all(
+      going.map(([botId, turn]) =>
+        // After the turn's submission, so a run being submitted now is aborted too.
+        this.#serially(botId, async () => {
+          if (this.#turns.get(botId) === turn) await (await this.#existingHistory(botId))?.abort(context)
+        }),
+      ),
+    )
+  }
+
   async forget({ id, name, historyId }: { id: string; name: string; historyId: string | null }): Promise<void> {
     this.#drop(id)
     if (historyId) await (await this.#harness.conversation(toConversationId(historyId), context))?.abort(context)
@@ -889,6 +908,8 @@ export class BotRuntime implements AgentRuntime {
         try {
           const bot = await getBot(this.#options.db, botId)
           if (!bot) break // Deleted.
+          // A turn in a group chat deleted while it waited, e.g. queued by rounds that were ending.
+          if (input.groupChatId && !(await getGroup(this.#options.db, input.groupChatId))) continue
           turn.submission = await this.#submit(bot, input, 'followUp')
           const history = await this.#history(bot)
           // Until the run ends, and any run an owner's steer started after it.
