@@ -284,7 +284,7 @@ describe('model settings', () => {
     expect(await server.client.models.getSettings()).toEqual(updated)
   })
 
-  it('puts the computer-use model back to "same as default"', async () => {
+  it('puts the computer-use model back to "same as each bot\'s model"', async () => {
     const server = await start()
     await connectWithKey(server, 'sk-fake-123')
     await server.client.models.updateSettings({ defaultModel: 'fake/fake-model', computerUseModel: 'fake/fake-model' })

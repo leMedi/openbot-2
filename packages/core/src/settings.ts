@@ -1,7 +1,10 @@
 import { type Db, settings } from '@openbot/db'
 import { eq, inArray } from 'drizzle-orm'
 
-/** Model refs (`provider/modelId`). A null computer-use model is "same as default"; a null default is not chosen yet. */
+/**
+ * Model refs (`provider/modelId`). A null computer-use model is "same as each bot's model" (its own, else the default);
+ * a null default is not chosen yet.
+ */
 export type ModelSettings = {
   defaultModel: string | null
   computerUseModel: string | null
