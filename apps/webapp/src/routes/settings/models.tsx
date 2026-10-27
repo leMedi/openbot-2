@@ -7,7 +7,8 @@ export const Route = createFileRoute('/settings/models')({
   component: Models,
 })
 
-const sameAsDefault = ''
+/** The empty option: no default chosen yet, or the computer-use model left to each bot's own. */
+const unset = ''
 
 function Models() {
   const [models, setModels] = useState<ModelInfo[]>()
@@ -52,7 +53,7 @@ function Models() {
           <ModelField
             label="Default model"
             description="Every bot uses this model unless it has its own."
-            value={settings.defaultModel ?? sameAsDefault}
+            value={settings.defaultModel ?? unset}
             models={models}
             placeholder="Choose a model"
             onChange={(ref) => update({ defaultModel: ref || null })}
@@ -60,14 +61,15 @@ function Models() {
           <ModelField
             label="Computer-use model"
             description="Drives bots' screens, so it must understand images."
-            value={settings.computerUseModel ?? sameAsDefault}
+            value={settings.computerUseModel ?? unset}
             models={models.filter((model) => model.vision)}
-            placeholder={defaultModel ? `Same as default (${defaultModel.name})` : 'Same as default'}
+            placeholder="Same as each bot's model"
             onChange={(ref) => update({ computerUseModel: ref || null })}
           />
           {!settings.computerUseModel && defaultModel && !defaultModel.vision && (
             <p className="text-sm text-amber-foreground">
-              {defaultModel.name} can't see images; choose a computer-use model so bots can use their screens.
+              {defaultModel.name} can't see images: bots on it work their screens from snapshots alone. Choose a
+              computer-use model so they can see screenshots.
             </p>
           )}
         </>
@@ -104,9 +106,9 @@ function ModelField({
         onChange={(event) => onChange(event.target.value)}
         className="rounded-md border border-input bg-input-fill px-2.5 py-1.5 text-base outline-offset-0"
       >
-        <option value={sameAsDefault}>{placeholder}</option>
+        <option value={unset}>{placeholder}</option>
         {/* A chosen model whose provider was since disconnected. */}
-        {value !== sameAsDefault && !models.some((model) => model.ref === value) && (
+        {value !== unset && !models.some((model) => model.ref === value) && (
           <option value={value} disabled>
             {value} (not available)
           </option>

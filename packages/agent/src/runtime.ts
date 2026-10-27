@@ -383,9 +383,9 @@ export class BotRuntime implements AgentRuntime {
       computer: options.computer,
       images,
       botOf,
-      model: async () => {
+      model: async (bot) => {
         const { computerUseModel, defaultModel } = await readModelSettings(options.db)
-        const model = computerUseModel ?? defaultModel
+        const model = computerUseModel ?? bot.model ?? defaultModel
         if (!model) throw new NoModelError('Choose a computer-use or default model first')
         return parseModelRef(model)
       },

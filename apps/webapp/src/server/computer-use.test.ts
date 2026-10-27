@@ -133,6 +133,50 @@ describe('computer-use sessions', () => {
     expect(new Set(server.providers.requests.map((request) => request.model))).toEqual(new Set(['fake/fake-model']))
   })
 
+  it("run on the bot's own model when no computer-use model is chosen", async () => {
+    const server = await createTestServer({ pages })
+    servers.push(server)
+    await server.connectProvider()
+    await server.client.models.updateSettings({ defaultModel: 'fake/fake-mini', computerUseModel: null })
+    const bot = await server.client.bots.create({ ...rex, model: 'fake/fake-model' })
+
+    await shopForSocks(server, bot)
+
+    expect(server.providers.requests).toHaveLength(6)
+    expect(new Set(server.providers.requests.map((request) => request.model))).toEqual(new Set(['fake/fake-model']))
+  })
+
+  it("tell a session whose model can't see images that screenshots aren't shown, and keep working from snapshots", async () => {
+    const { server, bot } = await startWithRex()
+    await server.client.models.updateSettings({ computerUseModel: null })
+    server.providers.script(
+      callsTools(['use_computer', useComputer]),
+      callsTools(['browser_screenshot', {}]),
+      callsTools(['desktop_screenshot', {}]),
+      callsTools(['browser_snapshot', {}]),
+      says('Socks are listed on shop.test.'),
+      callsTools(['sendMessage', { text: 'Socks are listed' }]),
+      endsSilently(),
+    )
+
+    await server.client.chats.send({ chatId: bot.chatId, text: 'How much are socks?' })
+    await untilIdle(server, bot)
+
+    expect(server.providers.requests[1]!.model).toBe('fake/fake-mini')
+    const [browserShot, desktopShot, snapshot] = [2, 3, 4].map((index) => server.providers.requests[index]!.messages.at(-1)!)
+    for (const [shot, toolName] of [
+      [browserShot, 'browser_screenshot'],
+      [desktopShot, 'desktop_screenshot'],
+    ] as const) {
+      expect(shot).toMatchObject({ role: 'toolResult', toolName, isError: false })
+      expect(JSON.stringify(shot)).not.toContain('"type":"image"')
+      expect(JSON.stringify(shot)).toContain("can't see images")
+    }
+    expect(JSON.stringify(snapshot)).toContain('Socks')
+    // No screenshot was taken for the session; only the final one, saved for the bot.
+    expect(server.computer.calls.filter((call) => call.kind.endsWith('.screenshot'))).toEqual([{ bot: 'Rex', kind: 'desktop.screenshot' }])
+  })
+
   it("refuse element references from a snapshot that isn't the latest", async () => {
     const { server, bot } = await startWithRex()
     server.providers.script(

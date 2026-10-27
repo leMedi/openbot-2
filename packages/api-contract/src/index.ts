@@ -298,7 +298,10 @@ export const model = z.object({
 })
 export type ModelInfo = z.infer<typeof model>
 
-/** Model refs; null means "same as default" (for the default model itself: not chosen yet). */
+/**
+ * Model refs. A null computer-use model is "same as each bot's model" (its own, else the default); a null default is
+ * not chosen yet.
+ */
 export const modelSettings = z.object({
   defaultModel: z.string().nullable(),
   computerUseModel: z.string().nullable(),
