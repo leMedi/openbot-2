@@ -14,7 +14,7 @@ import {
 import type { TestPage } from './pages.ts'
 
 /** The parts of the computer the contract covers; a screen daemon tested on its own has no browser or desktop to drive. */
-export type ContractComputer = Pick<Computer, 'screens' | 'shell'> & Partial<Pick<Computer, 'browser' | 'desktop'>>
+export type ContractComputer = Pick<Computer, 'screens'> & Partial<Pick<Computer, 'browser' | 'desktop'>>
 
 /** A computer under test, and what the contract needs to poke at it. */
 export type ContractWorld = {
@@ -23,10 +23,6 @@ export type ContractWorld = {
   reconnect(): Promise<ContractComputer>
   /** Kills every process of the bot's screen, as a crash would. */
   crash(bot: ScreenBot): Promise<void>
-  /** The Unix user bots' commands run as. */
-  user: string
-  /** The bot's own folder, where its commands start. */
-  folder(bot: ComputerBot): string
   /** Puts `page` where the computer's browsers can load it; returns its URL. Needed to cover the browser. */
   page?(name: string, page: TestPage): string
   /**
@@ -43,8 +39,6 @@ export type ContractOptions = {
   firstDisplay?: number
   /** How long a screen may take to come up. */
   timeout?: number
-  /** Whether to cover the shell; off for a screen daemon tested on its own. */
-  shell?: boolean
   /** Whether to cover the browser; off for a screen daemon tested with stand-in programs. */
   browser?: boolean
   /** Whether to cover the desktop; off for a screen daemon tested with stand-in programs. */
@@ -222,17 +216,6 @@ export function describeComputerContract(name: string, open: () => Promise<Contr
         startedAt: null,
         streamPort: null,
       })
-    })
-
-    it.runIf(options.shell ?? true)("runs commands as the bots' user, with sudo, in the bot's folder", async () => {
-      const world = await setup()
-      const rex = { id: `contract-${randomUUID()}`, name: 'Rex' }
-
-      const result = await world.computer.shell.exec(rex, 'whoami; sudo --non-interactive whoami; pwd')
-      const failed = await world.computer.shell.exec(rex, 'echo oops >&2; exit 3')
-
-      expect(result).toEqual({ stdout: `${world.user}\nroot\n${world.folder(rex)}\n`, stderr: '', exitCode: 0 })
-      expect(failed).toEqual({ stdout: '', stderr: 'oops\n', exitCode: 3 })
     })
 
     describe.runIf(options.browser ?? true)('the browser', () => {

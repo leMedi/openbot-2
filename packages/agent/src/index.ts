@@ -11,4 +11,4 @@ export {
 } from './providers.ts'
 export { BotRuntime, type BotStatus, type BotTool, interruptedNote, NoModelError, outdatedAnswer, replyReminder, supersededNote, type BotRuntimeOptions } from './runtime.ts'
 export { type Watchdog } from './run-scheduler.ts'
-export { BotComputer, botUser, openBotComputer, userExists } from './computer.ts'
+export { BotComputer, botUser, ComputerUnavailableError, openBotComputer, userExists } from './computer.ts'

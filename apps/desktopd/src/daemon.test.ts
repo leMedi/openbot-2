@@ -78,14 +78,12 @@ describeComputerContract(
   async () => {
     const daemon = await newDaemon()
     return {
-      computer: { screens: connectScreens({ socketPath: daemon.socketPath }), shell: { exec: () => Promise.reject(new Error('no shell')) } },
-      reconnect: async () => ({ screens: connectScreens({ socketPath: daemon.socketPath }), shell: { exec: () => Promise.reject(new Error('no shell')) } }),
+      computer: { screens: connectScreens({ socketPath: daemon.socketPath }) },
+      reconnect: async () => ({ screens: connectScreens({ socketPath: daemon.socketPath }) }),
       crash: async (bot) => kill(daemon.manager.pids(bot.id)),
-      user: '',
-      folder: () => '',
     }
   },
-  { shell: false, browser: false, desktop: false, timeout: 10_000 },
+  { browser: false, desktop: false, timeout: 10_000 },
 )
 
 describe('the screen daemon', () => {

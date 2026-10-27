@@ -105,7 +105,6 @@ export {
   DesktopUnavailableError,
   type DesktopWindow,
   type DesktopWindowTarget,
-  type ExecResult,
   type ScreenBot,
   type ScreenListing,
   type Screens,

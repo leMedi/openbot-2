@@ -66,7 +66,7 @@ import {
   unansweredQuestions,
 } from '@openbot/core'
 import type { Attachment, Db, Message, Surface } from '@openbot/db'
-import type { BotComputer } from './computer.ts'
+import { type BotComputer, ComputerUnavailableError } from './computer.ts'
 import { computerUse, type UseComputerDetails } from './computer-use.ts'
 import { type QueuedInput, type Run, RunScheduler, type Watchdog } from './run-scheduler.ts'
 
@@ -838,6 +838,7 @@ export class BotRuntime implements AgentRuntime {
     const [first] = inputs as [QueuedInput]
     // A turn in a group chat deleted while it waited, e.g. queued by rounds that were ending, has nothing to do either.
     if (!bot || (first.groupChatId && !(await getGroup(this.#options.db, first.groupChatId)))) return { ended: async () => true, answered: async () => true }
+    if (this.#options.computer.unavailable) throw new ComputerUnavailableError(this.#options.computer.unavailable)
     const history = await this.#history(bot)
     const others = (await listBots(this.#options.db)).filter((other) => other.id !== bot.id)
     const groups = await listGroups(this.#options.db, bot.id)

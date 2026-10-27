@@ -51,7 +51,7 @@ describe('bots on the computer', () => {
 
     const [result] = await work(server, bot, ['bash', { command: 'whoami' }])
 
-    expect(server.computer.calls.filter((call) => call.kind === 'shell.exec')).toEqual([{ bot: 'Rex', kind: 'shell.exec', command: 'whoami' }])
+    expect(server.commands).toEqual([{ bot: 'Rex', command: 'whoami' }])
     expect(result).toContain('openbot')
   })
 
@@ -139,5 +139,15 @@ describe('bots on the computer', () => {
     await server.client.bots.delete({ botId: bot.id })
 
     expect(existsSync(join(server.home, 'bots', bot.id))).toBe(false)
+  })
+
+  it("refuse to run, without posting the owner's message, when the server isn't in the runtime image", async () => {
+    const { server, bot } = await startWithRex({ outsideImage: true })
+
+    await expect(server.client.chats.send({ chatId: bot.chatId, text: 'Hello?' })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: expect.stringMatching(/only in OpenBot's runtime image.*no openbot-missing user/s),
+    })
+    expect(await server.client.chats.messages({ chatId: bot.chatId })).toEqual([])
   })
 })

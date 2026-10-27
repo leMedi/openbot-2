@@ -1,6 +1,6 @@
 export { callsTools, createFakeModel, endsSilently, fails, held, says, type FakeModel, type FakeTurn, type HeldTurn } from './fake-model.ts'
 export { createFakeProviders, type FakeProviders } from './fake-providers.ts'
 export { recordingTool } from './recording-tool.ts'
-export { fakeBotComputer } from './fake-computer.ts'
+export { type ExecResult, fakeBotComputer, type FakeBotComputer, type FakeCommand, type FakeShellScript } from './fake-computer.ts'
 export { answeringProvider } from './answering-provider.ts'
 export { slowTool } from './slow-tool.ts'
