@@ -4,6 +4,7 @@ import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
 import { type KeyboardEvent, type PointerEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
 import { useLive } from '../lib/live.tsx'
+import { summarizeAttachments } from './attachments.tsx'
 import { BotAvatar } from './bot-avatar.tsx'
 import { NewBotDialog } from './new-bot-dialog.tsx'
 import { ConfirmDelete } from './profile-pane.tsx'
@@ -259,7 +260,10 @@ function secondLine(bot: BotInfo, chat: ChatInfo | undefined, draft: string | un
   if (bot.working) return { text: 'Working…', className: 'text-green-foreground' }
   if (bot.error) return { text: "Couldn't reach its model", className: 'text-red-foreground' }
   const last = chat?.lastMessage
-  if (last) return { text: (last.author === 'owner' ? 'You: ' : '') + previewText(last.text), className: 'text-muted-foreground' }
+  if (last) {
+    const text = previewText(last.text) || (last.attachments.length ? summarizeAttachments(last.attachments) : '')
+    return { text: (last.author === 'owner' ? 'You: ' : '') + text, className: 'text-muted-foreground' }
+  }
   return { text: bot.title ?? 'No messages yet', className: 'text-muted-foreground' }
 }
 

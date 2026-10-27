@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
-import { join } from 'node:path'
+import { extname, isAbsolute, join, resolve } from 'node:path'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { type ExecutionEnv, getOrThrow } from '@earendil-works/pi-durable/env'
 import { Connection, localDaemon, RemoteExecutionEnv } from '@earendil-works/pi-env'
-import type { ComputerBot } from '@openbot/core'
+import { type ComputerBot, maxAttachmentBytes, safeFileName } from '@openbot/core'
 
 const context = BACKGROUND_CONTEXT
 
@@ -30,6 +30,8 @@ export class BotComputer {
   readonly home: string
   readonly user: string
   readonly #options: BotComputerOptions
+  /** Each bot's latest upload; the next waits for it, so two uploads can't both take a free name. */
+  readonly #uploads = new Map<string, Promise<unknown>>()
 
   constructor(options: BotComputerOptions) {
     this.home = options.home
@@ -45,6 +47,48 @@ export class BotComputer {
   /** A bot's own folder, where its commands start. */
   folder(botId: string): string {
     return join(this.home, 'bots', botId)
+  }
+
+  /** Where the files the owner sends a bot are saved. */
+  uploadsFolder(botId: string): string {
+    return join(this.folder(botId), 'uploads')
+  }
+
+  /**
+   * Saves a file the owner sent `bot` to its uploads folder, as the bots' user; returns its path there. A name already
+   * taken gets a number, `notes-2.txt`, so an earlier upload is never overwritten.
+   */
+  saveUpload(bot: ComputerBot, name: string, bytes: Uint8Array): Promise<string> {
+    const saved = (this.#uploads.get(bot.id) ?? Promise.resolve()).catch(() => {}).then(() => this.#saveUpload(bot, name, bytes))
+    this.#uploads.set(bot.id, saved)
+    void saved.finally(() => this.#uploads.get(bot.id) === saved && this.#uploads.delete(bot.id)).catch(() => {})
+    return saved
+  }
+
+  async #saveUpload(bot: ComputerBot, name: string, bytes: Uint8Array): Promise<string> {
+    const env = await this.env(bot)
+    const folder = this.uploadsFolder(bot.id)
+    getOrThrow(await env.createDir(folder, { recursive: true }, context))
+    const safe = safeFileName(name)
+    const ext = extname(safe)
+    const stem = safe.slice(0, safe.length - ext.length)
+    let path = join(folder, safe)
+    for (let n = 2; getOrThrow(await env.exists(path, context)); n++) path = join(folder, `${stem}-${n}${ext}`)
+    getOrThrow(await env.writeFile(path, bytes, context))
+    return path
+  }
+
+  /**
+   * Reads a file `bot` names, as the bots' user: an absolute path, or one relative to the bot's folder. Throws when it
+   * isn't a file or is larger than an attachment may be.
+   */
+  async readFile(bot: ComputerBot, path: string): Promise<{ path: string; bytes: Uint8Array }> {
+    const env = await this.env(bot)
+    const absolute = isAbsolute(path) ? path : resolve(this.folder(bot.id), path)
+    const info = getOrThrow(await env.fileInfo(absolute, context))
+    if (info.kind === 'directory') throw new Error(`${path} is not a file`)
+    if (info.size > maxAttachmentBytes) throw new Error(`${path} is larger than ${maxAttachmentBytes / 1024 / 1024} MB`)
+    return { path: absolute, bytes: getOrThrow(await env.readBinaryFile(absolute, context)) }
   }
 
   /** The environment `bot`'s tools run in, once its folder exists; made again if the bot deleted it. */

@@ -55,7 +55,7 @@ Only values needed before the database opens are env vars. Everything else lives
 
 | Env var | Default | Holds |
 |---|---|---|
-| `OPENBOT_DATA_DIR` | `/var/lib/openbot` | libSQL db, pi-durable storage, plugin installs, audit log. Mode 0700, server user only. |
+| `OPENBOT_DATA_DIR` | `/var/lib/openbot` | libSQL db, pi-durable storage, copies of messages' attachments, plugin installs, audit log. Mode 0700, server user only. |
 | `OPENBOT_HOME` | `/home/openbot` | Bots' world: `shared/`, `bots/<id>/` (workspace, uploads, Chromium profile), installed tools |
 | `OPENBOT_APP_DIR` | `/opt/openbot` | `releases/<version>/`, `current` symlink |
 | `OPENBOT_SECRET_KEY` | generated on first boot | Encryption of vault and system credentials |
@@ -121,6 +121,13 @@ One active run per bot, lanes ordered user > agent > background. Interrupts stee
 ### 3.3 The bot's voice
 
 The model's plain text is private. The only way to reach you is `sendMessage` (several short bubbles, attachments, question widgets, cards). If a run that answers your message ends without a `sendMessage`, a reminder forces a reply (Grok's reply guarantee).
+
+As built (#12), attachments:
+
+- The owner drops, drags, pastes or picks up to 6 files (50 MB each) in the composer; `chats.send` takes them as a multipart form. Each is saved as `openbot` to the bot's `uploads/` folder (`notes-2.txt` when the name is taken, never outside it). The bot's input lists their paths, and images go to the model as image input, shrunk by pi-durable's Photon image processor to fit (the same processor lets `read` show any image).
+- `sendMessage` takes `attachments`: paths on the computer, absolute or relative to the bot's folder. A file that isn't there fails the call and posts nothing.
+- The server keeps a copy of every message's files in `$OPENBOT_DATA_DIR/attachments/<chatId>/<id>`, so a download is the file as it was when posted. `GET /api/messages/{messageId}/attachments/{attachmentId}` always serves it as a download (`attachment`, `sandbox` CSP, `nosniff`). Deleting a bot deletes its DM's copies.
+- Transcript: images and videos in a gallery (320px high, 10px corners) that opens a full-screen viewer, other files as download chips; a message of files only isn't bubbled. The sidebar summarises it as "Sent 2 images" / "Sent a file".
 
 ### 3.4 Groups
 

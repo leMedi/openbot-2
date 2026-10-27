@@ -1,6 +1,6 @@
 import { type BotComputer, BotRuntime, type BotTool, type ModelProvider, Providers } from '@openbot/agent'
 import type { ChatInfo, LiveEvent } from '@openbot/api-contract'
-import { AllowAllOrchestrator, EventBus, getChatSummary, type Orchestrator, postMessage, SecretBox } from '@openbot/core'
+import { AllowAllOrchestrator, AttachmentStore, EventBus, getChatSummary, type Orchestrator, postMessage, SecretBox } from '@openbot/core'
 import type { Db } from '@openbot/db'
 import { toChatInfo, toMessageInfo } from './views.ts'
 
@@ -10,6 +10,10 @@ export type ServerContext = {
   bus: EventBus<LiveEvent>
   providers: Providers
   runtime: BotRuntime
+  /** Where bots work: the owner's files are saved there. */
+  computer: BotComputer
+  /** The copies of messages' files the owner downloads. */
+  attachments: AttachmentStore
 }
 
 /** Tells every tab how a chat now looks in the sidebar, after a message, a read or a pin; returns that. */
@@ -28,6 +32,7 @@ export async function createServerContext({
   agentStoragePath,
   orchestrator = new AllowAllOrchestrator(),
   computer,
+  attachmentsDir,
   tools,
 }: {
   db: Db
@@ -41,10 +46,13 @@ export async function createServerContext({
   orchestrator?: Orchestrator
   /** Where bots' shell and file tools run: the real computer, or a fake in tests. */
   computer: BotComputer
+  /** Where the server keeps copies of messages' files, in its data dir. */
+  attachmentsDir: string
   /** Tools beyond the built-in ones, e.g. a test's. */
   tools?: BotTool[]
 }): Promise<ServerContext> {
   const bus = new EventBus<LiveEvent>()
+  const attachments = new AttachmentStore(attachmentsDir)
   const providers = new Providers({ db, box: new SecretBox(secretKey), providers: modelProviders })
   const runtime = await BotRuntime.open({
     db,
@@ -53,16 +61,26 @@ export async function createServerContext({
     orchestrator,
     computer,
     tools,
-    async sendMessage(bot, text, idempotencyKey) {
-      const { message, created } = await postMessage(db, {
+    async sendMessage(bot, { text, attachments: files }, idempotencyKey) {
+      const saved = await attachments.save(bot.chatId, files)
+      const posted = await postMessage(db, {
         chatId: bot.chatId,
         author: 'bot',
         authorBotId: bot.id,
         authorName: bot.name,
         text,
+        attachments: saved,
         idempotencyKey,
+      }).catch(async (error) => {
+        await attachments.discard(bot.chatId, saved)
+        throw error
       })
-      if (!created) return
+      if (!posted.created) {
+        // A replayed call: its message, and the copies it kept, were posted the first time.
+        await attachments.discard(bot.chatId, saved)
+        return
+      }
+      const { message } = posted
       bus.publish({ type: 'message.created', message: toMessageInfo(message) })
       await publishChat({ db, bus }, bot.chatId)
     },
@@ -83,5 +101,5 @@ export async function createServerContext({
     },
     onStatus: (botId, status) => bus.publish({ type: 'bot.status', botId, ...status }),
   })
-  return { db, bus, providers, runtime }
+  return { db, bus, providers, runtime, computer, attachments }
 }

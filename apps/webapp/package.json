@@ -19,6 +19,7 @@
     "@openbot/ui": "workspace:*",
     "@orpc/openapi": "1.16.1",
     "@orpc/server": "1.16.1",
+    "@orpc/standard-server": "1.16.1",
     "@orpc/zod": "1.16.1",
     "@tanstack/react-router": "^1.170.45",
     "@tanstack/react-start": "^1.169.3",

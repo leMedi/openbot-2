@@ -86,6 +86,26 @@ export type QuestionCardInfo = z.infer<typeof questionCard>
 export const card = z.discriminatedUnion('type', [questionCard])
 export type CardInfo = z.infer<typeof card>
 
+/** At most this many files go with one message (Grok's composer limit); the server enforces the same. */
+export const maxAttachments = 6
+/** The largest file a message can carry, either way. */
+export const maxAttachmentBytes = 50 * 1024 * 1024
+
+/** A file posted with a message, on the computer at `path`; the owner downloads the copy posted with the message. */
+export const attachment = z.object({
+  id: z.string(),
+  name: z.string(),
+  mimeType: z.string(),
+  /** Bytes. */
+  size: z.number(),
+  /** Where it is on the computer: the bot's uploads folder for the owner's files, wherever the bot had it for its own. */
+  path: z.string(),
+})
+export type AttachmentInfo = z.infer<typeof attachment>
+
+/** Where the owner downloads an attachment from, under the API's URL. */
+export const attachmentPath = (messageId: string, attachmentId: string) => `/messages/${messageId}/attachments/${attachmentId}`
+
 /** Something the owner or a bot posted in a chat. A bot's thinking and tool use are never messages. */
 export const message = z.object({
   id: z.string(),
@@ -95,8 +115,10 @@ export const message = z.object({
   botId: z.string().nullable(),
   /** The author's name when it posted, with " (deleted)" once its bot is deleted. */
   authorName: z.string(),
-  /** Markdown. A card's message holds its prompt. */
+  /** Markdown; may be empty when the message carries files. A card's message holds its prompt. */
   text: z.string(),
+  /** Files that came with the message, in the order they were attached. */
+  attachments: z.array(attachment),
   /** Set when the message is a card. */
   card: card.nullable(),
   /** Milliseconds since the epoch. */
@@ -120,7 +142,7 @@ export const chat = z.object({
   /** The prompt of the newest question card still open: the chat needs the owner. Null when nothing waits. */
   waitingFor: z.string().nullable(),
   /** The newest message, for the sidebar's preview line; null when the chat is empty. */
-  lastMessage: message.pick({ author: true, authorName: true, text: true, createdAt: true }).nullable(),
+  lastMessage: message.pick({ author: true, authorName: true, text: true, attachments: true, createdAt: true }).nullable(),
 })
 export type ChatInfo = z.infer<typeof chat>
 
@@ -358,9 +380,32 @@ export const contract = {
       .input(z.object({ chatId: z.string() }))
       .output(z.array(message)),
     send: oc
-      .route({ method: 'POST', path: '/chats/{chatId}/messages', summary: 'Post the owner\'s message and wake the bot' })
-      .input(z.object({ chatId: z.string(), text: z.string().trim().min(1).max(100_000) }))
+      .route({
+        method: 'POST',
+        path: '/chats/{chatId}/messages',
+        summary:
+          "Post the owner's message and wake the bot. Files, sent as a multipart form, are saved to the bot's uploads " +
+          'folder; the bot is told where, and sees images',
+      })
+      .input(
+        z
+          .object({
+            chatId: z.string(),
+            text: z.string().trim().max(100_000).default(''),
+            files: z.array(z.file().max(maxAttachmentBytes)).max(maxAttachments).default([]),
+          })
+          .refine((input) => input.text || input.files.length, { message: 'Write a message or attach a file' }),
+      )
       .output(message),
+    attachment: oc
+      .route({
+        method: 'GET',
+        path: '/messages/{messageId}/attachments/{attachmentId}',
+        summary: "Download a message's file, as it was when posted",
+        outputStructure: 'detailed',
+      })
+      .input(z.object({ messageId: z.string(), attachmentId: z.string() }))
+      .output(z.object({ headers: z.record(z.string(), z.string()), body: z.file() })),
     answer: oc
       .route({
         method: 'POST',

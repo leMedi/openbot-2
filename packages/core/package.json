@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@openbot/db": "workspace:*",
-    "drizzle-orm": "^0.45.4"
+    "drizzle-orm": "^0.45.4",
+    "uuidv7": "^1.2.1"
   },
   "devDependencies": {
     "@types/node": "^24",

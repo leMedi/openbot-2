@@ -116,7 +116,10 @@ export const chats = sqliteTable(
   (table) => [index('chats_kind_idx').on(table.kind)],
 )
 
+/** A file posted with a message. The server keeps a copy, as it was when posted, for the owner to download. */
 export type Attachment = {
+  /** Names the server's copy. */
+  id: string
   name: string
   mimeType: string
   size: number

@@ -75,6 +75,33 @@ describe.skipIf(!inRuntimeImage)('bots on the real computer', () => {
     expect(readFileSync(join(server.home, 'bots', rex.id, 'notes.md'), 'utf8')).toBe('Ship on Monday\n')
   })
 
+  it("get the owner's files in their uploads folder as openbot, and send files back", async () => {
+    const server = await start()
+    const rex = await server.client.bots.create(newBot('Rex'))
+    const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64')
+    server.providers.script(
+      callsTools(['bash', { command: 'stat -c %U uploads/notes.txt uploads/screen.png && head -c 5000000 /dev/zero > big.bin' }]),
+      callsTools(['sendMessage', { text: 'Here', attachments: ['big.bin'] }]),
+      endsSilently(),
+    )
+
+    const sent = await server.client.chats.send({
+      chatId: rex.chatId,
+      text: 'Look',
+      files: [new File(['Ship on Friday\n'], 'notes.txt', { type: 'text/plain' }), new File([pixel], 'screen.png', { type: 'image/png' })],
+    })
+    await expect.poll(async () => (await server.client.bots.list()).find((entry) => entry.id === rex.id)?.working, { timeout: 30_000 }).toBe(false)
+
+    const uploads = join(server.home, 'bots', rex.id, 'uploads')
+    expect(sent.attachments.map((file) => file.path)).toEqual([join(uploads, 'notes.txt'), join(uploads, 'screen.png')])
+    expect(JSON.stringify(server.providers.requests[0]!.messages.at(-1))).toContain(pixel.toString('base64'))
+    expect(JSON.stringify(server.providers.requests[1]!.messages.at(-1))).toContain('openbot\\nopenbot')
+    const reply = (await server.client.chats.messages({ chatId: rex.chatId })).at(-1)!
+    expect(reply.attachments).toMatchObject([{ name: 'big.bin', size: 5_000_000 }])
+    const download = await server.client.chats.attachment({ messageId: reply.id, attachmentId: reply.attachments[0]!.id })
+    expect(download.body.size).toBe(5_000_000)
+  })
+
   it('lose their folder when deleted', async () => {
     const server = await start()
     const rex = await server.client.bots.create(newBot('Rex'))
