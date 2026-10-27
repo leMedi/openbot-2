@@ -2,6 +2,7 @@ packages:
   - "apps/*"
   - "packages/*"
   - "scripts"
+  - "evals"
 allowBuilds:
   '@google/genai': false
   esbuild: true

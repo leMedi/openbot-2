@@ -91,6 +91,24 @@ describe('providers', () => {
     ])
   })
 
+  it("connects with an API key from an environment given to it (evals, CI), never from the server's own", async () => {
+    const server = await start()
+    process.env.FAKE_API_KEY = 'sk-server-env'
+    try {
+      expect((await server.client.providers.list())[0]!.connection).toBeNull()
+    } finally {
+      delete process.env.FAKE_API_KEY
+    }
+    await expect(server.connectProviderFromEnv('fake', {})).rejects.toThrow(/No API key for fake/)
+
+    expect(await server.connectProviderFromEnv('fake', { FAKE_API_KEY: 'sk-env' })).toBe('FAKE_API_KEY')
+
+    expect((await server.client.providers.list())[0]!.connection).toEqual({ method: 'api_key' })
+    const request = server.providers.answerNextRequest()
+    expect(await server.complete('fake/fake-mini', { systemPrompt: 'Grade it', prompt: 'Rubric: …' })).toBe('ok')
+    expect(request.apiKey).toBe('sk-env')
+  })
+
   it('completes a subscription sign-in from the pasted redirect URL', async () => {
     const server = await start()
 

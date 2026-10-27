@@ -1,0 +1,29 @@
+description: >-
+  The bot runs a command to answer, then reports the result in its own words, not as a pasted wall of output.
+bots:
+  - name: Grace
+    title: Operations
+world:
+  shell:
+    - match: \bdf\b
+      stdout: |
+        Filesystem      Size  Used Avail Use% Mounted on
+        overlay         100G   58G   42G  58% /
+        tmpfs            64M     0   64M   0% /dev
+        /dev/vda1       100G   58G   42G  58% /home/openbot
+script:
+  - to: Grace
+    text: How much disk space is left on your computer?
+assert:
+  - tool_called: bash
+  - messages: { in: Grace, min: 1, max: 4 }
+  - max_message_length: 400
+  - no_silent_answer
+rubric:
+  - Says about 42 GB is free (of 100 GB)
+  - Answers in its own words rather than pasting the raw command output
+faux:
+  Grace:
+    - call: { bash: { command: df -h } }
+    - send: 42 GB free out of 100, so 58% used. Plenty of room
+    - end

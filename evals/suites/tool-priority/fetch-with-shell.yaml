@@ -1,0 +1,27 @@
+description: >-
+  The owner asks for a number a public JSON API gives. Fetching it from the shell is enough, so the bot never opens
+  its browser.
+smoke: true
+bots:
+  - name: Ada
+    title: Research assistant
+world:
+  shell:
+    # Whatever the bot fetches the rate with (curl, wget, a script), the API answers.
+    - match: frankfurter|curl|wget|http
+      stdout: '{"amount":1.0,"base":"EUR","date":"2026-03-13","rates":{"USD":1.0842}}'
+script:
+  - to: Ada
+    text: What's the euro to dollar rate today? The Frankfurter API (api.frankfurter.app) has it.
+assert:
+  - tool_called: bash
+  - tool_not_called: use_computer
+  - tool_order: [bash, sendMessage]
+  - no_silent_answer
+rubric:
+  - Gives the rate it fetched, 1.0842 (rounding is fine)
+faux:
+  Ada:
+    - call: { bash: { command: "curl -s 'https://api.frankfurter.app/latest?from=EUR&to=USD'" } }
+    - send: 1 EUR is about 1.0842 USD today (Frankfurter, 13 March)
+    - end

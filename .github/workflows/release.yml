@@ -6,12 +6,17 @@
 #              embedded, smoke-tests each, and pushes it as r<N> and latest
 #   install    builds the runtime image (amd64) with the release embedded and runs the installer unattended against
 #              the release's files (scripts/smoke-install.sh): a fresh install, a re-run, and an interactive install
+#   evals      on pushes to main (and manual runs), the smoke evals on a real model, when OPENBOT_EVAL_MODEL is set (with
+#              its provider's API key secret); skipped otherwise. Records pass rates in the release notes and never blocks
+#              the release: real models are noisy, so a low pass rate is something to read, not a broken build
 #   publish    the GitHub Release v<version> (archive, release.json, SHA256SUMS, compose.yml, install.sh), once everything
-#              above passed
+#              above passed, with the smoke evals' pass rates in its notes when they ran
 # Pull requests (and manual runs off main) run the tests and the packaging, and publish nothing. Runs on main queue up:
 # a push that arrives while another waits replaces it, and its release includes both. Shared config: release.env, which the repository
 # variables OPENBOT_SITE_URL, OPENBOT_RUNTIME_IMAGE and OPENBOT_RELEASES_URL override; ARM64_RUNNER picks the arm64 build's
-# runner.
+# runner. Evals: the variables OPENBOT_EVAL_MODEL, OPENBOT_EVAL_JUDGE_MODEL (default: the model) and OPENBOT_EVAL_RUNS
+# (default 3), and the secret holding the API key of each model's provider (ANTHROPIC_API_KEY, OPENAI_API_KEY,
+# GEMINI_API_KEY, OPENROUTER_API_KEY or XAI_API_KEY).
 name: Release
 
 on:
@@ -288,9 +293,60 @@ jobs:
           docker buildx imagetools create --tag "${REPOSITORY}:${RUNTIME}" --tag "${REPOSITORY}:latest" "${sources[@]}"
           docker buildx imagetools inspect "${REPOSITORY}:${RUNTIME}"
 
+  evals:
+    name: Smoke evals
+    # Real models cost money and need keys: only for what gets published, on main (forks' pull requests get no secrets
+    # anyway).
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      OPENBOT_EVAL_MODEL: ${{ vars.OPENBOT_EVAL_MODEL }}
+      OPENBOT_EVAL_JUDGE_MODEL: ${{ vars.OPENBOT_EVAL_JUDGE_MODEL }}
+      RUNS: ${{ vars.OPENBOT_EVAL_RUNS || '3' }}
+      # The runner connects each model's provider with its usual variable; unset ones are empty.
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+    steps:
+      - name: Are evals configured?
+        id: configured
+        run: |
+          if [ -n "${OPENBOT_EVAL_MODEL}" ]; then
+            echo "run=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "run=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice title=Smoke evals skipped::Set the repository variable OPENBOT_EVAL_MODEL (provider/model) and its provider's API key secret to run them"
+          fi
+      - if: steps.configured.outputs.run == 'true'
+        uses: actions/checkout@v5
+      - if: steps.configured.outputs.run == 'true'
+        uses: pnpm/action-setup@v4
+      - if: steps.configured.outputs.run == 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - if: steps.configured.outputs.run == 'true'
+        run: pnpm install --frozen-lockfile
+      # A failed run of the runner itself (not a low pass rate) leaves no report, and the release notes say so.
+      - name: Run the smoke suite
+        if: steps.configured.outputs.run == 'true'
+        continue-on-error: true
+        run: pnpm eval smoke --runs "${RUNS}" --report evals/out/smoke.md --json evals/out/smoke.json
+      - if: steps.configured.outputs.run == 'true'
+        uses: actions/upload-artifact@v5
+        with:
+          name: evals
+          path: evals/out/
+          if-no-files-found: ignore
+          retention-days: 90
+
   publish:
     name: Publish the GitHub Release
-    needs: [package, install, image, image-tags]
+    needs: [package, install, image, image-tags, evals]
     # The image jobs are skipped when the image exists already; any failure above blocks the release.
     if: >-
       always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.package.result == 'success' &&
@@ -304,6 +360,19 @@ jobs:
         with:
           name: release
           path: release
+      - name: Get the smoke evals' report
+        uses: actions/download-artifact@v5
+        # Absent when the evals were skipped or failed to run.
+        continue-on-error: true
+        with:
+          name: evals
+          path: evals
+      - name: Add the evals' pass rates to the notes
+        run: |
+          {
+            echo
+            if [ -f evals/smoke.md ]; then cat evals/smoke.md; else echo "Smoke evals: not run for this release."; fi
+          } >> release/notes.md
       # A rerun of the same run has the same version: its release gets the files again.
       - name: Create the release
         env:
@@ -316,6 +385,7 @@ jobs:
           files=(release/*.tar.gz release/release.json release/SHA256SUMS release/compose.yml release/install.sh)
           if gh release view "${TAG}" > /dev/null 2>&1; then
             gh release upload "${TAG}" "${files[@]}" --clobber
+            gh release edit "${TAG}" --notes-file release/notes.md
           else
             gh release create "${TAG}" "${files[@]}" --target "${SHA}" \
               --title "OpenBot ${VERSION}" --notes-file release/notes.md --latest

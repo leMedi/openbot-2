@@ -1,0 +1,24 @@
+description: >-
+  The owner shares news that needs no answer. Members pass rather than all acknowledging it; at most one says
+  something.
+bots:
+  - name: Ada
+    title: Designer
+  - name: Linus
+    title: Engineer
+  - name: Grace
+    title: Product manager
+groups:
+  - name: Launch
+    members: [Ada, Linus, Grace]
+script:
+  - to: Launch
+    text: "FYI: the team offsite moved from Wednesday to Thursday."
+assert:
+  - messages: { in: Launch, max: 1 }
+rubric:
+  - Nobody repeats what someone else already said
+faux:
+  Ada: [end]
+  Linus: [end]
+  Grace: [end]

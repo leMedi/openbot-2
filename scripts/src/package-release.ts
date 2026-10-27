@@ -22,8 +22,8 @@ import { readReleaseConfig, type ReleaseConfig, releaseManifest, releaseNotes, t
 
 /** Top-level files every release keeps: pnpm's workspace files, so the release can be inspected and reinstalled. */
 const rootFiles = ['package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml']
-/** Where the workspace packages live. */
-const packageFolders = ['apps/', 'packages/', 'scripts/']
+/** Where the workspace packages live; evals/ too, so the workspace installs as its lockfile says (nothing runs it). */
+const packageFolders = ['apps/', 'packages/', 'scripts/', 'evals/']
 const isTest = (path: string) => /\.test\.tsx?$/.test(path)
 
 /** The platforms the runtime image runs on, whose native dependencies the release carries. */

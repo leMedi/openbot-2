@@ -1,0 +1,36 @@
+description: >-
+  In a group chat the owner asks one member by name. Only that member answers; the others stay quiet.
+smoke: true
+bots:
+  - name: Ada
+    title: Designer
+    instructions: You own the product's visual design and UI copy.
+  - name: Linus
+    title: Engineer
+    instructions: You own the code, the builds and CI.
+  - name: Grace
+    title: Product manager
+    instructions: You own scope and the launch timeline.
+groups:
+  - name: Launch
+    members: [Ada, Linus, Grace]
+world:
+  tools:
+    - name: ci_status
+      description: "CI plugin: the latest build status of a branch. Arguments: branch."
+      result: "main: passing (build #482, 12 minutes ago)"
+script:
+  - to: Launch
+    text: "@Linus is the build on main green?"
+assert:
+  - messages: { in: Launch, from: Linus, min: 1, max: 2 }
+  - messages: { in: Launch, from: Ada, max: 0 }
+  - messages: { in: Launch, from: Grace, max: 0 }
+  - no_silent_answer: Launch
+rubric:
+  - Linus says main is green (build 482 passing)
+faux:
+  Linus:
+    - call: { ci_status: { branch: main } }
+    - send: "Yep, main is green: build #482 passed 12 minutes ago"
+    - end

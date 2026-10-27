@@ -1,0 +1,19 @@
+description: >-
+  The owner signs off. There's nothing to do, but the bot still answers with a message rather than staying silent.
+bots:
+  - name: Linus
+    title: Engineer
+script:
+  - to: Linus
+    text: That's all for today, thanks!
+assert:
+  - messages: { in: Linus, min: 1, max: 2 }
+  - max_message_length: 200
+  - tool_not_called: bash
+  - no_silent_answer
+rubric:
+  - A short, friendly sign-off, without offering a list of further help
+faux:
+  Linus:
+    - send: Anytime, have a good evening!
+    - end

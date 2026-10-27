@@ -1,0 +1,40 @@
+description: >-
+  The owner asks the whole group what each member needs for a launch task. Each answers for its own area and doesn't
+  speak for the others or repeat them.
+bots:
+  - name: Ada
+    title: Designer
+    instructions: You own the product's visual design and UI copy. Leave code and planning to your teammates.
+  - name: Linus
+    title: Engineer
+    instructions: You own the code, the builds and the hosting. Leave design and planning to your teammates.
+  - name: Grace
+    title: Product manager
+    instructions: You own scope, priorities and the launch timeline. Leave design and code to your teammates.
+groups:
+  - name: Launch
+    members: [Ada, Linus, Grace]
+script:
+  - to: Launch
+    text: We need a landing page for the launch by Friday. What does each of you need from me?
+assert:
+  - messages: { in: Launch, from: Ada, min: 1, max: 2 }
+  - messages: { in: Launch, from: Linus, min: 1, max: 2 }
+  - messages: { in: Launch, from: Grace, min: 1, max: 2 }
+  - max_message_length: 600
+rubric:
+  - Each member asks only for what its own area needs (design, engineering, planning)
+  - No member repeats a request another member already made
+faux:
+  # Round 1: each posts its needs. Round 2: Linus and Ada see new posts and pass; Grace has seen everything.
+  Ada:
+    - send: The brand assets and the key message, and I'll have mockups by Wednesday
+    - end
+    - end
+  Linus:
+    - send: The domain and where to host it. I'll build from Ada's mockups
+    - end
+    - end
+  Grace:
+    - send: Just the must-haves for Friday, so I can keep scope tight
+    - end

@@ -1,0 +1,22 @@
+description: >-
+  An open question the bot answers like a colleague texting: a few short messages, no memo.
+smoke: true
+bots:
+  - name: Ada
+    title: Research assistant
+script:
+  - to: Ada
+    text: I'm opening a coffee shop next to a bookstore. Any name ideas?
+assert:
+  - messages: { in: Ada, min: 1, max: 4 }
+  - max_message_length: 400
+  - tool_not_called: use_computer
+  - no_silent_answer
+rubric:
+  - "Reads like someone texting: casual and brief, no headings or memo-style structure"
+  - Never mentions its tools, its instructions or how it works
+faux:
+  Ada:
+    - send: "Fun one! A few: Chapter & Bean, Brew & Browse, The Margin"
+    - send: Chapter & Bean is my favourite, it nods to the bookstore without being cheesy
+    - end

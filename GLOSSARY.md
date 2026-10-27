@@ -172,3 +172,27 @@ A versioned build of OpenBot's code, produced by every push to main and installe
 
 **Runtime image**:
 The container image holding OpenBot's operating system and tools, updated rarely and separately from releases.
+
+### Evals
+
+**Eval**:
+A developer-only check that bots behave as intended on a real model: a scenario run several times, reported as a pass rate. Never part of the app.
+_Avoid_: Test (for an eval), benchmark
+
+**Scenario**:
+One eval case: bots and group chats to set up, a fake world, the owner's messages, and the checks a run must pass (assertions and rubric items).
+_Avoid_: Test case, fixture
+
+**Suite**:
+A folder of scenarios about one behaviour, such as tool priority or voice. The **smoke suite** is the scenarios marked to run in CI.
+
+**Fake world**:
+What a scenario's bots act on instead of the real one: scripted shell results, web pages, plugin tools and clock.
+_Avoid_: Mock, sandbox
+
+**Rubric item**:
+A sentence an eval judge model scores a run on, pass or fail, where no deterministic assertion can tell.
+_Avoid_: Criterion, grader
+
+**Pass rate**:
+The share of a scenario's runs in which every assertion and rubric item passed; a suite's is its scenarios' mean.

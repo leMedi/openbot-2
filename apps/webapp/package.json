@@ -2,6 +2,9 @@
   "name": "@openbot/webapp",
   "private": true,
   "type": "module",
+  "exports": {
+    "./testing": "./src/server/testing/harness.ts"
+  },
   "scripts": {
     "with-env": "dotenv -e ../../.env --",
     "dev": "pnpm with-env vite dev",

@@ -1,0 +1,61 @@
+import { describe, expect, it } from 'vitest'
+import { judgeRequest, parseVerdicts } from './judge.ts'
+
+const rubric = ['Sounds like a colleague texting', 'Says where the number came from']
+
+describe('the eval judge', () => {
+  it('is shown the scenario, what happened in each chat, the tool calls and the numbered rubric', () => {
+    const { systemPrompt, prompt } = judgeRequest({
+      description: 'Ada answers a weather question',
+      rubric,
+      record: {
+        toolCalls: [{ bot: 'Ada', tool: 'bash', args: { command: 'curl wttr.in/Paris' } }],
+        chats: {
+          Ada: [
+            { from: 'owner', author: 'You', text: 'Weather in Paris?' },
+            { from: 'bot', author: 'Ada', text: 'Sunny, 21C' },
+            { from: 'between_bots', author: 'Ada', text: 'FYI it is sunny' },
+          ],
+        },
+      },
+    })
+
+    expect(systemPrompt).toMatch(/JSON/)
+    expect(prompt).toBe(
+      [
+        'Scenario: Ada answers a weather question',
+        '',
+        'Chat "Ada":',
+        'You: Weather in Paris?',
+        'Ada: Sunny, 21C',
+        'Ada (to another bot): FYI it is sunny',
+        '',
+        'Tool calls (private, the owner never sees them):',
+        '- Ada: bash {"command":"curl wttr.in/Paris"}',
+        '',
+        'Rubric:',
+        '1. Sounds like a colleague texting',
+        '2. Says where the number came from',
+      ].join('\n'),
+    )
+  })
+
+  it('reads one verdict per rubric item from its JSON answer, even wrapped in prose or a code block', () => {
+    const answer = 'Here you go:\n```json\n{"verdicts": [{"item": 1, "pass": true, "reason": "Casual"}, {"item": 2, "pass": false, "reason": "No source"}]}\n```'
+    expect(parseVerdicts(answer, rubric)).toEqual([
+      { item: 'Sounds like a colleague texting', passed: true, reason: 'Casual' },
+      { item: 'Says where the number came from', passed: false, reason: 'No source' },
+    ])
+  })
+
+  it('fails items it gave no verdict for, and every item when its answer is unreadable', () => {
+    expect(parseVerdicts('{"verdicts": [{"item": 2, "pass": true, "reason": "ok"}]}', rubric)).toEqual([
+      { item: 'Sounds like a colleague texting', passed: false, reason: 'The judge gave no verdict' },
+      { item: 'Says where the number came from', passed: true, reason: 'ok' },
+    ])
+    expect(parseVerdicts('I think it was fine', rubric)).toEqual([
+      { item: 'Sounds like a colleague texting', passed: false, reason: 'The judge\'s answer wasn\'t JSON: I think it was fine' },
+      { item: 'Says where the number came from', passed: false, reason: 'The judge\'s answer wasn\'t JSON: I think it was fine' },
+    ])
+  })
+})
