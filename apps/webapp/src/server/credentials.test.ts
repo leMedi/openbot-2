@@ -68,6 +68,11 @@ describe('system credentials', () => {
     await expect.poll(async () => (await server.client.chats.messages({ chatId: bot.chatId })).length).toBe(6)
     await expect.poll(async () => (await server.client.bots.list())[0]!.working).toBe(false)
     const takeOver = (await server.client.chats.messages({ chatId: bot.chatId })).at(-1)!
+    const ana = await server.client.bots.create({ name: 'Ana', title: null, instructions: '', avatarShape: 'hex', avatarColor: 'blue', model: null })
+    // Both members pass.
+    server.providers.script(endsSilently(), endsSilently())
+    const group = await server.client.groups.create({ memberIds: [bot.id, ana.id], text: 'Hello, team' })
+    await server.rounds.idle(group.chat.id)
     server.providers.script(callsTools(['sendMessage', { text: 'OK' }]), endsSilently(), callsTools(['sendMessage', { text: 'OK' }]), endsSilently())
 
     // Each procedure that returns data, called once it has something to return. A new procedure fails the check
@@ -104,6 +109,8 @@ describe('system credentials', () => {
       'chats.attachment': await (await server.client.chats.attachment({ messageId: sent.id, attachmentId: sent.attachments[0]!.id })).body.text(),
       'chats.answer': await server.client.chats.answer({ messageId: question.id, answer: { option: 0 } }),
       'chats.handBack': await server.client.chats.handBack({ messageId: takeOver.id, outcome: 'done' }),
+      'groups.create': group,
+      'groups.update': await server.client.groups.update({ chatId: group.chat.id, title: 'Team' }),
       events: null,
       openapi: await (await server.fetch('/api/openapi.json')).json(),
     }

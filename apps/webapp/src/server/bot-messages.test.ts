@@ -134,7 +134,7 @@ describe('a bot messaging another bot', () => {
 
     const results = JSON.stringify(requestsOf(server, 'Rex')[1]!.messages.slice(-3))
     expect(results).toContain("You can't message yourself")
-    expect(results).toContain('There is no bot named Zed')
+    expect(results).toContain('There is no bot or group chat named Zed')
     expect(results).toContain('Your teammates are Ana.')
     expect(results).toContain('at most 8000 characters')
     expect(await transcript(server, rex)).toEqual([

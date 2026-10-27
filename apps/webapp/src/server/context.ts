@@ -2,11 +2,15 @@ import { type BotComputer, BotRuntime, type BotTool, type ModelProvider, Provide
 import type { ChatInfo, LiveEvent } from '@openbot/api-contract'
 import {
   AllowAllOrchestrator,
+  type AttachmentFile,
   AttachmentStore,
+  type BotWithChat,
+  type ChatSummary,
   type Browser,
   type Desktop,
   EventBus,
   getChatSummary,
+  GroupRounds,
   type Orchestrator,
   postMessage,
   type Screens,
@@ -36,13 +40,21 @@ export type ServerContext = {
   screenHolds: ScreenHolds
   /** Settles once the computer's screens first match the bots (or the computer couldn't be reached at all). */
   screensSynced: Promise<void>
+  /** Plays group chats' rounds of member turns. */
+  rounds: GroupRounds
 }
 
+/** A chat as the sidebar shows it, with the member taking its turn in a group. */
+export const chatInfoOf = ({ rounds }: Pick<ServerContext, 'rounds'>, summary: ChatSummary): ChatInfo => toChatInfo(summary, rounds.speaking(summary.id))
+
 /** Tells every tab how a chat now looks in the sidebar, after a message, a read or a pin; returns that. */
-export async function publishChat({ db, bus }: Pick<ServerContext, 'db' | 'bus'>, chatId: string): Promise<ChatInfo | undefined> {
+export async function publishChat(
+  { db, bus, rounds }: Pick<ServerContext, 'db' | 'bus' | 'rounds'>,
+  chatId: string,
+): Promise<ChatInfo | undefined> {
   const summary = await getChatSummary(db, chatId)
   if (!summary) return undefined
-  const chat = toChatInfo(summary)
+  const chat = chatInfoOf({ rounds }, summary)
   bus.publish({ type: 'chat.updated', chat })
   return chat
 }
@@ -88,6 +100,39 @@ export async function createServerContext({
   const screenHolds = new ScreenHolds()
   const attachments = new AttachmentStore(attachmentsDir)
   const providers = new Providers({ db, box: new SecretBox(secretKey), providers: modelProviders })
+  // Made before the runtime, whose resumed runs may post to groups as it opens; turns wait for it to be open.
+  let opened!: (runtime: BotRuntime) => void
+  const runtimeOpen = new Promise<BotRuntime>((resolve) => (opened = resolve))
+  const rounds = new GroupRounds({
+    db,
+    takeTurn: async (botId, input) => (await runtimeOpen).takeTurn(botId, input),
+    onSpeaking: (chatId) => void publish(chatId).catch((error) => console.error("[groups] Couldn't show who is taking a turn:", error)),
+  })
+  const publish = (chatId: string) => publishChat({ db, bus, rounds }, chatId)
+  /** Posts a bot's message with copies of its files to `chatId`; returns it, or undefined for a replayed call's. */
+  async function postBotMessage(bot: BotWithChat, chatId: string, text: string, files: AttachmentFile[], idempotencyKey: string) {
+    const saved = await attachments.save(chatId, files)
+    const posted = await postMessage(db, {
+      chatId,
+      author: 'bot',
+      authorBotId: bot.id,
+      authorName: bot.name,
+      text,
+      attachments: saved,
+      idempotencyKey,
+    }).catch(async (error) => {
+      await attachments.discard(chatId, saved)
+      throw error
+    })
+    if (!posted.created) {
+      // A replayed call: its message, and the copies it kept, were posted the first time.
+      await attachments.discard(chatId, saved)
+      return undefined
+    }
+    bus.publish({ type: 'message.created', message: toMessageInfo(posted.message) })
+    await publish(chatId)
+    return posted.message
+  }
   const runtime = await BotRuntime.open({
     db,
     models: providers.models,
@@ -97,28 +142,13 @@ export async function createServerContext({
     browser,
     desktop,
     tools,
-    async sendMessage(bot, { text, attachments: files }, idempotencyKey) {
-      const saved = await attachments.save(bot.chatId, files)
-      const posted = await postMessage(db, {
-        chatId: bot.chatId,
-        author: 'bot',
-        authorBotId: bot.id,
-        authorName: bot.name,
-        text,
-        attachments: saved,
-        idempotencyKey,
-      }).catch(async (error) => {
-        await attachments.discard(bot.chatId, saved)
-        throw error
-      })
-      if (!posted.created) {
-        // A replayed call: its message, and the copies it kept, were posted the first time.
-        await attachments.discard(bot.chatId, saved)
-        return
-      }
-      const { message } = posted
-      bus.publish({ type: 'message.created', message: toMessageInfo(message) })
-      await publishChat({ db, bus }, bot.chatId)
+    async sendMessage(bot, chatId, { text, attachments: files }, idempotencyKey) {
+      await postBotMessage(bot, chatId, text, files, idempotencyKey)
+    },
+    async messageGroup(sender, group, { text, attachments: files }, idempotencyKey) {
+      const message = await postBotMessage(sender, group.id, text, files, idempotencyKey)
+      // The other members answer it in rounds, as they answer the owner; rounds going on read it in their turns.
+      if (message) void rounds.startUnlessPlaying(group.id, message)
     },
     async messageBot(sender, recipient, { text, attachments: files }, idempotencyKey) {
       // One entry in each DM, each with its own copies of the files: either DM can go with its bot.
@@ -152,7 +182,7 @@ export async function createServerContext({
       if (!posted.some(({ created }) => created)) return posted[1]!.message
       for (const { message } of posted) {
         bus.publish({ type: 'message.created', message: toMessageInfo(message) })
-        await publishChat({ db, bus }, message.chatId)
+        await publish(message.chatId)
       }
       return posted[1]!.message
     },
@@ -169,7 +199,7 @@ export async function createServerContext({
       })
       if (!created) return
       bus.publish({ type: 'message.created', message: toMessageInfo(message) })
-      await publishChat({ db, bus }, bot.chatId)
+      await publish(bot.chatId)
     },
     async requestTakeOver(bot, card, idempotencyKey) {
       const { message, created } = await postMessage(db, {
@@ -184,13 +214,14 @@ export async function createServerContext({
       })
       if (!created) return
       bus.publish({ type: 'message.created', message: toMessageInfo(message) })
-      await publishChat({ db, bus }, bot.chatId)
+      await publish(bot.chatId)
     },
     screenFree: (botId) => screenHolds.whenFree(botId),
     onStatus: (botId, status) => bus.publish({ type: 'bot.status', botId, ...status }),
   })
+  opened(runtime)
   const screensSynced = keepScreensInSync(db, screens)
-  return { db, bus, providers, runtime, computer, attachments, screens, screenTickets, screenHolds, screensSynced }
+  return { db, bus, providers, runtime, computer, attachments, screens, screenTickets, screenHolds, screensSynced, rounds }
 }
 
 const syncRetryMs = [1_000, 2_000, 5_000, 10_000, 30_000]
