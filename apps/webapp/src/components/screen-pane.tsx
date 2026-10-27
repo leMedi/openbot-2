@@ -1,7 +1,8 @@
-import type { BotInfo, HandBackOutcome, MessageInfo } from '@openbot/api-contract'
+import type { BotInfo, MessageInfo } from '@openbot/api-contract'
 import { cn } from '@openbot/ui/lib/utils'
 import { useEffect, useRef, useState } from 'react'
-import { api, errorMessage } from '../lib/api.ts'
+import { api } from '../lib/api.ts'
+import { useHandBack } from './take-over-card.tsx'
 
 // Every screen is 1280×800 (`screenSize` on the server).
 const aspect = '1280 / 800'
@@ -137,22 +138,8 @@ function FullscreenScreen({ bot, takeOver, onLeave }: { bot: BotInfo; takeOver?:
 
 /** A waiting take-over card's instruction in fullscreen, as Grok's hand-off banner: either button hands the screen back. */
 function HandOffBanner({ message, instruction, onHandedBack }: { message: MessageInfo; instruction: string; onHandedBack: () => void }) {
-  const [sending, setSending] = useState<HandBackOutcome>()
-  const [error, setError] = useState<string>()
-
-  async function handBack(outcome: HandBackOutcome) {
-    if (sending) return
-    setSending(outcome)
-    setError(undefined)
-    try {
-      // Handed back before fullscreen closes, so letting go of the screen doesn't count as closing the viewer.
-      await api().chats.handBack({ messageId: message.id, outcome })
-      onHandedBack()
-    } catch (caught) {
-      setError(errorMessage(caught))
-      setSending(undefined)
-    }
-  }
+  // Handed back before fullscreen closes, so letting go of the screen doesn't count as closing the viewer.
+  const { sending, error, handBack } = useHandBack(message.id, onHandedBack)
 
   return (
     <div role="status" className="flex shrink-0 items-center gap-3 rounded-[10px] bg-[#f9850021] py-2.5 pr-2.5 pl-3 text-sm text-[#ffbd3b]">

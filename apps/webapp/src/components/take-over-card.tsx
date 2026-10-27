@@ -11,6 +11,27 @@ const status = {
   viewer_closed: { label: 'Handed back', dot: 'bg-muted-foreground' },
 } as const
 
+/** Hands a bot's screen back from its take-over card, once at a time, keeping the error to show. */
+export function useHandBack(messageId: string, onHandedBack: (message: MessageInfo) => void) {
+  const [sending, setSending] = useState<HandBackOutcome>()
+  const [error, setError] = useState<string>()
+
+  async function handBack(outcome: HandBackOutcome) {
+    if (sending) return
+    setSending(outcome)
+    setError(undefined)
+    try {
+      onHandedBack(await api().chats.handBack({ messageId, outcome }))
+    } catch (caught) {
+      setError(errorMessage(caught))
+    } finally {
+      setSending(undefined)
+    }
+  }
+
+  return { sending, error, handBack }
+}
+
 /**
  * A bot stuck on its screen asks the owner to take over (as Grok's card for handing over its computer): the instruction, then **Take over**,
  * which opens the screen in take-over mode, **I'm done**, which hands it back and wakes the bot, and **Skip**, which
@@ -31,21 +52,7 @@ export function TakeOverCard({
   onOpenScreen: () => void
   onHandedBack: (message: MessageInfo) => void
 }) {
-  const [sending, setSending] = useState<HandBackOutcome>()
-  const [error, setError] = useState<string>()
-
-  async function handBack(outcome: HandBackOutcome) {
-    if (sending || card.outcome) return
-    setSending(outcome)
-    setError(undefined)
-    try {
-      onHandedBack(await api().chats.handBack({ messageId: message.id, outcome }))
-    } catch (caught) {
-      setError(errorMessage(caught))
-    } finally {
-      setSending(undefined)
-    }
-  }
+  const { sending, error, handBack } = useHandBack(message.id, onHandedBack)
 
   const { label, dot } = status[card.outcome ?? 'waiting']
   return (
@@ -79,7 +86,7 @@ export function TakeOverCard({
           <button
             type="button"
             disabled={!!sending}
-            onClick={() => void handBack('done')}
+            onClick={() => !card.outcome && void handBack('done')}
             className="pressable rounded-md border border-border px-2.5 py-1 text-sm font-medium hover:bg-secondary-hover disabled:opacity-60"
           >
             I'm done
@@ -87,7 +94,7 @@ export function TakeOverCard({
           <button
             type="button"
             disabled={!!sending}
-            onClick={() => void handBack('skipped')}
+            onClick={() => !card.outcome && void handBack('skipped')}
             title={`Cancel this request without doing the step; ${botName} continues without it`}
             className="pressable rounded-md px-2.5 py-1 text-sm text-muted-foreground hover:bg-secondary-hover hover:text-foreground disabled:opacity-60"
           >
