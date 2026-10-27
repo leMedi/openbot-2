@@ -75,6 +75,7 @@ function start(watchdog?: { interruptAfterMs: number; detachAfterMs: number }) {
     histories: fake.histories,
     onWorking: (_botId, value) => working.push(value),
     onError: (_botId, error) => fake.log.push(`error ${error.message}`),
+    onRequeue: async () => {},
     watchdog,
   })
   schedulers.push(scheduler)
@@ -112,6 +113,18 @@ describe('an owner message', () => {
 
     expect(log).toEqual(['run Fix the build', 'abort', 'run Use pnpm (supersedes) + And run the tests (supersedes)'])
     expect(scheduler.superseded('rex')).toBe(false)
+  })
+})
+
+describe('a run being submitted', () => {
+  it("isn't superseded while it waits for the history, e.g. for a run resumed after a restart", async () => {
+    const { scheduler, holdSubmissions } = start()
+    const release = holdSubmissions()
+    scheduler.wake('rex', bot('Lunch?'))
+    await settled()
+
+    expect(scheduler.superseded('rex')).toBe(false)
+    release()
   })
 })
 

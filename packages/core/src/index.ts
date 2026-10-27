@@ -87,6 +87,7 @@ export {
 } from './take-overs.ts'
 export { readModelSettings, writeModelSettings, type ModelSettings } from './settings.ts'
 export { lanes, type AgentRuntime, type BotInput, type Lane } from './ports/agent-runtime.ts'
+export { keepInput, type KeptInput, queuedInputs, requeueInput, takeInputs } from './bot-inputs.ts'
 export {
   type Browser,
   BrowserUnavailableError,
@@ -114,4 +115,3 @@ export {
   stoppedScreen,
 } from './ports/computer.ts'
 export type { Orchestrator, OrchestratorMode, ProposedAction, ReviewContext, Surface, Verdict } from './ports/orchestrator.ts'
-export { keepInput, type KeptInput, markInputsSubmitted, queuedInputs, requeueInput } from './bot-inputs.ts'

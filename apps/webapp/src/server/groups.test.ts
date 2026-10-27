@@ -7,12 +7,19 @@ import { type BotInfo, type ChatInfo, maxGroupMembers, minGroupMembers, type New
 import { groupRoundRules } from '@openbot/core'
 import { messages } from '@openbot/db'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createTestServer, restartTestServer, type TestServer } from './testing/harness.ts'
+import { createTestServer, restartTestServer, type TestServer, type TestServerOptions } from './testing/harness.ts'
 
 const servers: TestServer[] = []
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()))
 })
+
+/** Restarts `server` on its data, as `restartTestServer` does, closing the new server after the test instead. */
+async function restart(server: TestServer, options?: TestServerOptions) {
+  const restarted = await restartTestServer(server, options)
+  servers.splice(servers.indexOf(server), 1, restarted)
+  return restarted
+}
 
 const profile = (name: string): NewBot => ({
   name,
@@ -393,10 +400,9 @@ describe('deleting a group chat', () => {
     await turn.requested
     expect((await chatInfo(before, chat.id)).speaking).toBe(rex!.id)
 
-    const after = await restartTestServer(before, {
+    const after = await restart(before, {
       script: (providers) => providers.scriptFor('Rex', ...posts('Still here.')),
     })
-    servers.splice(servers.indexOf(before), 1, after)
     await expect.poll(async () => (await transcript(after, chat.id)).length).toBe(2)
     await expect.poll(async () => (await after.client.bots.list()).some((bot) => bot.working)).toBe(false)
 
@@ -414,10 +420,9 @@ describe('deleting a group chat', () => {
     await dmWork.requested
     const { chat } = await before.client.groups.create({ memberIds: [rex!.id, ana!.id], text: 'Anyone there?' })
 
-    const after = await restartTestServer(before, {
+    const after = await restart(before, {
       script: (providers) => providers.scriptFor('Rex', ...posts('Report done.')),
     })
-    servers.splice(servers.indexOf(before), 1, after)
     await expect.poll(async () => (await transcript(after, rex!.chatId)).length).toBe(2)
     await expect.poll(async () => (await after.client.bots.list()).some((bot) => bot.working)).toBe(false)
 

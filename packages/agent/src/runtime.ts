@@ -54,7 +54,6 @@ import {
   listGroups,
   type Lane,
   listBots,
-  markInputsSubmitted,
   markReminded,
   maxAttachments,
   maxBotMessageLength,
@@ -70,6 +69,7 @@ import {
   requeueInput,
   reviewAction,
   setBotHistory,
+  takeInputs,
   unansweredQuestions,
 } from '@openbot/core'
 import type { Attachment, Db, Message, Surface } from '@openbot/db'
@@ -357,8 +357,11 @@ function requestIdOf(inputs: readonly QueuedInput[]): string | undefined {
 /** What of a queued input is kept across restarts: all but what only this process can use. */
 const toKept = ({ settle: _settle, supersedes: _supersedes, ...input }: QueuedInput) => input as KeptInput
 
-/** The ids of the inputs kept across restarts: all but a group chat's turns, whose rounds end with the server. */
-const keptIds = (inputs: readonly QueuedInput[]) => inputs.flatMap((input) => (input.groupChatId || !input.id ? [] : [input.id]))
+/** Whether an input is kept across restarts: all are but a group chat's turns, whose rounds end with the server. */
+const isKept = (input: QueuedInput) => !input.groupChatId
+
+/** The ids of the kept inputs among `inputs`; `#wake` gave each one. */
+const keptIds = (inputs: readonly QueuedInput[]) => inputs.filter(isKept).map((input) => input.id!)
 
 /**
  * Runs bots on pi-durable (ADR 0005): each bot's history is one pi conversation (ADR 0001), and `sendMessage` and
@@ -387,17 +390,17 @@ export class BotRuntime implements AgentRuntime {
     this.#scheduler = new RunScheduler({
       histories: {
         submit: async (botId, inputs) => {
-          let run
+          let submitted = false
           try {
-            run = await this.#submit(botId, inputs)
-          } catch (error) {
-            // Dropped, as it would be without a restart; unless the runtime is closing under it.
-            if (!this.#closing) await markInputsSubmitted(this.#options.db, botId, keptIds(inputs))
-            throw error
+            const run = await this.#submit(botId, inputs)
+            submitted = true
+            return run
+          } finally {
+            // Submitted, pi-durable keeps the run from here on: were this lost, resubmitting the inputs finds their run.
+            // A run that couldn't start is dropped, as it would be without a restart, unless the runtime is closing
+            // under it: it then starts on the next boot.
+            if (submitted || !this.#closing) await takeInputs(this.#options.db, botId, keptIds(inputs))
           }
-          // pi-durable keeps the run from here on; were this lost, resubmitting the inputs finds their run.
-          await markInputsSubmitted(this.#options.db, botId, keptIds(inputs))
-          return run
         },
         idle: async (botId) => (await this.#existingHistory(botId))?.waitForIdle(context),
         abort: async (botId) => (await this.#existingHistory(botId))?.abort(context),
@@ -408,9 +411,9 @@ export class BotRuntime implements AgentRuntime {
         this.#errors.set(botId, error.message)
         this.#options.onStatus(botId, this.status(botId))
       },
-      onRequeue: (botId, input) => {
-        if (!keptIds([input]).length) return
-        void requeueInput(this.#options.db, botId, toKept(input)).catch((error) =>
+      onRequeue: async (botId, input) => {
+        if (!isKept(input)) return
+        await requeueInput(this.#options.db, botId, toKept(input)).catch((error) =>
           console.error(`[agent] Couldn't keep bot ${botId}'s interrupted input queued:`, error),
         )
       },
@@ -783,7 +786,7 @@ export class BotRuntime implements AgentRuntime {
     if (!bot) throw new Error(`Unknown bot ${botId}`)
     await this.#model(bot)
     this.#errors.delete(botId)
-    if (input.groupChatId) return this.#scheduler.wake(botId, input)
+    if (!isKept(input)) return this.#scheduler.wake(botId, input)
     const queued = { ...input, id: input.id ?? randomUUID() }
     if (!(await keepInput(this.#options.db, botId, toKept(queued)))) return false
     return this.#scheduler.wake(botId, queued)

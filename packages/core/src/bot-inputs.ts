@@ -22,16 +22,16 @@ export async function keepInput(db: Db, botId: string, input: KeptInput): Promis
 export async function requeueInput(db: Db, botId: string, input: KeptInput): Promise<void> {
   await db
     .update(botInputs)
-    .set({ input, position: nextPosition, submittedAt: null })
+    .set({ input, position: nextPosition, takenAt: null })
     .where(and(eq(botInputs.botId, botId), eq(botInputs.inputId, input.id)))
 }
 
 /** Takes the bot's inputs `inputIds` off its queue: their run was submitted, or couldn't start. */
-export async function markInputsSubmitted(db: Db, botId: string, inputIds: readonly string[]): Promise<void> {
+export async function takeInputs(db: Db, botId: string, inputIds: readonly string[]): Promise<void> {
   if (!inputIds.length) return
   await db
     .update(botInputs)
-    .set({ submittedAt: new Date() })
+    .set({ takenAt: new Date() })
     .where(and(eq(botInputs.botId, botId), inArray(botInputs.inputId, [...inputIds])))
 }
 
@@ -40,7 +40,7 @@ export async function queuedInputs(db: Db): Promise<{ botId: string; input: Kept
   const rows = await db
     .select({ botId: botInputs.botId, input: botInputs.input })
     .from(botInputs)
-    .where(isNull(botInputs.submittedAt))
+    .where(isNull(botInputs.takenAt))
     .orderBy(asc(botInputs.position))
   return rows.map(({ botId, input }) => ({ botId, input: input as KeptInput }))
 }

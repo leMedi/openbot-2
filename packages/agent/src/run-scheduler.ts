@@ -42,8 +42,8 @@ export type RunSchedulerOptions = {
   onWorking(botId: string, working: boolean): void
   /** A run couldn't start. */
   onError(botId: string, error: Error): void
-  /** An interrupt queued `input` to run again, with its new attempt. */
-  onRequeue?(botId: string, input: QueuedInput): void
+  /** An interrupt queued `input` to run again, with its new attempt; the next run waits for it to resolve. */
+  onRequeue(botId: string, input: QueuedInput): Promise<void>
   watchdog?: Watchdog
 }
 
@@ -280,7 +280,7 @@ export class RunScheduler {
       const { run } = active
       if (bot.active !== active || !run || (await run.ended())) return
       await Promise.race([this.#options.histories.abort(botId), active.detached])
-      if (!(await run.answered())) for (const input of active.inputs) this.#requeue(botId, bot, input)
+      if (!(await run.answered())) for (const input of active.inputs) await this.#requeue(botId, bot, input)
     }).catch((error) => couldntInterrupt(botId, error))
   }
 
@@ -288,14 +288,14 @@ export class RunScheduler {
    * Queues an interrupted run's input to run again, moving its waiter there. The owner's messages don't: they are in
    * the history, and the run superseding them answers them. A group turn gives up after `maxGroupTurnAttempts` runs.
    */
-  #requeue(botId: string, bot: BotState, input: QueuedInput) {
+  async #requeue(botId: string, bot: BotState, input: QueuedInput) {
     if (isOwnerMessage(input)) return
     const attempt = (input.attempt ?? 0) + 1
     if (input.groupChatId && attempt >= maxGroupTurnAttempts) return
     const requeued = { ...input, attempt }
     enqueue(bot.queue, requeued)
     input.settle = undefined
-    this.#options.onRequeue?.(botId, requeued)
+    await this.#options.onRequeue(botId, requeued)
   }
 
   /** Starts the watchdog on `active`, which the owner's message now waits for. */

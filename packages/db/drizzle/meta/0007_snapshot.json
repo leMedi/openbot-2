@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7e8b60bb-51a2-4681-9d9c-d261b0b775cb",
+  "id": "c84b3dcc-9bea-42dd-97e0-27dd7dca727b",
   "prevId": "8dc8ce65-9274-4af2-9b37-7347a446817b",
   "tables": {
     "audit_log": {
@@ -140,8 +140,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "submitted_at": {
-          "name": "submitted_at",
+        "taken_at": {
+          "name": "taken_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,

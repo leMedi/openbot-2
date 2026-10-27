@@ -204,8 +204,8 @@ export const auditLog = sqliteTable(
 )
 
 /**
- * What woke each bot (`AgentRuntime.wake`), kept so a restart loses none of its queue. A row stays once its run is
- * submitted, so an input of the same id never runs twice. A group chat's turns aren't kept: its rounds end with the
+ * What woke each bot (`AgentRuntime.wake`), kept so a restart loses none of its queue. A row stays once it leaves the
+ * queue, so an input of the same id never runs twice. A group chat's turns aren't kept: its rounds end with the
  * server. Its shape is owned by `core`.
  */
 export const botInputs = sqliteTable(
@@ -219,10 +219,13 @@ export const botInputs = sqliteTable(
     inputId: text('input_id').notNull(),
     /** The input: its lane, priority, text, files and attempt. */
     input: text('input', { mode: 'json' }).$type<unknown>().notNull(),
-    /** Its place in the bot's queue, before the scheduler sorts it by lane; renewed when an interrupt queues it again. */
+    /**
+     * When it was queued, as one counter across all bots: a bot's inputs in this order, sorted by lane, are its queue.
+     * Renewed when an interrupt queues it again.
+     */
     position: integer('position').notNull(),
-    /** When its run was submitted to pi-durable, which keeps it from there; null while queued. */
-    submittedAt: integer('submitted_at', { mode: 'timestamp_ms' }),
+    /** When it left the queue: its run was submitted to pi-durable, which keeps it from there, or couldn't start. */
+    takenAt: integer('taken_at', { mode: 'timestamp_ms' }),
     createdAt: createdAt(),
   },
   (table) => [uniqueIndex('bot_inputs_input_unique').on(table.botId, table.inputId), uniqueIndex('bot_inputs_position_unique').on(table.position)],

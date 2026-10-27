@@ -11,6 +11,13 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()))
 })
 
+/** Restarts `server` on its data, as `restartTestServer` does, closing the new server after the test instead. */
+async function restart(server: TestServer, options?: TestServerOptions) {
+  const restarted = await restartTestServer(server, options)
+  servers.splice(servers.indexOf(server), 1, restarted)
+  return restarted
+}
+
 const profile = (name: string, title: string | null = null): NewBot => ({
   name,
   title,
@@ -408,11 +415,10 @@ describe('waking a busy bot', () => {
     await before.runtime.wake(rex.id, { lane: 'bot', text: 'Ask Ana about lunch', id: 'lunch-1' })
     await untilIdle(before, rex)
 
-    const after = await restartTestServer(before, {
+    const after = await restart(before, {
       // Her run for the owner goes on, then Rex's message wakes her.
       script: (providers) => providers.scriptFor('Ana', callsTools(['sendMessage', { text: 'Report done.' }]), endsSilently(), endsSilently()),
     })
-    servers.splice(servers.indexOf(before), 1, after)
     await untilIdle(after, ana)
     const [incoming] = (await after.client.chats.messages({ chatId: ana.chatId })).filter((message) => message.botMessage)
     // A replayed message_bot call wakes her with the same input again.
@@ -438,11 +444,10 @@ describe('waking a busy bot', () => {
     await before.runtime.wake(rex.id, { lane: 'bot', text: 'Warn Ana', id: 'warn-1' })
     await warned.requested
 
-    const after = await restartTestServer(before, {
+    const after = await restart(before, {
       // The priority message's run goes on, then the digest runs again.
       script: (providers) => providers.scriptFor('Ana', endsSilently(), callsTools(['sendMessage', { text: 'Digest.' }]), endsSilently()),
     })
-    servers.splice(servers.indexOf(before), 1, after)
     await untilIdle(after, ana)
     // A routine waking her again with the same input finds it was queued already.
     await after.runtime.wake(ana.id, { lane: 'background', text: 'Write the daily digest', id: 'digest-1' })

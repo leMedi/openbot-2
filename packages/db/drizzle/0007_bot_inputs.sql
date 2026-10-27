@@ -4,7 +4,7 @@ CREATE TABLE `bot_inputs` (
 	`input_id` text NOT NULL,
 	`input` text NOT NULL,
 	`position` integer NOT NULL,
-	`submitted_at` integer,
+	`taken_at` integer,
 	`created_at` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
 	FOREIGN KEY (`bot_id`) REFERENCES `bots`(`id`) ON UPDATE no action ON DELETE cascade
 );
