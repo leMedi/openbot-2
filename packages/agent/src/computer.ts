@@ -50,6 +50,7 @@ export class BotComputer {
     this.#options = options
   }
 
+  /** Refuses any work on a computer bots can't run on. */
   #assertAvailable(): void {
     if (this.unavailable) throw new ComputerUnavailableError(this.unavailable)
   }
@@ -179,12 +180,14 @@ export function userExists(name: string): boolean {
  */
 export function openBotComputer({ home, user = botUser }: { home: string; user?: string }): BotComputer {
   const daemon = packagedDaemon()
-  const missing = !userExists(user) ? `there is no ${user} user` : !daemon ? 'there is no pi-env daemon for this machine' : undefined
-  if (missing) {
+  if (!userExists(user) || !daemon) {
+    const missing = !userExists(user) ? `there is no ${user} user` : 'there is no pi-env daemon for this machine'
     const unavailable = `Bots run only in OpenBot's runtime image, and this server isn't in it: ${missing}. Start OpenBot with Docker Compose (\`pnpm dev:up\` for development).`
+    console.error(`[computer] ${unavailable}`)
     return new BotComputer({
       home,
       user,
+      // Never reached: every use refuses first.
       env: () => {
         throw new ComputerUnavailableError(unavailable)
       },
@@ -192,7 +195,7 @@ export function openBotComputer({ home, user = botUser }: { home: string; user?:
     })
   }
   // `--set-home` so commands see the bots' home as ~, not the server's.
-  const command = userInfo().username === user ? [daemon!] : ['sudo', '--non-interactive', '--set-home', `--user=${user}`, '--', daemon!]
+  const command = userInfo().username === user ? [daemon] : ['sudo', '--non-interactive', '--set-home', `--user=${user}`, '--', daemon]
   const connection = new Connection({ command, onLog: (text) => console.error(`[pi-env] ${text.trimEnd()}`) })
   return new BotComputer({
     home,

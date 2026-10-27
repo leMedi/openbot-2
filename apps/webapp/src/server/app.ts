@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { botUser, builtinModelProviders, openBotComputer, userExists } from '@openbot/agent'
+import { botUser, builtinModelProviders, openBotComputer } from '@openbot/agent'
 import { connectBrowser, connectDesktop, connectScreens } from '@openbot/computer'
 import { openDb } from '@openbot/db'
 import { env, paths } from '@openbot/db/env'
@@ -39,7 +39,7 @@ async function open(): Promise<ServerContext> {
     computer: openBotComputer({ home: paths.home }),
     browser: connectBrowser({ screens }),
     // Each screen's cua-driver runs as the bots' user and answers only that user.
-    desktop: connectDesktop({ screens, runAs: userExists(botUser) ? botUser : undefined }),
+    desktop: connectDesktop({ screens, runAs: botUser }),
     attachmentsDir: join(paths.dataDir, 'attachments'),
     screens,
     screenTickets: serverScreenTickets(),
