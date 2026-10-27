@@ -138,10 +138,29 @@ The model every bot uses unless it has its own.
 ### Memory and routines
 
 **Memory**:
-Facts a bot keeps across conversations, either its own or shared by all bots (global memory).
+The facts a bot keeps across conversations: its bot memory plus the shared memory. When the two disagree, its own fact wins.
+
+**Bot memory**:
+The facts only one bot knows, mostly about its own work. They go when the bot is deleted.
+_Avoid_: Private memory, own memory
+
+**Shared memory**:
+The facts every bot knows, mostly about the owner. They stay when the bot that wrote them is deleted.
+_Avoid_: Global memory, user memory
 
 **Fact**:
-One remembered statement, with a tier: profile (always relevant), log (a dated event) or note (short-lived).
+One remembered statement, with a tier: profile (always relevant, never fades), log (a dated event that fades but is kept) or note (short-lived, gone after a week). Forgetting a fact removes it for good.
+
+**Episode**:
+A log fact in which a bot sums up what it has done in its last few runs that did something.
+_Avoid_: Journal, diary
+
+**Extraction**:
+Picking out facts after each run: facts about the owner come only from the owner's own words, facts about the bot's work only from what it said; other bots' words are never a source.
+
+**Consolidation**:
+The nightly tidy-up of memory that changed that day: merging duplicates, promoting recurring facts to profile, dropping expired notes, and keeping profiles short.
+_Avoid_: Dreaming
 
 **Routine**:
 A note from a bot to its future self plus a schedule; when it fires, the bot wakes and may stay silent.
