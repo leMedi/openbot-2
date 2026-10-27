@@ -178,7 +178,8 @@ export function ProfilePane({ bot, onSaved, onDeleted }: { bot: BotInfo; onSaved
   )
 }
 
-function ConfirmDelete({ bot, onCancel, onDeleted }: { bot: BotInfo; onCancel: () => void; onDeleted: () => void }) {
+/** Asks before deleting a bot for good (ADR 0009), then deletes it. */
+export function ConfirmDelete({ bot, onCancel, onDeleted }: { bot: BotInfo; onCancel: () => void; onDeleted: () => void }) {
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string>()
 

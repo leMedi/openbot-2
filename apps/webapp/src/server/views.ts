@@ -1,6 +1,6 @@
-import { type AuditEntryInfo, type BotInfo, type CardInfo, deletedAuthorName, type MessageInfo } from '@openbot/api-contract'
+import { type AuditEntryInfo, type BotInfo, type CardInfo, type ChatInfo, deletedAuthorName, type MessageInfo } from '@openbot/api-contract'
 import type { BotStatus } from '@openbot/agent'
-import { type BotWithChat, isQuestionCard, questionAnswerOf } from '@openbot/core'
+import { type BotWithChat, type ChatSummary, isQuestionCard, questionAnswerOf } from '@openbot/core'
 import type { AuditEntry, Message } from '@openbot/db'
 
 /**
@@ -24,6 +24,20 @@ export function toMessageInfo(message: Message): MessageInfo {
 function toCardInfo(message: Message): CardInfo | null {
   if (!isQuestionCard(message.card)) return null
   return { ...message.card, answer: questionAnswerOf(message) }
+}
+
+/** What the sidebar shows of a chat; its newest message is cut down to a preview. */
+export function toChatInfo(chat: ChatSummary): ChatInfo {
+  const last = chat.lastMessage && toMessageInfo(chat.lastMessage)
+  return {
+    id: chat.id,
+    kind: chat.kind,
+    botId: chat.botId,
+    pinnedPosition: chat.pinnedPosition,
+    unread: chat.unread,
+    waitingFor: chat.waitingFor,
+    lastMessage: last && { author: last.author, authorName: last.authorName, text: last.text, createdAt: last.createdAt },
+  }
 }
 
 export function toBotInfo(bot: BotWithChat, { working, error }: BotStatus): BotInfo {

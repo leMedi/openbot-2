@@ -1,4 +1,4 @@
-import { type BotInfo, deletedAuthorName, type MessageInfo, type StampedEvent } from '@openbot/api-contract'
+import { type BotInfo, type ChatInfo, deletedAuthorName, type MessageInfo, type StampedEvent } from '@openbot/api-contract'
 import { type ReactNode, createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react'
 import { api } from './api.ts'
 
@@ -12,11 +12,13 @@ function mergeMessages(messages: readonly MessageInfo[], incoming: readonly Mess
 }
 
 /**
- * Bots and the messages of opened chats, kept in sync with the server over the live event stream. A reconnect
+ * Bots, every chat's sidebar state, and the messages of opened chats, kept in sync with the server over the live event stream. A reconnect
  * resumes from the last stamp seen; when the server can't resume (a restart, or too long away), everything is refetched.
  */
 export class LiveStore {
   bots: BotInfo[] | undefined
+  /** Every chat's sidebar state (pinned, unread, waiting), by chat id. */
+  chats: ReadonlyMap<string, ChatInfo> = new Map()
   messages: ReadonlyMap<string, MessageInfo[]> = new Map()
   /** What the owner has typed but not sent, per chat; kept while the app is open. */
   drafts: ReadonlyMap<string, string> = new Map()
@@ -60,6 +62,66 @@ export class LiveStore {
     this.#update(() => this.#setMessages(message.chatId, mergeMessages(this.messages.get(message.chatId) ?? [], [message])))
   }
 
+  /** Shows a chat as the server returned it, e.g. after marking it read. */
+  setChat(chat: ChatInfo) {
+    this.#update(() => (this.chats = new Map(this.chats).set(chat.id, chat)))
+  }
+
+  /**
+   * Marks a chat read up to `upTo`: at once here, then on the server. The server's answer arrives as `chat.updated`,
+   * in order with the chat's other changes, so a bot posting meanwhile still shows; a failed save shows the server's
+   * state again.
+   */
+  async markRead(chatId: string, upTo: string | undefined) {
+    const chat = this.chats.get(chatId)
+    if (chat?.unread) this.setChat({ ...chat, unread: false })
+    try {
+      await api().chats.read({ chatId, upTo })
+    } catch (error) {
+      await this.#refetchChats().catch(() => {}) // The save's error is the one to show.
+      throw error
+    }
+  }
+
+  /** Chat ids pinned in the sidebar, in the owner's order. */
+  get pinnedChatIds(): string[] {
+    return [...this.chats.values()]
+      .filter((chat) => chat.pinnedPosition !== null)
+      .sort((a, b) => a.pinnedPosition! - b.pinnedPosition!)
+      .map((chat) => chat.id)
+  }
+
+  /** Pin saves in flight, sent one after another so they land in the order the owner made them. */
+  #pinning: Promise<unknown> = Promise.resolve()
+
+  /**
+   * Pins exactly `chatIds`, in that order: shown at once, then saved; the saved order arrives as `chat.updated`
+   * events. A failed save shows the server's order again.
+   */
+  async setPinned(chatIds: string[]) {
+    this.#update(() => {
+      const chats = new Map(this.chats)
+      for (const [id, chat] of chats) {
+        const position = chatIds.indexOf(id)
+        chats.set(id, { ...chat, pinnedPosition: position === -1 ? null : position })
+      }
+      this.chats = chats
+    })
+    const save = this.#pinning.then(() => api().chats.setPinned({ chatIds }))
+    this.#pinning = save.catch(() => {})
+    try {
+      await save
+    } catch (error) {
+      await this.#refetchChats().catch(() => {}) // The save's error is the one to show.
+      throw error
+    }
+  }
+
+  async #refetchChats() {
+    const chats = await api().chats.list()
+    this.#update(() => (this.chats = new Map(chats.map((chat) => [chat.id, chat]))))
+  }
+
   setDraft(chatId: string, text: string) {
     this.#update(() => {
       const drafts = new Map(this.drafts)
@@ -82,6 +144,9 @@ export class LiveStore {
   removeBot(botId: string, chatId: string) {
     this.#update(() => {
       this.bots = this.bots?.filter((bot) => bot.id !== botId)
+      const chats = new Map(this.chats)
+      chats.delete(chatId)
+      this.chats = chats
       const messages = new Map(this.messages)
       messages.delete(chatId)
       for (const [id, list] of messages) {
@@ -125,16 +190,20 @@ export class LiveStore {
       case 'message.updated':
         if (this.messages.has(event.message.chatId)) this.addMessage(event.message)
         return
+      case 'chat.updated':
+        return this.setChat(event.chat)
     }
   }
 
   async #refetch() {
-    const [bots, chats] = await Promise.all([
+    const [bots, summaries, chats] = await Promise.all([
       api().bots.list(),
+      api().chats.list(),
       Promise.all([...this.messages.keys()].map(async (chatId) => [chatId, await api().chats.messages({ chatId })] as const)),
     ])
     this.#update(() => {
       this.bots = bots
+      this.chats = new Map(summaries.map((chat) => [chat.id, chat]))
       for (const [chatId, loaded] of chats) {
         this.#setMessages(chatId, mergeMessages(this.messages.get(chatId) ?? [], loaded))
       }

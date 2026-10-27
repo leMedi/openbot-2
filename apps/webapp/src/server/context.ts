@@ -1,8 +1,8 @@
 import { BotRuntime, type BotTool, type ModelProvider, Providers } from '@openbot/agent'
-import type { LiveEvent } from '@openbot/api-contract'
-import { AllowAllOrchestrator, EventBus, type Orchestrator, postMessage, SecretBox } from '@openbot/core'
+import type { ChatInfo, LiveEvent } from '@openbot/api-contract'
+import { AllowAllOrchestrator, EventBus, getChatSummary, type Orchestrator, postMessage, SecretBox } from '@openbot/core'
 import type { Db } from '@openbot/db'
-import { toMessageInfo } from './views.ts'
+import { toChatInfo, toMessageInfo } from './views.ts'
 
 /** What every procedure runs against; built once per server start, or per test by the harness. */
 export type ServerContext = {
@@ -10,6 +10,15 @@ export type ServerContext = {
   bus: EventBus<LiveEvent>
   providers: Providers
   runtime: BotRuntime
+}
+
+/** Tells every tab how a chat now looks in the sidebar, after a message, a read or a pin; returns that. */
+export async function publishChat({ db, bus }: Pick<ServerContext, 'db' | 'bus'>, chatId: string): Promise<ChatInfo | undefined> {
+  const summary = await getChatSummary(db, chatId)
+  if (!summary) return undefined
+  const chat = toChatInfo(summary)
+  bus.publish({ type: 'chat.updated', chat })
+  return chat
 }
 
 export async function createServerContext({
@@ -49,7 +58,9 @@ export async function createServerContext({
         text,
         idempotencyKey,
       })
-      if (created) bus.publish({ type: 'message.created', message: toMessageInfo(message) })
+      if (!created) return
+      bus.publish({ type: 'message.created', message: toMessageInfo(message) })
+      await publishChat({ db, bus }, bot.chatId)
     },
     async askQuestion(bot, card, idempotencyKey) {
       const { message, created } = await postMessage(db, {
@@ -62,7 +73,9 @@ export async function createServerContext({
         card,
         idempotencyKey,
       })
-      if (created) bus.publish({ type: 'message.created', message: toMessageInfo(message) })
+      if (!created) return
+      bus.publish({ type: 'message.created', message: toMessageInfo(message) })
+      await publishChat({ db, bus }, bot.chatId)
     },
     onStatus: (botId, status) => bus.publish({ type: 'bot.status', botId, ...status }),
   })

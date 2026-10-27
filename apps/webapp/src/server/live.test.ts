@@ -72,9 +72,12 @@ describe('live sync', () => {
     expect(messageIds(seenBySecond)).toEqual(messageIds(seenByFirst))
     expect(seenByFirst.map((event) => event.event.type)).toEqual([
       'message.created',
+      'chat.updated',
       'bot.status',
       'message.created',
+      'chat.updated',
       'message.created',
+      'chat.updated',
       'bot.status',
     ])
   })
@@ -92,7 +95,7 @@ describe('live sync', () => {
     const again = await subscribe(server, last)
     expect(again.hello).toEqual({ ...last, event: { type: 'hello', resumed: true } })
     const missed = await again.read(idle)
-    expect(missed.map((event) => event.seq)).toEqual([last.seq + 1, last.seq + 2, last.seq + 3, last.seq + 4])
+    expect(missed.map((event) => event.seq)).toEqual([1, 2, 3, 4, 5, 6].map((step) => last.seq + step))
     expect(messageIds(missed)).toEqual((await server.client.chats.messages({ chatId: bot.chatId })).map((message) => message.id))
   })
 
