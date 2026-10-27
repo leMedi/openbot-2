@@ -1,23 +1,71 @@
 import { type Bot, type Db, type NewBot, bots, chats } from '@openbot/db'
-import { asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, ne, sql } from 'drizzle-orm'
 
 export class NameTakenError extends Error {}
+
+/** What the owner sets on a bot. */
+export type BotProfile = Pick<NewBot, 'name' | 'title' | 'instructions' | 'avatarShape' | 'avatarColor' | 'model'>
+
+/** Throws `NameTakenError` when a bot other than `exceptId` has `name`, ignoring case. */
+async function assertNameFree(tx: Pick<Db, 'select'>, name: string, exceptId?: string) {
+  const [taken] = await tx
+    .select({ id: bots.id })
+    .from(bots)
+    .where(and(sql`lower(${bots.name}) = lower(${name})`, exceptId ? ne(bots.id, exceptId) : undefined))
+  if (taken) throw new NameTakenError(`There is already a bot named ${name}`)
+}
 
 /** A bot with the id of its DM. */
 export type BotWithChat = Bot & { chatId: string }
 
 /** Creates a bot and its DM in one transaction. Throws `NameTakenError` when another bot has the name, ignoring case. */
-export async function createBot(db: Db, values: Omit<NewBot, 'id' | 'historyId' | 'displayNumber'>): Promise<BotWithChat> {
+export async function createBot(db: Db, values: BotProfile): Promise<BotWithChat> {
   return db.transaction(async (tx) => {
-    const [taken] = await tx
-      .select({ id: bots.id })
-      .from(bots)
-      .where(sql`lower(${bots.name}) = lower(${values.name})`)
-    if (taken) throw new NameTakenError(`There is already a bot named ${values.name}`)
+    await assertNameFree(tx, values.name)
     const [bot] = await tx.insert(bots).values(values).returning()
     const [chat] = await tx.insert(chats).values({ kind: 'dm', botId: bot!.id }).returning()
     return { ...bot!, chatId: chat!.id }
   })
+}
+
+/**
+ * Changes a bot's profile. Throws `NameTakenError` when another bot has the new name, ignoring case; returns undefined
+ * when there is no such bot.
+ */
+export async function updateBot(
+  db: Db,
+  id: string,
+  changes: Partial<BotProfile>,
+): Promise<BotWithChat | undefined> {
+  await db.transaction(async (tx) => {
+    if (changes.name !== undefined) await assertNameFree(tx, changes.name, id)
+    if (Object.keys(changes).length > 0) await tx.update(bots).set(changes).where(eq(bots.id, id))
+  })
+  return getBot(db, id)
+}
+
+/**
+ * Deletes a bot for good (ADR 0009): its row, and through cascades its DM with its messages and its audit entries. It
+ * leaves group chats; messages it posted elsewhere keep a copy of its name. Returns the deleted bot, or undefined when
+ * there is no such bot.
+ */
+export async function deleteBot(db: Db, id: string): Promise<BotWithChat | undefined> {
+  const bot = await getBot(db, id)
+  if (!bot) return undefined
+  await db.transaction(async (tx) => {
+    const groups = await tx
+      .select({ id: chats.id, members: chats.members })
+      .from(chats)
+      .where(and(eq(chats.kind, 'group'), sql`exists (select 1 from json_each(${chats.members}) where value = ${id})`))
+    for (const group of groups) {
+      await tx
+        .update(chats)
+        .set({ members: group.members.filter((member) => member !== id) })
+        .where(eq(chats.id, group.id))
+    }
+    await tx.delete(bots).where(eq(bots.id, id))
+  })
+  return bot
 }
 
 export async function listBots(db: Db): Promise<BotWithChat[]> {

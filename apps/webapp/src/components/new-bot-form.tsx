@@ -1,19 +1,8 @@
-import {
-  avatarColors,
-  avatarShapes,
-  type BotInfo,
-  type ModelInfo,
-  type ModelSettings,
-  type NewBot,
-} from '@openbot/api-contract'
+import { avatarColors, avatarShapes, type BotInfo, type NewBot } from '@openbot/api-contract'
 import { cn } from '@openbot/ui/lib/utils'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
-import { avatarPalette, BotAvatar } from './bot-avatar.tsx'
-
-const followDefault = ''
-
-const inputClass = 'rounded-md border border-input bg-input-fill px-2.5 py-1.5 text-base outline-none focus:border-ring'
+import { AvatarPicker, Field, followDefault, inputClass, ModelSelect, useModels } from './bot-fields.tsx'
 
 /** Name, title, instructions, avatar and model of a new bot. */
 export function NewBotForm({
@@ -31,22 +20,10 @@ export function NewBotForm({
   const [shape, setShape] = useState<NewBot['avatarShape']>(() => avatarShapes[Math.floor(Math.random() * avatarShapes.length)]!)
   const [color, setColor] = useState<NewBot['avatarColor']>(() => avatarColors[Math.floor(Math.random() * avatarColors.length)]!)
   const [model, setModel] = useState(followDefault)
-  const [models, setModels] = useState<ModelInfo[]>([])
-  const [settings, setSettings] = useState<ModelSettings>()
-  const [error, setError] = useState<string>()
+  const { models, defaultModel, error: modelsError } = useModels()
+  const [submitError, setError] = useState<string>()
   const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    Promise.all([api().models.list(), api().models.getSettings()]).then(
-      ([models, settings]) => {
-        setModels(models)
-        setSettings(settings)
-      },
-      (caught) => setError(errorMessage(caught)),
-    )
-  }, [])
-
-  const defaultModel = models.find((entry) => entry.ref === settings?.defaultModel)
+  const error = submitError ?? modelsError
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -71,40 +48,11 @@ export function NewBotForm({
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
-      <div className="flex items-center gap-3">
-        <BotAvatar shape={shape} color={color} size={56} />
-        <div className="flex flex-col gap-2">
-          <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="Shape">
-            {avatarShapes.map((entry) => (
-              <button
-                key={entry}
-                type="button"
-                role="radio"
-                aria-checked={entry === shape}
-                aria-label={entry}
-                onClick={() => setShape(entry)}
-                className={cn('rounded-md p-0.5', entry === shape ? 'bg-selected' : 'hover:bg-secondary')}
-              >
-                <BotAvatar shape={entry} color={color} size={22} />
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Color">
-            {avatarColors.map((entry) => (
-              <button
-                key={entry}
-                type="button"
-                role="radio"
-                aria-checked={entry === color}
-                aria-label={entry}
-                onClick={() => setColor(entry)}
-                className={cn('size-5 rounded-full ring-offset-2 ring-offset-popover', entry === color && 'ring-2 ring-ring')}
-                style={{ background: `linear-gradient(135deg, ${avatarPalette[entry].join(', ')})` }}
-              />
-            ))}
-          </div>
-        </div>
-      </div>
+      <AvatarPicker
+        shape={shape}
+        color={color}
+        onChange={(change) => ('avatarShape' in change ? setShape(change.avatarShape) : setColor(change.avatarColor))}
+      />
 
       <Field label="Name" htmlFor="bot-name" hint="How you and other bots mention it; no two bots share one.">
         <input id="bot-name" required autoFocus placeholder="Rex" value={name} onChange={(event) => setName(event.target.value)} className={inputClass} />
@@ -126,14 +74,7 @@ export function NewBotForm({
       </Field>
 
       <Field label="Model" htmlFor="bot-model">
-        <select id="bot-model" value={model} onChange={(event) => setModel(event.target.value)} className={inputClass}>
-          <option value={followDefault}>Default ({defaultModel?.name ?? 'not chosen yet'})</option>
-          {models.map((entry) => (
-            <option key={entry.ref} value={entry.ref}>
-              {entry.name} · {entry.provider}
-            </option>
-          ))}
-        </select>
+        <ModelSelect id="bot-model" value={model} models={models} defaultModel={defaultModel} onChange={setModel} />
       </Field>
 
       {error && <p className="text-destructive-foreground">{error}</p>}
@@ -153,17 +94,5 @@ export function NewBotForm({
         </button>
       </footer>
     </form>
-  )
-}
-
-function Field({ label, htmlFor, hint, children }: { label: string; htmlFor: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <label htmlFor={htmlFor} className="font-medium">
-        {label}
-      </label>
-      {children}
-      {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
-    </div>
   )
 }

@@ -1,9 +1,10 @@
 import type { BotInfo, MessageInfo } from '@openbot/api-contract'
 import { cn } from '@openbot/ui/lib/utils'
-import { Link, createFileRoute } from '@tanstack/react-router'
+import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { BotAvatar } from '../../components/bot-avatar.tsx'
 import { Markdown } from '../../components/markdown.tsx'
+import { ProfilePane } from '../../components/profile-pane.tsx'
 import { api, errorMessage } from '../../lib/api.ts'
 import { useLive } from '../../lib/live.tsx'
 
@@ -11,10 +12,12 @@ export const Route = createFileRoute('/_app/bots/$botId')({
   component: Dm,
 })
 
-/** The DM between the owner and one bot, in Grok Bot's layout. */
+/** The DM between the owner and one bot, in Grok Bot's layout, with its Profile pane beside it when open. */
 function Dm() {
   const { botId } = Route.useParams()
   const live = useLive()
+  const navigate = useNavigate()
+  const [profileOpen, setProfileOpen] = useState(false)
   const bot = live.bots?.find((entry) => entry.id === botId)
   const [error, setError] = useState<string>()
   const [loadedChat, setLoadedChat] = useState<string>()
@@ -34,30 +37,50 @@ function Dm() {
   const loading = loadedChat !== bot.chatId && !error
 
   return (
-    <>
-      <header className="flex min-h-[51px] items-center gap-2 border-b border-border-subtle px-4">
-        <BotAvatar shape={bot.avatarShape} color={bot.avatarColor} />
-        <span className="font-semibold">{bot.name}</span>
-        {bot.working && <span className="text-sm text-muted-foreground">Working</span>}
-      </header>
-      <MessageList bot={bot} messages={messages ?? []} loading={loading} />
-      {error && <p className="px-6 text-destructive-foreground">{error}</p>}
-      {bot.error && !bot.working && (
-        <p role="alert" className="mx-[max(24px,calc((100%-700px)/2))] rounded-lg bg-red/10 px-3 py-2 text-sm text-red-foreground">
-          {bot.name} couldn't reach its model: {bot.error}. Check its provider in{' '}
-          <Link to="/settings/providers" className="underline">
-            Settings
-          </Link>
-          , then send your message again.
-        </p>
+    <div className="flex min-h-0 flex-1">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex min-h-[51px] items-center gap-2 border-b border-border-subtle px-4">
+          <BotAvatar shape={bot.avatarShape} color={bot.avatarColor} />
+          <span className="font-semibold">{bot.name}</span>
+          {bot.working && <span className="text-sm text-muted-foreground">Working</span>}
+          <button
+            type="button"
+            aria-pressed={profileOpen}
+            onClick={() => setProfileOpen((open) => !open)}
+            className={cn('ml-auto rounded-md px-2 py-1 text-base hover:bg-secondary-hover', profileOpen && 'bg-selected')}
+          >
+            Profile
+          </button>
+        </header>
+        <MessageList bot={bot} messages={messages ?? []} loading={loading} />
+        {error && <p className="px-6 text-destructive-foreground">{error}</p>}
+        {bot.error && !bot.working && (
+          <p role="alert" className="mx-[max(24px,calc((100%-700px)/2))] rounded-lg bg-red/10 px-3 py-2 text-sm text-red-foreground">
+            {bot.name} couldn't reach its model: {bot.error}. Check its provider in{' '}
+            <Link to="/settings/providers" className="underline">
+              Settings
+            </Link>
+            , then send your message again.
+          </p>
+        )}
+        <Composer
+          bot={bot}
+          draft={live.drafts.get(bot.chatId) ?? ''}
+          onDraft={(text) => live.setDraft(bot.chatId, text)}
+          onSent={(message) => live.addMessage(message)}
+        />
+      </div>
+      {profileOpen && (
+        <ProfilePane
+          bot={bot}
+          onSaved={(saved) => live.updateBot(saved)}
+          onDeleted={() => {
+            live.removeBot(bot.id, bot.chatId)
+            navigate({ to: '/', replace: true })
+          }}
+        />
       )}
-      <Composer
-        bot={bot}
-        draft={live.drafts.get(bot.chatId) ?? ''}
-        onDraft={(text) => live.setDraft(bot.chatId, text)}
-        onSent={(message) => live.addMessage(message)}
-      />
-    </>
+    </div>
   )
 }
 

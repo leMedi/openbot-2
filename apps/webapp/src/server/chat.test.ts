@@ -94,6 +94,53 @@ describe('chatting in a DM', () => {
     expect(server.providers.requests.map((request) => request.model)).toEqual(['fake/fake-mini', 'fake/fake-mini'])
   })
 
+  it('moves every bot without a model of its own to a new default model, and only those', async () => {
+    const { server, bot: rexBot } = await startWithRex()
+    const ana = await server.client.bots.create({ ...rex, name: 'Ana', model: 'fake/fake-model' })
+    const kim = await server.client.bots.create({ ...rex, name: 'Kim', model: 'fake/fake-model' })
+    await server.client.bots.update({ botId: kim.id, model: null })
+
+    await server.client.models.updateSettings({ defaultModel: 'fake/fake-mini' })
+    for (const bot of [rexBot, ana, kim]) {
+      server.providers.script(callsTools(['sendMessage', { text: 'Hi' }]), endsSilently())
+      await server.client.chats.send({ chatId: bot.chatId, text: 'Hello' })
+      await untilIdle(server, bot)
+    }
+
+    expect(server.providers.requests.map((request) => request.model)).toEqual([
+      ...['fake/fake-mini', 'fake/fake-mini'],
+      ...['fake/fake-model', 'fake/fake-model'],
+      ...['fake/fake-mini', 'fake/fake-mini'],
+    ])
+  })
+
+  it('runs an edited bot as it is now', async () => {
+    const { server, bot } = await startWithRex()
+    await server.client.bots.update({ botId: bot.id, name: 'Rexy', title: 'Tester', instructions: 'Rexy writes tests first.' })
+    server.providers.script(callsTools(['sendMessage', { text: 'Hi' }]), endsSilently())
+
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Hello' })
+    await untilIdle(server, bot)
+
+    const system = JSON.stringify(server.providers.requests[0]!.messages)
+    expect(system).toContain('You are Rexy, Tester.')
+    expect(system).toContain('Rexy writes tests first.')
+    expect(system).not.toContain('Rex fixes builds')
+    expect((await server.client.chats.messages({ chatId: bot.chatId })).at(-1)).toMatchObject({ authorName: 'Rexy' })
+  })
+
+  it('gives bots no tool to delete a bot', async () => {
+    const { server, bot } = await startWithRex()
+    server.providers.script(callsTools(['sendMessage', { text: 'Hi' }]), endsSilently())
+
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Delete yourself' })
+    await untilIdle(server, bot)
+
+    const tools = server.providers.requests[0]!.tools
+    expect(tools).toContain('sendMessage')
+    expect(tools.filter((tool) => /delete|remove|bot/i.test(tool))).toEqual([])
+  })
+
   it("refuses the owner's message, without posting it, when the bot's model is unavailable", async () => {
     const { server, bot } = await startWithRex()
     await server.client.providers.disconnect({ providerId: 'fake' })
