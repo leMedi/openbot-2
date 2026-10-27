@@ -1,6 +1,7 @@
 import { type Db, type Message, messages } from '@openbot/db'
 import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 import { getMessage } from './chats.ts'
+import { oweReply } from './owed-replies.ts'
 
 /**
  * A take-over card's payload, as stored in `messages.card`: a computer-use session got stuck on something only the
@@ -51,11 +52,16 @@ export async function findWaitingTakeOver(db: Db, chatId: string): Promise<(Mess
 export async function handBack(db: Db, messageId: string, outcome: HandBackOutcome): Promise<{ message: Message; card: TakeOverCard }> {
   const message = await getMessage(db, messageId)
   if (!message || !isTakeOverCard(message.card)) throw new TakeOverNotFoundError('No such take-over')
-  const [handed] = await db
-    .update(messages)
-    .set({ cardState: { outcome } satisfies TakeOverState })
-    .where(and(eq(messages.id, messageId), isNull(messages.cardState)))
-    .returning()
+  // The bot owes the owner a reply once it has gone on, as to their message.
+  const handed = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(messages)
+      .set({ cardState: { outcome } satisfies TakeOverState })
+      .where(and(eq(messages.id, messageId), isNull(messages.cardState)))
+      .returning()
+    if (row) await oweReply(tx, row.chatId)
+    return row
+  })
   if (!handed) throw new HandedBackError('The screen was already handed back')
   return { message: handed, card: message.card }
 }

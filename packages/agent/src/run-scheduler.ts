@@ -8,6 +8,8 @@ export type QueuedInput = BotInput & {
   supersedes?: boolean
   /** Called once its run has ended for good, or it was dropped (the bot deleted, the scheduler closed). */
   settle?: () => void
+  /** Interrupted, it doesn't run again: the input of a run resumed after a restart, when only its lane and id are known. */
+  runsOnce?: boolean
 }
 
 /** A run of a bot's history that the scheduler started. */
@@ -42,6 +44,8 @@ export type RunSchedulerOptions = {
   onWorking(botId: string, working: boolean): void
   /** A run couldn't start. */
   onError(botId: string, error: Error): void
+  /** An interrupt queued `input` to run again, with its new attempt; the next run waits for it to resolve. */
+  onRequeue(botId: string, input: QueuedInput): Promise<void>
   watchdog?: Watchdog
 }
 
@@ -90,6 +94,10 @@ type BotState = {
   active?: ActiveRun
   driving: boolean
   working: boolean
+  /** A run the watchdog detached is still ending, and the next waits to be submitted after it. */
+  detachedEnding: boolean
+  /** A run resumed after a restart, which the driver takes on before the queue (see `adopt`). */
+  adopted?: { inputs: QueuedInput[]; run: Run }
   /** Submissions and aborts, in order, so an abort reaches the run it was meant for. */
   chain: Promise<unknown>
 }
@@ -121,6 +129,18 @@ export class RunScheduler {
     this.#watchdog = options.watchdog ?? defaultWatchdog
   }
 
+  /**
+   * Takes on a run of the bot's history that pi-durable resumed after a restart, for `inputs`, as the bot's run going on
+   * (Grok's resumed turns): newer inputs interrupt it, or wait for it, as they would any run. Call it before waking the
+   * bot.
+   */
+  adopt(botId: string, inputs: QueuedInput[], run: Run) {
+    const bot = this.#bot(botId)
+    bot.adopted = { inputs, run }
+    this.#setWorking(botId, bot, true)
+    this.#drive(botId, bot)
+  }
+
   /** Queues `input`, interrupting the bot's run when it should; false when the input is there already. */
   wake(botId: string, input: QueuedInput): boolean {
     const bot = this.#bot(botId)
@@ -146,8 +166,9 @@ export class RunScheduler {
    * detached one still ending while the next waits to be submitted.
    */
   superseded(botId: string): boolean {
-    const active = this.#bots.get(botId)?.active
-    return !!active && (active.superseded || !active.run)
+    const bot = this.#bots.get(botId)
+    const active = bot?.active
+    return !!active && (active.superseded || (bot.detachedEnding && !active.run))
   }
 
   /**
@@ -199,7 +220,7 @@ export class RunScheduler {
   #bot(botId: string): BotState {
     let bot = this.#bots.get(botId)
     if (!bot) {
-      bot = { queue: [], driving: false, working: false, chain: Promise.resolve() }
+      bot = { queue: [], driving: false, working: false, detachedEnding: false, chain: Promise.resolve() }
       this.#bots.set(botId, bot)
     }
     return bot
@@ -210,6 +231,15 @@ export class RunScheduler {
     const done = bot.chain.then(work, work)
     bot.chain = done.catch(() => {})
     return done
+  }
+
+  /** The next run: one resumed after a restart, which is going on already, or the inputs to submit next. */
+  #take(bot: BotState): { inputs: QueuedInput[]; run?: Run } | undefined {
+    const { adopted } = bot
+    bot.adopted = undefined
+    if (adopted) return adopted
+    const inputs = this.#next(bot)
+    return inputs.length ? { inputs } : undefined
   }
 
   /** The inputs of the next run: the next input, or every owner's message waiting, which run together. */
@@ -226,15 +256,27 @@ export class RunScheduler {
     if (bot.driving) return
     bot.driving = true
     void (async () => {
-      for (let inputs; !this.#closed && (inputs = this.#next(bot)).length; ) {
+      for (let next; !this.#closed && (next = this.#take(bot)); ) {
+        const { inputs, run } = next
         let detach!: () => void
-        const detached = new Promise<void>((resolve) => (detach = resolve))
+        const detached = new Promise<void>(
+          (resolve) =>
+            (detach = () => {
+              bot.detachedEnding = true
+              resolve()
+            }),
+        )
         const active: ActiveRun = { inputs, interrupted: false, superseded: false, detached, detach, timers: [] }
         bot.active = active
         try {
           // Chained at once, so an interrupt asked from now on comes after it.
           await this.#serially(bot, async () => {
-            active.run = await this.#options.histories.submit(botId, inputs)
+            try {
+              active.run = run ?? (await this.#options.histories.submit(botId, inputs))
+            } finally {
+              // Submitting waited for the history to be idle: a detached run has ended.
+              bot.detachedEnding = false
+            }
           })
           await Promise.race([this.#options.histories.idle(botId), detached])
           // Any interrupt of this run, asked while it went on.
@@ -264,7 +306,7 @@ export class RunScheduler {
       const { run } = active
       if (bot.active !== active || !run || (await run.ended())) return
       await Promise.race([this.#options.histories.abort(botId), active.detached])
-      if (!(await run.answered())) for (const input of active.inputs) this.#requeue(bot, input)
+      if (!(await run.answered())) for (const input of active.inputs) await this.#requeue(botId, bot, input)
     }).catch((error) => couldntInterrupt(botId, error))
   }
 
@@ -272,12 +314,14 @@ export class RunScheduler {
    * Queues an interrupted run's input to run again, moving its waiter there. The owner's messages don't: they are in
    * the history, and the run superseding them answers them. A group turn gives up after `maxGroupTurnAttempts` runs.
    */
-  #requeue(bot: BotState, input: QueuedInput) {
-    if (isOwnerMessage(input)) return
+  async #requeue(botId: string, bot: BotState, input: QueuedInput) {
+    if (isOwnerMessage(input) || input.runsOnce) return
     const attempt = (input.attempt ?? 0) + 1
     if (input.groupChatId && attempt >= maxGroupTurnAttempts) return
-    enqueue(bot.queue, { ...input, attempt })
+    const requeued = { ...input, attempt }
+    enqueue(bot.queue, requeued)
     input.settle = undefined
+    await this.#options.onRequeue(botId, requeued)
   }
 
   /** Starts the watchdog on `active`, which the owner's message now waits for. */

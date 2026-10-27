@@ -1,6 +1,7 @@
 import { type Db, type Message, messages } from '@openbot/db'
 import { and, asc, eq, inArray, lt, type SQL, sql } from 'drizzle-orm'
 import { getMessage } from './chats.ts'
+import { oweReply } from './owed-replies.ts'
 
 export const questionOptionStyles = ['default', 'primary', 'danger'] as const
 export type QuestionOptionStyle = (typeof questionOptionStyles)[number]
@@ -77,11 +78,16 @@ export async function answerQuestion(
     answer = { text: answer.text.trim() }
     if (!answer.text) throw new InvalidAnswerError('The answer is empty')
   }
-  const [answered] = await db
-    .update(messages)
-    .set({ cardState: patchState({ answer } satisfies QuestionState) })
-    .where(and(eq(messages.id, messageId), isOpen))
-    .returning()
+  // The bot owes the owner a reply to their answer, as to their message.
+  const answered = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(messages)
+      .set({ cardState: patchState({ answer } satisfies QuestionState) })
+      .where(and(eq(messages.id, messageId), isOpen))
+      .returning()
+    if (row) await oweReply(tx, row.chatId)
+    return row
+  })
   if (!answered) throw new QuestionAnsweredError('The question was already answered or dismissed')
   return { message: answered, card, answer }
 }

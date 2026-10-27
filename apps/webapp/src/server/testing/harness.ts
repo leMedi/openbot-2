@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { botUser, type BotTool, type ModelProvider, openBotComputer, type Watchdog } from '@openbot/agent'
-import { createFakeModel, createFakeProviders, fakeBotComputer, type FakeBotComputer, type FakeShellScript } from '@openbot/agent/testing'
+import { createFakeModel, createFakeProviders, fakeBotComputer, type FakeBotComputer, type FakeProviders, type FakeShellScript } from '@openbot/agent/testing'
 import { connectBrowser, connectDesktop, connectScreens, defaultDaemonSocket } from '@openbot/computer'
 import type { Orchestrator, Screens, ScreenStatus } from '@openbot/core'
 import { createFakeComputer, type FakeComputer, type FakeComputerScript } from '@openbot/core/testing'
@@ -56,6 +56,8 @@ export type TestServerOptions = {
   watchdog?: Watchdog
   /** Answers bots' downloads, e.g. of the https:// images they send each other. */
   fetch?: typeof fetch
+  /** Scripts the model before the server starts, e.g. for the runs and queued inputs a restart resumes. */
+  script?: (providers: FakeProviders) => void
 }
 
 /**
@@ -72,11 +74,12 @@ type KeptComputers = { computer: FakeComputer; botComputer: FakeBotComputer }
 async function open(
   dir: string,
   secretKey: string,
-  { shell, pages, realComputer, outsideImage, modelProviders = [], ...options }: TestServerOptions,
+  { shell, pages, realComputer, outsideImage, modelProviders = [], script, ...options }: TestServerOptions,
   kept?: KeptComputers,
 ) {
   const db = await openDb(join(dir, 'openbot.db'))
   const providers = createFakeProviders()
+  script?.(providers)
   const home = realComputer ? process.env.OPENBOT_HOME! : join(dir, 'home')
   // The computer outlives the server, as the screen daemon does.
   const computer = kept?.computer ?? createFakeComputer({ pages })

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
@@ -38,15 +39,20 @@ import {
   type Desktop,
   type BotInput,
   type BotWithChat,
+  botsOwingReplies,
   describeUnanswered,
   findBotByHistory,
   findBotByName,
   findGroupByName,
   getGroup,
   othersIn,
+  pruneTakenInputs,
   findWaitingTakeOver,
   getBot,
   type Group,
+  keepInput,
+  keptInput,
+  type KeptInput,
   groupRoundRules,
   listGroups,
   type Lane,
@@ -59,11 +65,16 @@ import {
   type Orchestrator,
   type QuestionCard,
   questionOptionStyles,
+  queuedInputs,
   type TakeOverCard,
   readModelSettings,
   recordUnreviewed,
+  redriveReply,
+  requeueInput,
   reviewAction,
   setBotHistory,
+  sinceLastReply,
+  takeInputs,
   unansweredQuestions,
 } from '@openbot/core'
 import type { Attachment, Db, Message, Surface } from '@openbot/db'
@@ -103,6 +114,13 @@ To send the owner a file from your computer, such as a report or a screenshot, a
 When your screen needs the owner (a login, a captcha, a two-factor code, a payment), use_computer asks them to take it over on a card and ends your turn; their handing the screen back wakes you, and you go on from there.
 
 When you need the owner to decide before you go on, ask with askQuestion: a short prompt and up to six options they can pick with one click. Asking ends your turn, so send anything else first; their answer wakes you as their next message.`
+
+/**
+ * Starts the input waking a bot that owes the owner a reply once the server is back (Grok's ack redrive), before the
+ * owner's messages since its last reply.
+ */
+export const owedReplyNote =
+  "[The server restarted before you replied to the owner. Their messages since your last reply follow; you may have seen some already, or none may be new. If you already did what they asked, confirm it with sendMessage; if not, acknowledge them and go on with it, without repeating anything you already did; if you can't tell what they last asked, say you may have missed their latest message and ask them to resend it. Never claim work is done that you can't see.]"
 
 /** Starts an input that runs again: a newer message interrupted the bot while it worked on it. */
 export const interruptedNote = '[You were interrupted by a newer message while working on this. Pick it up again.]'
@@ -348,6 +366,22 @@ function requestIdOf(inputs: readonly QueuedInput[]): string | undefined {
   return ids.every(Boolean) ? ids.join(' ') : undefined
 }
 
+/** The ids of the inputs of the run whose request id is `requestId` (see `requestIdOf`). */
+const inputIdsOf = (requestId: string) => requestId.split(' ').map((token) => token.replace(/:attempt-\d+$/, ''))
+
+/** What of a queued input is kept across restarts: all but what only this process can use. */
+const toKept = ({ settle: _settle, supersedes: _supersedes, ...input }: QueuedInput) => input as KeptInput
+
+/**
+ * Whether an input is kept across restarts: those of the bot and background lanes. The owner's are not: their messages
+ * are in their DM, and a bot owing them a reply is woken to give it (`owedReplyNote`); a group chat's turns end with its
+ * rounds, as the server stops.
+ */
+const isKept = (input: QueuedInput) => input.lane !== 'owner'
+
+/** The ids of the kept inputs among `inputs`; `#wake` gave each one. */
+const keptIds = (inputs: readonly QueuedInput[]) => inputs.filter(isKept).map((input) => input.id!)
+
 /**
  * Runs bots on pi-durable (ADR 0005): each bot's history is one pi conversation (ADR 0001), and `sendMessage` and
  * `askQuestion` are the only ways a bot reaches a chat.
@@ -365,6 +399,8 @@ export class BotRuntime implements AgentRuntime {
   readonly #errors = new Map<string, string>()
   /** Messages each bot has sent in its current group turn, by the turn's input id. */
   readonly #groupMessages = new Map<string, { inputId: string; sent: number }>()
+  /** Closing: a run that can't start now is queued still, for the next start. */
+  #closing = false
 
   private constructor(harness: Harness, options: BotRuntimeOptions, images: ImageProcessor) {
     this.#harness = harness
@@ -372,7 +408,19 @@ export class BotRuntime implements AgentRuntime {
     this.#images = images
     this.#scheduler = new RunScheduler({
       histories: {
-        submit: (botId, inputs) => this.#submit(botId, inputs),
+        submit: async (botId, inputs) => {
+          let submitted = false
+          try {
+            const run = await this.#submit(botId, inputs)
+            submitted = true
+            return run
+          } finally {
+            // Submitted, pi-durable keeps the run from here on: were this lost, resubmitting the inputs finds their run.
+            // A run that couldn't start is dropped, as it would be without a restart, unless the runtime is closing
+            // under it: it then starts on the next boot.
+            if (submitted || !this.#closing) await takeInputs(this.#options.db, botId, keptIds(inputs))
+          }
+        },
         idle: async (botId) => (await this.#existingHistory(botId))?.waitForIdle(context),
         abort: async (botId) => (await this.#existingHistory(botId))?.abort(context),
       },
@@ -381,6 +429,12 @@ export class BotRuntime implements AgentRuntime {
         console.error(`[agent] Bot ${botId}'s run couldn't start:`, error)
         this.#errors.set(botId, error.message)
         this.#options.onStatus(botId, this.status(botId))
+      },
+      onRequeue: async (botId, input) => {
+        if (!isKept(input)) return
+        await requeueInput(this.#options.db, botId, toKept(input)).catch((error) =>
+          console.error(`[agent] Couldn't keep bot ${botId}'s interrupted input queued:`, error),
+        )
       },
       watchdog: options.watchdog,
     })
@@ -721,8 +775,78 @@ export class BotRuntime implements AgentRuntime {
       context,
     )
     runtime = new BotRuntime(harness, options, images)
+    // Read before pi-durable resumes runs, whose replayed calls may queue inputs: those are woken as they are queued.
+    await pruneTakenInputs(options.db)
+    const queued = await queuedInputs(options.db)
+    const resuming = await runtime.#resumingRuns()
     harness.resume()
+    // At once, so no replayed call wakes a bot first. The runs pi-durable resumes are the bots' runs going on, which the
+    // queued inputs, back in the order they were queued and sorted by lane, wait for or interrupt.
+    for (const { botId, inputs, run } of resuming) runtime.#scheduler.adopt(botId, inputs, run)
+    for (const { botId, input } of queued) runtime.#scheduler.wake(botId, input)
+    for (const botId of await botsOwingReplies(options.db)) void runtime.#redriveReply(botId)
     return runtime
+  }
+
+  /**
+   * The runs of bots' histories pi-durable is about to resume, with the inputs they were for (see `RunScheduler.adopt`).
+   * Those kept are read back, so an interrupt queues them again; of the others, only the lane and id are known, so they
+   * run once. Read before pi-durable resumes them.
+   */
+  async #resumingRuns(): Promise<{ botId: string; inputs: QueuedInput[]; run: Run }[]> {
+    const runs = []
+    for (const bot of await listBots(this.#options.db)) {
+      const history = bot.historyId ? await this.#harness.conversation(toConversationId(bot.historyId), context) : undefined
+      if (!history) continue
+      const submissionIds = await history.commit(async (tx) => [...((await tx.doc(LiveDoc, history.id)).run?.inputs ?? [])], context)
+      if (!submissionIds.length) continue
+      const submissions = () => Promise.all(submissionIds.map(async (id) => (await this.#harness.submission(id, context))?.status(context)))
+      const requestId = (await submissions()).find((submission) => submission?.requestId)?.requestId
+      const record = await this.inputOf(history.id)
+      const inputs = await Promise.all(
+        (requestId ? inputIdsOf(requestId) : [record?.id]).map(
+          async (id): Promise<QueuedInput> =>
+            (id && (await keptInput(this.#options.db, bot.id, id))) || {
+              lane: record?.lane ?? 'owner',
+              text: '',
+              ...(id && { id }),
+              ...(record?.groupChatId && { groupChatId: record.groupChatId }),
+              runsOnce: true,
+            },
+        ),
+      )
+      const statuses = async () => (await submissions()).map((submission) => submission?.status)
+      runs.push({
+        botId: bot.id,
+        inputs,
+        run: {
+          ended: async () => (await statuses()).every((status) => status === 'done' || status === 'unanswered'),
+          answered: async () => (await statuses()).every((status) => status === 'done'),
+        },
+      })
+    }
+    return runs
+  }
+
+  /**
+   * Wakes a bot that owes the owner a reply as the server starts, once any run pi-durable resumed has ended: that run
+   * may reply yet. It reads `owedReplyNote`, then the owner's messages since its last reply.
+   */
+  async #redriveReply(botId: string) {
+    try {
+      await (await this.#existingHistory(botId))?.waitForIdle(context)
+      const bot = await getBot(this.#options.db, botId)
+      if (!bot || !(await redriveReply(this.#options.db, botId))) return
+      const unanswered = await sinceLastReply(this.#options.db, bot.chatId)
+      await this.wake(botId, {
+        lane: 'owner',
+        text: [owedReplyNote, ...unanswered.map((message) => message.text)].filter(Boolean).join('\n\n'),
+        attachments: unanswered.flatMap((message) => message.attachments),
+        id: `owed-reply:${randomUUID()}`,
+      })
+    } catch (error) {
+      console.error(`[agent] Couldn't wake bot ${botId} for the reply it owes the owner:`, error)
+    }
   }
 
   /** Queues `input` (see `AgentRuntime.wake` and `RunScheduler`). */
@@ -737,13 +861,19 @@ export class BotRuntime implements AgentRuntime {
     await ended
   }
 
-  /** Queues `input`; false when it was there already. */
+  /**
+   * Queues `input`, kept in the database across restarts unless it is a group chat's turn; false when it was queued
+   * before, here or before a restart.
+   */
   async #wake(botId: string, input: QueuedInput): Promise<boolean> {
     const bot = await getBot(this.#options.db, botId)
     if (!bot) throw new Error(`Unknown bot ${botId}`)
     await this.#model(bot)
     this.#errors.delete(botId)
-    return this.#scheduler.wake(botId, input)
+    if (!isKept(input)) return this.#scheduler.wake(botId, input)
+    const queued = { ...input, id: input.id ?? randomUUID() }
+    if (!(await keepInput(this.#options.db, botId, toKept(queued)))) return false
+    return this.#scheduler.wake(botId, queued)
   }
 
   /** What the input of the bot's current run, the newest in its history, recorded: its lane and group chat. */
@@ -816,6 +946,7 @@ export class BotRuntime implements AgentRuntime {
   }
 
   async close(): Promise<void> {
+    this.#closing = true
     this.#scheduler.close()
     await this.#harness.close(context)
     await this.#options.computer.close()

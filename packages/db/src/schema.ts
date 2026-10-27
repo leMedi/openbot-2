@@ -81,6 +81,14 @@ export const bots = sqliteTable(
       .$type<Partial<Record<Surface, OrchestratorMode>>>()
       .notNull()
       .default(sql`'{}'`),
+    /**
+     * Since when the bot owes the owner a reply (Grok's ack obligation): set with the owner's DM message, answer or
+     * hand-back, cleared by the bot's next message or card in its DM; null when it owes none. A bot still owing one
+     * when the server starts is woken to reply.
+     */
+    replyOwedAt: integer('reply_owed_at', { mode: 'timestamp_ms' }),
+    /** How many times a start woke the bot for the reply it owes; it gives up after 3. */
+    replyRedrives: integer('reply_redrives').notNull().default(0),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -201,6 +209,34 @@ export const auditLog = sqliteTable(
     createdAt: createdAt(),
   },
   (table) => [index('audit_log_bot_idx').on(table.botId, table.id)],
+)
+
+/**
+ * What woke each bot (`AgentRuntime.wake`), kept so a restart loses none of its queue. A row stays once it leaves the
+ * queue, so an input of the same id never runs twice. A group chat's turns aren't kept: its rounds end with the
+ * server. Its shape is owned by `core`.
+ */
+export const botInputs = sqliteTable(
+  'bot_inputs',
+  {
+    id: id(),
+    botId: text('bot_id')
+      .notNull()
+      .references(() => bots.id, { onDelete: 'cascade' }),
+    /** The input's own id, e.g. that of the message that woke the bot. */
+    inputId: text('input_id').notNull(),
+    /** The input: its lane, priority, text, files and attempt. */
+    input: text('input', { mode: 'json' }).$type<unknown>().notNull(),
+    /**
+     * When it was queued, as one counter across all bots: a bot's inputs in this order, sorted by lane, are its queue.
+     * Renewed when an interrupt queues it again.
+     */
+    position: integer('position').notNull(),
+    /** When it left the queue: its run was submitted to pi-durable, which keeps it from there, or couldn't start. */
+    takenAt: integer('taken_at', { mode: 'timestamp_ms' }),
+    createdAt: createdAt(),
+  },
+  (table) => [uniqueIndex('bot_inputs_input_unique').on(table.botId, table.inputId), uniqueIndex('bot_inputs_position_unique').on(table.position)],
 )
 
 export type Setting = typeof settings.$inferSelect

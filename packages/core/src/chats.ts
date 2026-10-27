@@ -1,6 +1,7 @@
 import { type Chat, type Db, type Message, type NewChat, type NewMessage, bots, chats, messages } from '@openbot/db'
 import { asc, eq, inArray, sql } from 'drizzle-orm'
 import { groupName } from './groups.ts'
+import { oweReply, replied } from './owed-replies.ts'
 
 /** The longest text one bot can send another (Grok's limit). */
 export const maxBotMessageLength = 8_000
@@ -22,10 +23,16 @@ export async function listMessages(db: Db, chatId: string): Promise<Message[]> {
 
 /**
  * Posts a message. With an `idempotencyKey` (a bot's tool call), posting again returns the first message and
- * `created: false`, so a replayed call never posts twice.
+ * `created: false`, so a replayed call never posts twice. The owner's message in a DM makes its bot owe them a reply,
+ * which the bot's own message or card there gives (see `oweReply`); a message between bots does neither.
  */
 export async function postMessage(db: Db, values: NewMessage): Promise<{ message: Message; created: boolean }> {
-  const [inserted] = await db.insert(messages).values(values).onConflictDoNothing({ target: messages.idempotencyKey }).returning()
+  const inserted = await db.transaction(async (tx) => {
+    const [message] = await tx.insert(messages).values(values).onConflictDoNothing({ target: messages.idempotencyKey }).returning()
+    if (message && values.author === 'owner') await oweReply(tx, values.chatId)
+    else if (message && !values.direction) await replied(tx, values.chatId)
+    return message
+  })
   if (inserted) return { message: inserted, created: true }
   const [existing] = await db.select().from(messages).where(eq(messages.idempotencyKey, values.idempotencyKey!))
   return { message: existing!, created: false }

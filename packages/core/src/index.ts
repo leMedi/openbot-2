@@ -87,6 +87,8 @@ export {
 } from './take-overs.ts'
 export { readModelSettings, writeModelSettings, type ModelSettings } from './settings.ts'
 export { lanes, type AgentRuntime, type BotInput, type Lane } from './ports/agent-runtime.ts'
+export { keepInput, keptInput, type KeptInput, pruneTakenInputs, queuedInputs, requeueInput, takeInputs } from './bot-inputs.ts'
+export { botsOwingReplies, maxReplyRedrives, redriveReply, sinceLastReply } from './owed-replies.ts'
 export {
   type Browser,
   BrowserUnavailableError,
