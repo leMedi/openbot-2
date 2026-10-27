@@ -49,6 +49,11 @@ export async function servePages() {
       pages.set(name, page)
       return `${origin}/${name}`
     },
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    // Without dropping them, a browser's spare connections (opened ahead, with no request yet) hold the close for a minute.
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.close(() => resolve())
+        server.closeAllConnections()
+      }),
   }
 }

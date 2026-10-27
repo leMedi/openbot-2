@@ -261,7 +261,7 @@ describe('computer-use sessions', () => {
     const [stale, fresh] = [server.providers.requests[5]!, server.providers.requests[6]!].map((request) => request.messages.at(-1)!)
     expect(stale).toMatchObject({ role: 'toolResult', toolName: 'desktop_click', isError: false })
     expect(JSON.stringify(stale)).toContain("Effect: refused. d1 isn't on the latest snapshot")
-    expect(JSON.stringify(fresh)).toContain('Effect: confirmed. Clicked push button \\"New\\"')
+    expect(JSON.stringify(fresh)).toContain('Effect: confirmed. Clicked button \\"New\\"')
   })
 
   it('are written to the audit log with their reason', async () => {

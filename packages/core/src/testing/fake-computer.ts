@@ -267,8 +267,8 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
       }
       const lines = [
         `- frame "${window.title}"`,
-        `  - ${ref('new')} push button "New"`,
-        `  - ${ref('save')} push button "Save"`,
+        `  - ${ref('new')} button "New"`,
+        `  - ${ref('save')} button "Save"`,
         ...window.documents.flatMap((document, index) =>
           index === window.documents.length - 1 ? [`  - page tab ""`, `    - ${ref('text')} text ${JSON.stringify(document)}`] : [`  - page tab ""`],
         ),
@@ -285,7 +285,7 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
         if (target.element === 'new') {
           window.documents.push('')
           window.allSelected = false
-          return { effect: 'confirmed', summary: 'Clicked push button "New"; a new tab opened.' }
+          return { effect: 'confirmed', summary: 'Clicked button "New"; a new tab opened.' }
         }
         return { effect: 'unverifiable', summary: `Clicked ${target.element}; look to see what changed.` }
       }
@@ -298,7 +298,7 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
       if ('ref' in into) {
         const target = state.refs.get(into.ref)
         if (!target) return stale(into.ref)
-        if (target.element !== 'text') return { effect: 'refused', summary: `${into.ref} is a push button, not a field you can type into` }
+        if (target.element !== 'text') return { effect: 'refused', summary: `${into.ref} is a button, not a field you can type into` }
         const window = windowOf(state, target.window)
         typeInto(window, text)
         return { effect: 'confirmed', summary: `Typed ${text.length} character(s); it reads back '${window.documents.at(-1)}'.` }

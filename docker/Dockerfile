@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # OpenBot's one container (ADR 0002): the server, every bot's screen and the bots' shell on one computer.
-#   runtime  what users run: Ubuntu, Node, Chromium, Xvfb, Openbox, x11vnc + websockify, AT-SPI, cua-driver, supervisord,
+#   runtime  what users run: Debian, Node, Chromium, Xvfb, Openbox, x11vnc + websockify, AT-SPI, cua-driver, supervisord,
 #            and the release it was built with (design §2.4)
 #   dev      the same system plus the toolchain, without a release; docker/compose.dev.yml runs the bind-mounted repo
 #            with hot reload
@@ -8,13 +8,15 @@
 # target takes as a build context: `docker build docker --target runtime --build-context release=<dir>`, where <dir>
 # holds a release built by `pnpm release:package --out <dir>`.
 
-ARG UBUNTU_VERSION=24.04
+# Debian trixie, pinned by digest: bumping it means updating both. Debian ships Chromium as a signed apt package for
+# amd64 and arm64.
+ARG DEBIAN_IMAGE=debian:trixie-20261020@sha256:4c25275446ca371766b8b093c696782eabce06263fccacb8d5d813b3dc44b308
 
 # cua-driver (MIT, https://github.com/trycua/cua) drives the desktop apps on bots' screens. A pinned release, checked
 # against the SHA-256 recorded here and against its Sigstore signature, which must come from cua's release workflow at
 # that exact tag. Bumping CUA_DRIVER_VERSION means updating both hashes from the release's SHA256SUMS. Only the binary
 # reaches the runtime image; cosign (itself pinned by SHA-256) stays in this stage.
-FROM ubuntu:${UBUNTU_VERSION} AS cua-driver
+FROM ${DEBIAN_IMAGE} AS cua-driver
 
 ARG TARGETARCH
 ARG CUA_DRIVER_VERSION=0.38.0
@@ -49,12 +51,10 @@ RUN case "${TARGETARCH}" in \
  && mkdir /out \
  && tar -xzf "${tarball}" -C /out --no-same-owner cua-driver
 
-FROM ubuntu:${UBUNTU_VERSION} AS base
+FROM ${DEBIAN_IMAGE} AS base
 
 ARG TARGETARCH
 ARG NODE_VERSION=24.22.1
-# Chromium comes from Playwright: Ubuntu only ships it as a snap, and Playwright builds it for amd64 and arm64.
-ARG PLAYWRIGHT_VERSION=1.64.1
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -67,6 +67,8 @@ RUN apt-get update \
       xvfb openbox x11vnc websockify xdotool x11-utils dbus-x11 \
       fonts-liberation fonts-noto-color-emoji \
       at-spi2-core mousepad \
+      chromium \
+ && chromium --version \
  && rm -rf /var/lib/apt/lists/*
 
 # Desktop control (design §4): each screen runs its own cua-driver, which reads apps through AT-SPI (at-spi2-core) and
@@ -90,18 +92,9 @@ RUN case "${TARGETARCH}" in amd64) arch=x64 ;; arm64) arch=arm64 ;; *) echo "uns
  && rm "${tarball}" \
  && node --version
 
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/chromium
-RUN npx --yes "playwright@${PLAYWRIGHT_VERSION}" install --with-deps --no-shell chromium \
- && chrome="$(find /opt/chromium -type f -name chrome -perm -u+x | head -n 1)" \
- && test -n "${chrome}" \
- && ln -s "${chrome}" /usr/local/bin/chromium \
- && chromium --version \
- && rm -rf /var/lib/apt/lists/* /root/.npm /root/.cache
-
 # Two users (design §2.1): `openbot-server` runs the server and owns the data dir; `openbot` is the bots' user, with
 # passwordless sudo because it is their computer. The server may start processes as `openbot` (bots' shell and files).
-RUN userdel --remove ubuntu 2>/dev/null || true \
- && groupadd --gid 2000 openbot \
+RUN groupadd --gid 2000 openbot \
  && useradd --uid 2000 --gid openbot --shell /bin/bash --home-dir /home/openbot --create-home openbot \
  && groupadd --gid 2001 openbot-server \
  && useradd --uid 2001 --gid openbot-server --shell /bin/bash --home-dir /home/openbot-server --create-home openbot-server \

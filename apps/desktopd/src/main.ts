@@ -3,15 +3,18 @@
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { serve } from './http.ts'
-import { clearDisplay, profileFolder, screenPrograms, streamPort } from './programs.ts'
+import { clearDisplay, profileFolder, screenPrograms, streamPort, userNamespacesAllowed } from './programs.ts'
 import { ScreenManager } from './screen-manager.ts'
 
 const home = resolve(process.env.OPENBOT_HOME || homedir())
 const socketPath = process.env.OPENBOT_DESKTOPD_SOCKET || '/run/openbot/desktopd.sock'
 const log = (message: string) => console.log(`[desktopd] ${message}`)
 
+const sandbox = await userNamespacesAllowed()
+if (!sandbox) log("this host doesn't allow user namespaces: bots' browsers run without Chromium's sandbox")
+
 const manager = new ScreenManager({
-  programs: screenPrograms(home),
+  programs: screenPrograms(home, { sandbox }),
   streamPort,
   profile: (botId) => profileFolder(home, botId),
   cleanup: clearDisplay,

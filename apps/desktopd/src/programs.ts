@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process'
 import { access, readFile, rm } from 'node:fs/promises'
 import { connect } from 'node:net'
 import { join } from 'node:path'
@@ -51,10 +52,17 @@ const freshSocket = (socket: string, command: string[]) => ({
 })
 
 /**
- * A bot's screen: Xvfb at 1280×800, its own D-Bus session with an accessibility bus, Openbox, the bot's own Chromium
- * profile in its folder, x11vnc serving the stream on localhost, and cua-driver for the desktop tools.
+ * Whether this user may create user namespaces, which Chromium's sandbox needs (Debian's Chromium has no setuid helper).
+ * Some hosts block them in containers, e.g. Ubuntu 24.04's AppArmor restriction on unprivileged user namespaces.
  */
-export function screenPrograms(home: string): (screen: ScreenSpec) => Program[] {
+export const userNamespacesAllowed = () => new Promise<boolean>((resolve) => execFile('unshare', ['--user', 'true'], (error) => resolve(!error)))
+
+/**
+ * A bot's screen: Xvfb at 1280×800, its own D-Bus session with an accessibility bus, Openbox, the bot's own Chromium
+ * profile in its folder, x11vnc serving the stream on localhost, and cua-driver for the desktop tools. Chromium runs in
+ * its sandbox unless `sandbox` is false.
+ */
+export function screenPrograms(home: string, { sandbox }: { sandbox: boolean }): (screen: ScreenSpec) => Program[] {
   return ({ botId, display }) => {
     const bus = sessionBusSocket(display)
     // Every program after the bus is in the screen's session, so apps on it (and Chromium) show up on its AT-SPI bus.
@@ -85,10 +93,8 @@ export function screenPrograms(home: string): (screen: ScreenSpec) => Program[] 
           '--no-default-browser-check',
           '--password-store=basic',
           '--disable-dev-shm-usage',
-          // Chrome's own sandbox needs user namespaces, which Docker's default seccomp profile blocks; the container
-          // is the boundary (ADR 0002).
-          '--no-sandbox',
-          '--test-type',
+          // Without user namespaces the container is the only boundary (ADR 0002); --test-type hides the warning bar.
+          ...(sandbox ? [] : ['--no-sandbox', '--test-type']),
           // Restarted after a crash, it opens as it was, without asking to restore.
           '--hide-crash-restore-bubble',
           '--remote-debugging-address=127.0.0.1',

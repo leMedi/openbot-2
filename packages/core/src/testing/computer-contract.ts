@@ -31,7 +31,7 @@ export type ContractWorld = {
   page?(name: string, page: TestPage): string
   /**
    * What opens a text editor on the computer's screens (Mousepad on the real one): one window whose accessibility tree
-   * has a `text` element holding the document and a `push button "New"` that opens another document as a
+   * has a `text` element holding the document and a `button "New"` that opens another document as a
    * `page tab`. Needed to cover the desktop.
    */
   editor?: string
@@ -386,7 +386,7 @@ export function describeComputerContract(name: string, open: () => Promise<Contr
         const after = await desktop.snapshot(rex, window.id)
 
         expect(snapshot.window.id).toBe(window.id)
-        expect(snapshot.tree).toMatch(/- \[ref=d\d+\] push button "New"/)
+        expect(snapshot.tree).toMatch(/- \[ref=d\d+\] button "New"/)
         expect(typed.effect).toBe('confirmed')
         expect(after.tree).toMatch(/- \[ref=d\d+\] text "Hello from Rex/)
       })
@@ -396,7 +396,7 @@ export function describeComputerContract(name: string, open: () => Promise<Contr
         const tabs = (snapshot: DesktopSnapshot) => snapshot.tree.split('\n').filter((line) => /- (\[ref=d\d+\] )?page tab /.test(line)).length
         const before = await desktop.snapshot(rex, window.id)
 
-        delivered(await desktop.click(rex, { ref: desktopRefOf(before, 'push button', 'New') }))
+        delivered(await desktop.click(rex, { ref: desktopRefOf(before, 'button', 'New') }))
 
         await expect.poll(async () => tabs(await desktop.snapshot(rex, window.id)), { timeout }).toBe(tabs(before) + 1)
       })
@@ -420,7 +420,7 @@ export function describeComputerContract(name: string, open: () => Promise<Contr
 
       it('refuses element references from an older snapshot, as an effect', { timeout: timeout * 2 }, async () => {
         const { desktop, rex, window } = await editing()
-        const old = desktopRefOf(await desktop.snapshot(rex, window.id), 'push button', 'New')
+        const old = desktopRefOf(await desktop.snapshot(rex, window.id), 'button', 'New')
         await desktop.snapshot(rex, window.id)
 
         const clicked = await desktop.click(rex, { ref: old })

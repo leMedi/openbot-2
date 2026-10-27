@@ -79,7 +79,7 @@ export type DesktopWindow = { id: number; app: string; title: string; x: number;
 
 /**
  * A window's accessibility tree: one element per line, indented by nesting, each element the desktop can act on with a
- * reference, e.g. `- [ref=d12] push button "Save"` or `- [ref=d14] text "Hello"`. As with the browser, only the
+ * reference, e.g. `- [ref=d12] button "Save"` or `- [ref=d14] text "Hello"`. As with the browser, only the
  * references of the latest snapshot (of any window) are accepted.
  */
 export type DesktopSnapshot = { window: DesktopWindow; tree: string }
