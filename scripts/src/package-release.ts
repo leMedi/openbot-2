@@ -17,6 +17,7 @@ import { createHash } from 'node:crypto'
 import { appendFileSync, chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, relative } from 'node:path'
 import { releaseFacts } from './facts.ts'
+import { installScript } from './install-script.ts'
 import { readReleaseConfig, type ReleaseConfig, releaseManifest, releaseNotes, type ReleaseManifest } from './manifest.ts'
 
 /** Top-level files every release keeps: pnpm's workspace files, so the release can be inspected and reinstalled. */
@@ -37,6 +38,8 @@ export type PackagedRelease = {
   checksums: string
   /** The compose sample (docker/compose.yml), for the installer. */
   compose: string
+  /** The installer (scripts/install.sh) with the config's site and releases URLs as its defaults. */
+  installer: string
   /** The GitHub Release's notes. */
   notes: string
 }
@@ -106,15 +109,17 @@ export function packageRelease({
   copyFileSync(join(release, 'release.json'), manifestFile)
   const compose = join(out, 'compose.yml')
   copyFileSync(join(repo, 'docker', 'compose.yml'), compose)
+  const installer = join(out, 'install.sh')
+  writeFileSync(installer, installScript(readFileSync(join(repo, 'scripts', 'install.sh'), 'utf8'), config), { mode: 0o755 })
   const checksums = join(out, 'SHA256SUMS')
   writeFileSync(
     checksums,
-    [archive, manifestFile, compose].map((file) => `${sha256(file)}  ${basename(file)}\n`).join(''),
+    [archive, manifestFile, compose, installer].map((file) => `${sha256(file)}  ${basename(file)}\n`).join(''),
   )
   const notes = join(out, 'notes.md')
   writeFileSync(notes, releaseNotes(manifest))
   rmSync(join(out, 'work'), { recursive: true, force: true })
-  return { manifest, config, archive, manifestFile, checksums, compose, notes }
+  return { manifest, config, archive, manifestFile, checksums, compose, installer, notes }
 }
 
 /** The release's `bin/start`, run by the runtime image as `openbot-server` (docker/start-server.sh). */

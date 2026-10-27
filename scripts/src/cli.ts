@@ -31,7 +31,7 @@ switch (positionals[0]) {
   }
   case 'package': {
     if (!values.out) throw new Error('package needs --out <dir>')
-    const { manifest, config, archive, manifestFile, checksums, compose, notes } = packageRelease({
+    const { manifest, config, archive, manifestFile, checksums, compose, installer, notes } = packageRelease({
       repo,
       out: resolve(values.out),
       run,
@@ -46,6 +46,7 @@ switch (positionals[0]) {
       manifest: manifestFile,
       checksums,
       compose,
+      installer,
       notes,
     })
     break

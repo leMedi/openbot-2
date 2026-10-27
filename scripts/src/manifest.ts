@@ -9,6 +9,8 @@ export type ReleaseConfig = {
   siteUrl: string
   /** The runtime image's repository, without a tag. */
   runtimeImage: string
+  /** Where releases are downloaded from: `<releasesUrl>/latest/download/<file>`, `<releasesUrl>/download/v<version>/<file>`. */
+  releasesUrl: string
 }
 
 export type ReleaseManifest = {
@@ -37,9 +39,17 @@ export function readReleaseConfig(text: string, environment: Record<string, stri
     if (!found) throw new Error(`release.env must set ${name}`)
     return found
   }
-  const siteUrl = value('OPENBOT_SITE_URL').replace(/\/+$/, '')
-  if (!/^https?:\/\/[^/]+/.test(siteUrl)) throw new Error(`OPENBOT_SITE_URL must be an http(s) URL: ${siteUrl}`)
-  return { siteUrl, runtimeImage: value('OPENBOT_RUNTIME_IMAGE') }
+  /** An http(s) URL, without trailing slashes. */
+  const httpUrl = (name: string) => {
+    const url = value(name).replace(/\/+$/, '')
+    if (!/^https?:\/\/[^/]+/.test(url)) throw new Error(`${name} must be an http(s) URL: ${url}`)
+    return url
+  }
+  return {
+    siteUrl: httpUrl('OPENBOT_SITE_URL'),
+    runtimeImage: value('OPENBOT_RUNTIME_IMAGE'),
+    releasesUrl: httpUrl('OPENBOT_RELEASES_URL'),
+  }
 }
 
 export function releaseManifest(
