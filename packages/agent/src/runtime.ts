@@ -152,8 +152,6 @@ export type BotRuntimeOptions = {
   askQuestion(bot: BotWithChat, card: QuestionCard, idempotencyKey: string): Promise<void>
   /** Posts a take-over card to a bot's DM when its computer-use session is stuck on what only the owner can do. */
   requestTakeOver(bot: BotWithChat, card: TakeOverCard, idempotencyKey: string): Promise<void>
-  /** Resolves once the owner isn't holding the bot's screen; computer-use sessions wait for it before each action. */
-  screenFree(botId: string): Promise<void>
   /** A bot's status changed: it started or finished working, or a run failed. */
   onStatus(botId: string, status: BotStatus): void
 }
@@ -389,7 +387,6 @@ export class BotRuntime implements AgentRuntime {
         if (!model) throw new NoModelError('Choose a computer-use or default model first')
         return parseModelRef(model)
       },
-      screenFree: (bot) => options.screenFree(bot.id),
       waitingTakeOver: async (bot) => (await findWaitingTakeOver(options.db, bot.chatId))?.card.instruction ?? null,
       requestTakeOver: options.requestTakeOver,
     })

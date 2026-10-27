@@ -18,7 +18,6 @@ import {
   syncScreens,
 } from '@openbot/core'
 import type { Db } from '@openbot/db'
-import { ScreenHolds } from './screen-holds.ts'
 import type { ScreenTickets } from './screen-stream.ts'
 import { toChatInfo, toMessageInfo } from './views.ts'
 
@@ -36,8 +35,6 @@ export type ServerContext = {
   screens: Screens
   /** Tickets to screens' streams, redeemed by the stream proxy. */
   screenTickets: ScreenTickets
-  /** Screens the owner has taken over; computer-use sessions wait while one is held. */
-  screenHolds: ScreenHolds
   /** Settles once the computer's screens first match the bots (or the computer couldn't be reached at all). */
   screensSynced: Promise<void>
   /** Plays group chats' rounds of member turns. */
@@ -97,7 +94,6 @@ export async function createServerContext({
   tools?: BotTool[]
 }): Promise<ServerContext> {
   const bus = new EventBus<LiveEvent>()
-  const screenHolds = new ScreenHolds()
   const attachments = new AttachmentStore(attachmentsDir)
   const providers = new Providers({ db, box: new SecretBox(secretKey), providers: modelProviders })
   // Made before the runtime, whose resumed runs may post to groups as it opens; turns wait for it to be open.
@@ -216,12 +212,11 @@ export async function createServerContext({
       bus.publish({ type: 'message.created', message: toMessageInfo(message) })
       await publish(bot.chatId)
     },
-    screenFree: (botId) => screenHolds.whenFree(botId),
     onStatus: (botId, status) => bus.publish({ type: 'bot.status', botId, ...status }),
   })
   opened(runtime)
   const screensSynced = keepScreensInSync(db, screens)
-  return { db, bus, providers, runtime, computer, attachments, screens, screenTickets, screenHolds, screensSynced, rounds }
+  return { db, bus, providers, runtime, computer, attachments, screens, screenTickets, screensSynced, rounds }
 }
 
 const syncRetryMs = [1_000, 2_000, 5_000, 10_000, 30_000]

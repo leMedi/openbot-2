@@ -500,7 +500,7 @@ export const contract = {
         path: '/messages/{messageId}/hand-back',
         summary:
           "Hand a bot's screen back after its take-over card, once: `done` when the owner did the step, `skipped` when they " +
-          "didn't. Ends the owner's hold on the screen and wakes the bot with the outcome",
+          "didn't. Wakes the bot with the outcome",
       })
       .input(z.object({ messageId: z.string(), outcome: handBackOutcome }))
       .output(message),
@@ -587,20 +587,6 @@ export const contract = {
       })
       .input(z.object({ botId: z.string() }))
       .output(screenTicket),
-    hold: oc
-      .route({
-        method: 'PUT',
-        path: '/bots/{botId}/screen/hold',
-        summary:
-          "Take over the bot's screen, or renew the hold: the bot's computer-use sessions pause until it is handed back. A " +
-          'hold not renewed by `expiresAt` ends by itself',
-      })
-      .input(z.object({ botId: z.string() }))
-      .output(z.object({ expiresAt: z.number() })),
-    release: oc
-      .route({ method: 'DELETE', path: '/bots/{botId}/screen/hold', summary: "Hand the bot's screen back; its sessions go on" })
-      .input(z.object({ botId: z.string() }))
-      .output(z.void()),
   },
   orchestrator: {
     getModes: oc

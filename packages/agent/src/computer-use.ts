@@ -1,4 +1,4 @@
-import { awaitWithContext, BACKGROUND_CONTEXT, type Context } from '@earendil-works/chord/context'
+import { BACKGROUND_CONTEXT, type Context } from '@earendil-works/chord/context'
 import { type ImageContent, type TextContent, Type } from '@earendil-works/pi-ai'
 import {
   configure,
@@ -92,8 +92,6 @@ export type ComputerUseOptions = {
   botOf(conversationId: ConversationId): Promise<BotWithChat>
   /** The model the bot's computer-use sessions run on: the computer-use model, else the bot's own model, else the default. */
   model(bot: BotWithChat): Promise<ModelRef>
-  /** Resolves once the owner isn't holding the bot's screen, so a session never fights them for its input. */
-  screenFree(bot: BotWithChat): Promise<void>
   /** The instruction of the bot's take-over card still waiting for the owner, or null. */
   waitingTakeOver(bot: BotWithChat): Promise<string | null>
   /** Posts a take-over card to the bot's DM; `idempotencyKey` makes a replayed call post once. */
@@ -315,17 +313,7 @@ export function computerUse(options: ComputerUseOptions) {
     }),
   })
 
-  // Every screen tool first waits while the owner holds the screen: a session's input would fight theirs.
-  const pausable = [...browserTools, ...desktopTools].map(
-    (tool): ToolRegistration<any, any> => ({
-      ...tool,
-      execute: async (args: unknown, api: any, ctx: any) => {
-        await awaitWithContext(options.screenFree(await botOf(api.conversationId)), ctx)
-        return tool.execute(args as never, api, ctx)
-      },
-    }),
-  )
-  const tools = [...pausable, needsHelp]
+  const tools = [...browserTools, ...desktopTools, needsHelp]
   const extension: Extension = defineExtension({
     name: 'computer-use',
     sections: [section('computer-use', () => computerUseVoice, { tag: false })],
@@ -348,7 +336,7 @@ export function computerUse(options: ComputerUseOptions) {
     replay: 'safe',
     // A bot has one screen: two sessions at once would fight over it and invalidate each other's references.
     executionMode: 'sequential',
-    execute: async (args, api, ctx) => {
+    execute: async (args, api) => {
       const bot = await botOf(api.conversationId)
       // Checked once: a rerun after a restart may find the card this very call posted.
       const waiting = (await api.memo<boolean>('started', context)) ? null : await options.waitingTakeOver(bot)
@@ -375,7 +363,6 @@ export function computerUse(options: ComputerUseOptions) {
       // Opened once: a rerun after a restart finds the session mid-way and leaves its page alone.
       let start = (await api.memo<string>('start', context)) ?? ''
       if (args.startUrl && !start) {
-        await awaitWithContext(options.screenFree(bot), ctx)
         try {
           await browser.navigate(bot, args.startUrl)
           start = `\n\nThe browser has opened ${args.startUrl}.`

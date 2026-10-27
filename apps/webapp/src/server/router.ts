@@ -223,7 +223,6 @@ export const router = os.router({
       if (!bot) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
       // Its screen stops before its folder, with the browser profile in it, goes. If the computer can't be reached, the
       // screen is stopped when the server next starts.
-      context.screenHolds.release(bot.id)
       await context.screens.stop(bot).catch((error) => console.error(`[screens] Couldn't stop ${bot.name}'s screen:`, error))
       // Its pi history stays orphaned in pi-durable's storage, which can't delete a conversation yet; no bot reaches it.
       await context.runtime.forget(bot)
@@ -370,8 +369,6 @@ export const router = os.router({
         throw error
       }
       const { message, card } = handed
-      // The screen is the bot's again before it wakes, so its next session doesn't wait for the owner.
-      context.screenHolds.release(bot.id)
       const info = toMessageInfo(message)
       context.bus.publish({ type: 'message.updated', message: info })
       await publishChat(context, message.chatId)
@@ -479,15 +476,6 @@ export const router = os.router({
       }
       const { ticket, expiresAt } = context.screenTickets.issue(bot.id, status.streamPort)
       return { url: screenStreamUrl(bot.id, ticket), expiresAt }
-    }),
-
-    hold: os.screens.hold.handler(async ({ context, input }) => {
-      const bot = await botMustExist(context, input.botId)
-      return context.screenHolds.hold(bot.id)
-    }),
-
-    release: os.screens.release.handler(({ context, input }) => {
-      context.screenHolds.release(input.botId)
     }),
   },
 

@@ -2,7 +2,6 @@ import { callsTools, endsSilently, says } from '@openbot/agent/testing'
 import type { BotInfo, NewBot } from '@openbot/api-contract'
 import type { TestPage } from '@openbot/core/testing'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ScreenHolds } from './screen-holds.ts'
 import { createTestServer, type TestServer } from './testing/harness.ts'
 
 const servers: TestServer[] = []
@@ -69,34 +68,8 @@ describe('a computer-use session stuck on what only the owner can do', () => {
     expect(JSON.stringify(last)).toContain('call needs_help with one line telling them what to do on the screen')
   })
 
-  it('opens the screen in take-over mode: holding it pauses sessions until it is handed back', async () => {
-    const { server, bot } = await startWithRex()
-    await server.client.screens.hold({ botId: bot.id })
-    server.providers.script(
-      callsTools(['use_computer', { goal: 'Look at the sign-in page', reason: 'Testing', startUrl: login }]),
-      callsTools(['browser_snapshot', {}]),
-      says('It is a sign-in page.'),
-      callsTools(['sendMessage', { text: 'It asks me to sign in' }]),
-      endsSilently(),
-    )
-
-    await server.client.chats.send({ chatId: bot.chatId, text: 'Look at the shop' })
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    expect(server.computer.calls.filter((call) => call.kind.startsWith('browser.'))).toEqual([])
-    expect((await server.client.bots.list()).find((entry) => entry.id === bot.id)?.working).toBe(true)
-
-    await server.client.screens.release({ botId: bot.id })
-    await untilIdle(server, bot)
-
-    expect(server.computer.calls.filter((call) => call.kind.startsWith('browser.'))).toEqual([
-      { bot: 'Rex', kind: 'browser.navigate', url: login },
-      { bot: 'Rex', kind: 'browser.snapshot' },
-    ])
-  })
-
-  it('resumes the bot with the outcome when the owner clicks Done, handing the screen back', async () => {
+  it('resumes the bot when the owner clicks Done, to look at the screen first and go on', async () => {
     const { server, bot, card } = await stuckAtSignIn()
-    await server.client.screens.hold({ botId: bot.id })
     server.providers.script(
       callsTools(['use_computer', orders]),
       callsTools(['browser_snapshot', {}]),
@@ -110,9 +83,9 @@ describe('a computer-use session stuck on what only the owner can do', () => {
 
     expect(handed.card).toEqual({ type: 'take_over', instruction: signIn, outcome: 'done' })
     const woken = JSON.stringify(server.providers.requests[3]!.messages.at(-1))
-    expect(woken).toContain('they did what you asked (\\"Sign in to shop.test with your account\\")')
+    expect(woken).toContain('The owner handed your screen back after what you asked them to do (\\"Sign in to shop.test with your account\\")')
+    expect(woken).toContain('starting with a screenshot to see the current state of the screen')
     expect(woken).toContain(orders.goal)
-    // Handed back: the next session didn't wait for the owner.
     const messages = await server.client.chats.messages({ chatId: bot.chatId })
     expect(messages.at(-1)).toMatchObject({ author: 'bot', text: 'Your last order was wool socks' })
     expect((await server.client.chats.list()).find((entry) => entry.id === bot.chatId)!.waitingFor).toBeNull()
@@ -127,6 +100,8 @@ describe('a computer-use session stuck on what only the owner can do', () => {
 
     const woken = JSON.stringify(server.providers.requests[3]!.messages.at(-1))
     expect(woken).toContain("The owner skipped what you asked them to do on your screen")
+    expect(woken).toContain("don't immediately ask for the same step again")
+    expect(woken).toContain('send the owner a brief message saying what is blocked, then stop and wait for their reply')
     expect((await server.client.chats.messages({ chatId: bot.chatId })).at(-2)!.card).toMatchObject({ outcome: 'skipped' })
   })
 
@@ -159,20 +134,5 @@ describe('a computer-use session stuck on what only the owner can do', () => {
     const result = server.providers.requests[4]!.messages.at(-1)!
     expect(result).toMatchObject({ role: 'toolResult', toolName: 'use_computer', isError: true })
     expect(JSON.stringify(result)).toContain("The owner hasn't handed your screen back yet")
-  })
-})
-
-describe('screen holds', () => {
-  it('end when not renewed in time, letting waiting sessions go on', async () => {
-    const holds = new ScreenHolds(50)
-    holds.hold('rex')
-    let free = false
-    const waiting = holds.whenFree('rex').then(() => (free = true))
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    holds.hold('rex')
-    await new Promise((resolve) => setTimeout(resolve, 40))
-    expect(free).toBe(false)
-    await waiting
-    expect(holds.isHeld('rex')).toBe(false)
   })
 })
