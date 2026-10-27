@@ -7,28 +7,45 @@ import { api } from '../lib/api.ts'
 const aspect = '1280 / 800'
 /** Failed connections in a row before the owner is told the screen can't be reached. */
 const attemptsBeforeUnreachable = 3
+/** How often a take-over renews the server's hold, well within its 60 s. */
+const holdRenewMs = 20_000
 
 type ViewState = 'connecting' | 'starting' | 'connected' | 'unreachable'
 
 /**
- * A bot's screen beside its DM, like Grok's computer pane: live and view-only, opening fullscreen; **Take over** gives
- * the owner its mouse and keyboard until **Hand back**.
+ * Keeps the server's hold on the bot's screen while `control` is on, renewing it, and hands the screen back when it goes
+ * off: the bot's computer-use sessions pause meanwhile, so their input never fights the owner's.
  */
-export function ScreenPane({ bot }: { bot: BotInfo }) {
-  const [control, setControl] = useState(false)
-  const [fullscreen, setFullscreen] = useState(false)
-
-  // Another bot's screen starts watched, not controlled.
+function useScreenHold(botId: string, control: boolean) {
   useEffect(() => {
-    setControl(false)
-    setFullscreen(false)
-  }, [bot.id])
+    if (!control) return
+    // A failed hold only means sessions aren't paused; the owner still has the screen.
+    const hold = () => api().screens.hold({ botId }).catch(() => {})
+    void hold()
+    const timer = setInterval(hold, holdRenewMs)
+    return () => {
+      clearInterval(timer)
+      api().screens.release({ botId }).catch(() => {})
+    }
+  }, [botId, control])
+}
+
+/**
+ * A bot's screen beside its DM, like Grok's computer pane: live and view-only, opening fullscreen; **Take over** gives
+ * the owner its mouse and keyboard until **Hand back**. `control` is the DM's, so a take-over card can turn it on.
+ */
+export function ScreenPane({ bot, control, onControl }: { bot: BotInfo; control: boolean; onControl: (control: boolean) => void }) {
+  const [fullscreen, setFullscreen] = useState(false)
+  useScreenHold(bot.id, control)
+
+  // Another bot's screen starts in the pane.
+  useEffect(() => setFullscreen(false), [bot.id])
 
   const takeOver = (
     <button
       type="button"
       aria-pressed={control}
-      onClick={() => setControl((taken) => !taken)}
+      onClick={() => onControl(!control)}
       className={cn(
         'pressable rounded-md px-2.5 py-1 text-sm font-medium',
         control ? 'bg-primary text-primary-foreground hover:bg-primary-hover' : 'bg-secondary hover:bg-secondary-hover',

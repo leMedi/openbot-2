@@ -41,7 +41,7 @@ export class ChatNotFoundError extends Error {}
 /** A chat as the sidebar shows it: whether a bot posted since the owner looked, what waits for them, the newest message. */
 export type ChatSummary = Chat & {
   unread: boolean
-  /** The prompt of the newest open question card, or null. */
+  /** The prompt of the newest open question card, or the instruction of a take-over card still waiting; else null. */
   waitingFor: string | null
   lastMessage: Message | null
 }
@@ -59,8 +59,8 @@ export async function listChatSummaries(db: Db, chatIds?: readonly string[]): Pr
           and (${chats.lastReadMessageId} is null or ${messages.id} > ${chats.lastReadMessageId})
       )`,
       waitingFor: sql<string | null>`(
-        select json_extract(${messages.card}, '$.prompt') from ${messages}
-        where ${messages.chatId} = ${chats.id} and json_extract(${messages.card}, '$.type') = 'question'
+        select coalesce(json_extract(${messages.card}, '$.prompt'), json_extract(${messages.card}, '$.instruction')) from ${messages}
+        where ${messages.chatId} = ${chats.id} and json_extract(${messages.card}, '$.type') in ('question', 'take_over')
           and ${messages.cardState} is null
         order by ${messages.id} desc limit 1
       )`,

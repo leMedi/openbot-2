@@ -8,6 +8,7 @@ import { Markdown } from '../../components/markdown.tsx'
 import { ProfilePane } from '../../components/profile-pane.tsx'
 import { QuestionCard } from '../../components/question-card.tsx'
 import { ScreenPane } from '../../components/screen-pane.tsx'
+import { TakeOverCard } from '../../components/take-over-card.tsx'
 import { api, errorMessage } from '../../lib/api.ts'
 import { useLive } from '../../lib/live.tsx'
 
@@ -63,15 +64,35 @@ function Dm() {
   const live = useLive()
   const navigate = useNavigate()
   const [pane, setPane] = useState<Pane | null>('screen')
+  /** The bot whose screen the owner controls: from the pane's Take over, or a take-over card's. Another bot's starts watched. */
+  const [controlled, setControlled] = useState<string>()
+  const control = controlled === botId
+  const setControl = (on: boolean) => setControlled(on ? botId : undefined)
   const bot = live.bots?.find((entry) => entry.id === botId)
+  // A take-over card handed back, in this tab or another, ends the owner's control of the screen.
+  const waitingTakeOver = bot && [...(live.messages.get(bot.chatId) ?? [])].reverse().find((message) => message.card?.type === 'take_over' && !message.card.outcome)?.id
+  const wasWaiting = useRef(waitingTakeOver)
+  useEffect(() => {
+    if (wasWaiting.current && !waitingTakeOver) setControlled(undefined)
+    wasWaiting.current = waitingTakeOver
+  }, [waitingTakeOver])
   if (!bot) return live.bots ? <p className="m-auto text-muted-foreground">This bot doesn't exist.</p> : null
   return (
     <div className="flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Keyed, so loading state, scroll position and sends in flight belong to one chat. */}
-        <Chat key={bot.chatId} bot={bot} pane={pane} onTogglePane={(next) => setPane((open) => (open === next ? null : next))} />
+        <Chat
+          key={bot.chatId}
+          bot={bot}
+          pane={pane}
+          onTogglePane={(next) => setPane((open) => (open === next ? null : next))}
+          onScreen={(takeOver) => {
+            setPane('screen')
+            setControl(takeOver)
+          }}
+        />
       </div>
-      {pane === 'screen' && <ScreenPane bot={bot} />}
+      {pane === 'screen' && <ScreenPane bot={bot} control={control} onControl={setControl} />}
       {pane === 'profile' && (
         <ProfilePane
           bot={bot}
@@ -86,7 +107,18 @@ function Dm() {
   )
 }
 
-function Chat({ bot, pane, onTogglePane }: { bot: BotInfo; pane: Pane | null; onTogglePane: (pane: Pane) => void }) {
+function Chat({
+  bot,
+  pane,
+  onTogglePane,
+  onScreen,
+}: {
+  bot: BotInfo
+  pane: Pane | null
+  onTogglePane: (pane: Pane) => void
+  /** Opens the screen pane, in take-over mode or to watch. */
+  onScreen: (takeOver: boolean) => void
+}) {
   const live = useLive()
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string>()
@@ -273,6 +305,7 @@ function Chat({ bot, pane, onTogglePane }: { bot: BotInfo; pane: Pane | null; on
             onResend={(entry) => void send(entry.text, entry.files, entry.key)}
             onDiscard={(entry) => setOutgoing((list) => list.filter((other) => other.key !== entry.key))}
             onAnswered={(message) => live.addMessage(message)}
+            onScreen={onScreen}
           />
         </div>
         {unseen && (
@@ -325,13 +358,16 @@ function MessageList({
   onResend,
   onDiscard,
   onAnswered,
+  onScreen,
 }: {
   bot: BotInfo
   rows: Row[]
   loading: boolean
   onResend: (entry: Outgoing) => void
   onDiscard: (entry: Outgoing) => void
+  /** A card was answered or handed back: the server's message as it is now. */
   onAnswered: (message: MessageInfo) => void
+  onScreen: (takeOver: boolean) => void
 }) {
   // Letter keys answer the newest open question only.
   const newestOpenQuestion = [...rows].reverse().find((row) => row.message?.card?.type === 'question' && !row.message.card.answer)?.key
@@ -345,6 +381,33 @@ function MessageList({
         const continuesNext = rows[index + 1]?.author === row.author
         const failed = row.outgoing?.error
         const card = row.message?.card
+        if (card?.type === 'take_over') {
+          return (
+            <div
+              key={row.key}
+              role="article"
+              className={cn(
+                'max-w-[min(88%,520px)] origin-bottom-left',
+                continuesNext ? 'mb-1' : 'mb-[22px]',
+                row.enter && 'motion-safe:animate-message-in motion-reduce:animate-fade-in',
+              )}
+            >
+              <span className="sr-only">{row.authorName}: </span>
+              <TakeOverCard
+                message={row.message!}
+                card={card}
+                botName={bot.name}
+                onTakeOver={() => onScreen(true)}
+                onOpenScreen={() => onScreen(false)}
+                onHandedBack={(message) => {
+                  onAnswered(message)
+                  // Handing back ends the owner's control; the server already let go of the screen.
+                  onScreen(false)
+                }}
+              />
+            </div>
+          )
+        }
         if (card?.type === 'question') {
           return (
             <div

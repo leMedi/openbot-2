@@ -64,8 +64,8 @@ A standing permission for one bot to use one thing (a plugin account, a vault it
 _Avoid_: Permission, access
 
 **Take over**:
-The owner controlling a bot's screen directly to unblock it, ending with **hand back**.
-_Avoid_: Remote control, box help
+The owner controlling a bot's screen directly to unblock it, ending with **hand back**. A bot stuck on its screen asks for one on a **take-over card**; while the owner holds the screen, the bot's computer-use sessions wait.
+_Avoid_: Remote control, box help, handoff
 
 ### The machine
 

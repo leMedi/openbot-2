@@ -12,6 +12,9 @@ import {
   setPinnedChats,
   createBot,
   describeAnswer,
+  describeHandBack,
+  handBack,
+  HandedBackError,
   InvalidAnswerError,
   deleteBot,
   getBot,
@@ -26,11 +29,13 @@ import {
   QuestionAnsweredError,
   QuestionNotFoundError,
   reopenQuestion,
+  reopenTakeOver,
   readBotOrchestratorModes,
   readModelSettings,
   readOrchestratorModes,
   screenSize,
   startScreen,
+  TakeOverNotFoundError,
   writeBotOrchestratorModes,
   updateBot,
   writeModelSettings,
@@ -160,6 +165,7 @@ export const router = os.router({
       if (!bot) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
       // Its screen stops before its folder, with the browser profile in it, goes. If the computer can't be reached, the
       // screen is stopped when the server next starts.
+      context.screenHolds.release(bot.id)
       await context.screens.stop(bot).catch((error) => console.error(`[screens] Couldn't stop ${bot.name}'s screen:`, error))
       // Its pi history stays orphaned in pi-durable's storage, which can't delete a conversation yet; no bot reaches it.
       await context.runtime.forget(bot)
@@ -289,6 +295,39 @@ export const router = os.router({
       }
       return info
     }),
+
+    handBack: os.chats.handBack.handler(async ({ context, input }) => {
+      const asked = await getMessage(context.db, input.messageId)
+      const bot = asked?.authorBotId ? await getBot(context.db, asked.authorBotId) : undefined
+      if (!asked?.card || !bot) throw new ORPCError('NOT_FOUND', { message: 'No such take-over' })
+      await assertCanRun(context, bot)
+      let handed
+      try {
+        handed = await handBack(context.db, input.messageId, input.outcome)
+      } catch (error) {
+        if (error instanceof TakeOverNotFoundError) throw new ORPCError('NOT_FOUND', { message: error.message })
+        if (error instanceof HandedBackError) throw new ORPCError('CONFLICT', { message: error.message })
+        throw error
+      }
+      const { message, card } = handed
+      // The screen is the bot's again before it wakes, so its next session doesn't wait for the owner.
+      context.screenHolds.release(bot.id)
+      const info = toMessageInfo(message)
+      context.bus.publish({ type: 'message.updated', message: info })
+      await publishChat(context, message.chatId)
+      try {
+        await context.runtime.wake(bot.id, { lane: 'owner', text: describeHandBack(card, input.outcome), id: `hand-back:${message.id}` })
+      } catch (error) {
+        // A hand-back the bot never got isn't kept, so the owner can hand back again.
+        const reopened = await reopenTakeOver(context.db, message.id)
+        if (reopened) {
+          context.bus.publish({ type: 'message.updated', message: toMessageInfo(reopened) })
+          await publishChat(context, reopened.chatId)
+        }
+        throw error
+      }
+      return info
+    }),
   },
 
   providers: {
@@ -351,6 +390,15 @@ export const router = os.router({
       }
       const { ticket, expiresAt } = context.screenTickets.issue(bot.id, status.streamPort)
       return { url: screenStreamUrl(bot.id, ticket), expiresAt }
+    }),
+
+    hold: os.screens.hold.handler(async ({ context, input }) => {
+      const bot = await botMustExist(context, input.botId)
+      return context.screenHolds.hold(bot.id)
+    }),
+
+    release: os.screens.release.handler(({ context, input }) => {
+      context.screenHolds.release(input.botId)
     }),
   },
 

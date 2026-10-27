@@ -63,7 +63,12 @@ describe('system credentials', () => {
     await server.client.chats.send({ chatId: bot.chatId, text: 'Pick for me' })
     await expect.poll(async () => (await server.client.chats.messages({ chatId: bot.chatId })).length).toBe(4)
     const question = (await server.client.chats.messages({ chatId: bot.chatId })).at(-1)!
-    server.providers.script(callsTools(['sendMessage', { text: 'OK' }]), endsSilently())
+    server.providers.script(callsTools(['use_computer', { goal: 'Look at the shop', reason: 'Testing' }]), callsTools(['needs_help', { instruction: 'Sign in' }]))
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Look at the shop' })
+    await expect.poll(async () => (await server.client.chats.messages({ chatId: bot.chatId })).length).toBe(6)
+    await expect.poll(async () => (await server.client.bots.list())[0]!.working).toBe(false)
+    const takeOver = (await server.client.chats.messages({ chatId: bot.chatId })).at(-1)!
+    server.providers.script(callsTools(['sendMessage', { text: 'OK' }]), endsSilently(), callsTools(['sendMessage', { text: 'OK' }]), endsSilently())
 
     // Each procedure that returns data, called once it has something to return. A new procedure fails the check
     // below until it is added here.
@@ -86,6 +91,8 @@ describe('system credentials', () => {
       'bots.audit': await server.client.bots.audit({ botId: bot.id }),
       'screens.status': await server.client.screens.status({ botId: bot.id }),
       'screens.ticket': await server.client.screens.ticket({ botId: bot.id }),
+      'screens.hold': await server.client.screens.hold({ botId: bot.id }),
+      'screens.release': null,
       'orchestrator.getModes': await server.client.orchestrator.getModes(),
       'orchestrator.updateModes': await server.client.orchestrator.updateModes({ vault: 'enforce' }),
       'bots.delete': null,
@@ -96,6 +103,7 @@ describe('system credentials', () => {
       'chats.send': sent,
       'chats.attachment': await (await server.client.chats.attachment({ messageId: sent.id, attachmentId: sent.attachments[0]!.id })).body.text(),
       'chats.answer': await server.client.chats.answer({ messageId: question.id, answer: { option: 0 } }),
+      'chats.handBack': await server.client.chats.handBack({ messageId: takeOver.id, outcome: 'done' }),
       events: null,
       openapi: await (await server.fetch('/api/openapi.json')).json(),
     }
