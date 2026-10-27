@@ -146,6 +146,13 @@ One active run per bot, lanes ordered user > agent > background. Interrupts stee
 
 The model's plain text is private. The only way to reach you is `sendMessage` (several short bubbles, attachments, question widgets, cards). If a run that answers your message ends without a `sendMessage`, a reminder forces a reply (Grok's reply guarantee).
 
+As built (#40), question cards follow Grok's widgets:
+
+- The owner can dismiss an open card with its ×: it shows "Dismissed", can't be answered any more, and doesn't wake the bot (`chats.dismiss`). Letter keys skip dismissed cards.
+- `askQuestion({ dismissOnMoveOn: true })`, for low-stakes questions only: the owner's next message in the DM dismisses the card if they left it unanswered. Without it a card stays answerable indefinitely.
+- Each run the driver starts in the bot's DM (not a steer, not a group turn) begins with `Unanswered questions:\n- <prompt>` for every question still unanswered, open or dismissed; `messages.card_state.reminded` then keeps it from being listed again. Open cards stay answerable.
+- **Seam 1:** `questions.test.ts`.
+
 As built (#12), attachments:
 
 - The owner drops, drags, pastes or picks up to 6 files (50 MB each) in the composer; `chats.send` takes them as a multipart form. Each is saved as `openbot` to the bot's `uploads/` folder (`notes-2.txt` when the name is taken, never outside it). The bot's input lists their paths, and images go to the model as image input, shrunk by pi-durable's Photon image processor to fit (the same processor lets `read` show any image).

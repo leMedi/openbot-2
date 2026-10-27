@@ -213,3 +213,109 @@ describe('answering a question', () => {
     await untilIdle(server, bot)
   })
 })
+
+describe('dismissing a question', () => {
+  it("shows the card dismissed, doesn't wake the bot, and refuses an answer afterwards", async () => {
+    const { server, bot, card } = await askedByRex()
+
+    const dismissed = await server.client.chats.dismiss({ messageId: card.id })
+    expect(dismissed.card).toMatchObject({ type: 'question', answer: null, dismissed: true })
+
+    await expect(server.client.chats.answer({ messageId: card.id, answer: { option: 0 } })).rejects.toMatchObject({
+      code: 'CONFLICT',
+    })
+    const messages = await server.client.chats.messages({ chatId: bot.chatId })
+    expect(messages.find((message) => message.id === card.id)!.card).toMatchObject({ answer: null, dismissed: true })
+    expect((await server.client.chats.list()).find((chat) => chat.id === bot.chatId)!.waitingFor).toBeNull()
+    expect((await server.client.bots.list()).find((entry) => entry.id === bot.id)!.working).toBe(false)
+    expect(server.providers.requests).toHaveLength(1)
+  })
+
+  it("can't dismiss an answered question", async () => {
+    const { server, bot, card } = await askedByRex()
+    server.providers.script(callsTools(['sendMessage', { text: 'SQLite it is.' }]), endsSilently())
+    await server.client.chats.answer({ messageId: card.id, answer: { option: 0 } })
+    await untilIdle(server, bot)
+
+    await expect(server.client.chats.dismiss({ messageId: card.id })).rejects.toMatchObject({ code: 'CONFLICT' })
+  })
+})
+
+describe('a question dismissed when the owner moves on', () => {
+  it('is dismissed by the owner’s next message in the chat, while other cards stay answerable', async () => {
+    const { server, bot } = await startWithRex()
+    server.providers.script(
+      callsTools(['askQuestion', whichDatabase as never]),
+      callsTools(['askQuestion', { prompt: 'Want a coffee?', options: [{ label: 'Yes' }, { label: 'No' }], dismissOnMoveOn: true }]),
+    )
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Set up storage for the app' })
+    await untilIdle(server, bot)
+    await server.client.chats.send({ chatId: bot.chatId, text: 'And a break?' })
+    await untilIdle(server, bot)
+    const [, database, , coffee] = await server.client.chats.messages({ chatId: bot.chatId })
+    expect(coffee!.card).toMatchObject({ prompt: 'Want a coffee?', answer: null, dismissed: false })
+
+    server.providers.script(callsTools(['sendMessage', { text: 'OK.' }]), endsSilently())
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Never mind, back to work' })
+    await untilIdle(server, bot)
+
+    const messages = await server.client.chats.messages({ chatId: bot.chatId })
+    expect(messages.find((message) => message.id === coffee!.id)!.card).toMatchObject({ dismissed: true })
+    expect(messages.find((message) => message.id === database!.id)!.card).toMatchObject({ dismissed: false })
+    await expect(server.client.chats.answer({ messageId: coffee!.id, answer: { option: 0 } })).rejects.toMatchObject({
+      code: 'CONFLICT',
+    })
+    server.providers.script(callsTools(['sendMessage', { text: 'SQLite it is.' }]), endsSilently())
+    await server.client.chats.answer({ messageId: database!.id, answer: { option: 0 } })
+    await untilIdle(server, bot)
+  })
+})
+
+describe('reminding the bot of unanswered questions', () => {
+  /** What the bot read of the input that started run `index`: the newest owner message in its request. */
+  const inputOf = (server: TestServer, index: number) => {
+    const message = server.providers.requests[index]!.messages.filter((entry) => entry.role === 'user').at(-1)!
+    return typeof message.content === 'string' ? message.content : JSON.stringify(message.content)
+  }
+
+  it('lists every question still unanswered, open or dismissed, at the start of its next run, once', async () => {
+    const { server, bot } = await startWithRex()
+    server.providers.script(
+      callsTools(['askQuestion', whichDatabase as never], ['askQuestion', { prompt: 'Which port?', options: [{ label: '3000' }, { label: '8080' }] }]),
+    )
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Set up storage and a server' })
+    await untilIdle(server, bot)
+    const questions = (await server.client.chats.messages({ chatId: bot.chatId })).filter((message) => message.card)
+    const database = questions.find((message) => message.text === 'Which database should I use?')!
+    const port = questions.find((message) => message.text === 'Which port?')!
+    await server.client.chats.dismiss({ messageId: port.id })
+
+    server.providers.script(callsTools(['sendMessage', { text: 'Sure.' }]), endsSilently())
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Add a README too' })
+    await untilIdle(server, bot)
+    expect(inputOf(server, 1)).toMatch(/^Unanswered questions:\n- (Which database should I use\?|Which port\?)\n- .+\n\nAdd a README too$/)
+    expect(inputOf(server, 1)).toContain('- Which database should I use?')
+    expect(inputOf(server, 1)).toContain('- Which port?')
+
+    server.providers.script(callsTools(['sendMessage', { text: 'Done.' }]), endsSilently())
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Thanks' })
+    await untilIdle(server, bot)
+    expect(inputOf(server, 3)).toBe('Thanks')
+
+    // Listed once, the open card stays answerable.
+    server.providers.script(callsTools(['sendMessage', { text: 'SQLite it is.' }]), endsSilently())
+    await server.client.chats.answer({ messageId: database.id, answer: { option: 0 } })
+    await untilIdle(server, bot)
+    expect(inputOf(server, 5)).toContain('The owner answered your question "Which database should I use?"')
+  })
+
+  it("doesn't list a question the owner answers before the next run", async () => {
+    const { server, bot, card } = await askedByRex()
+    server.providers.script(callsTools(['sendMessage', { text: 'SQLite it is.' }]), endsSilently())
+
+    await server.client.chats.answer({ messageId: card.id, answer: { option: 0 } })
+    await untilIdle(server, bot)
+
+    expect(inputOf(server, 1)).not.toContain('Unanswered questions')
+  })
+})

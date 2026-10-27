@@ -59,13 +59,17 @@ describe('system credentials', () => {
     const sent = await server.client.chats.send({ chatId: bot.chatId, text: 'Hello', files: [new File(['notes'], 'notes.txt')] })
     await expect.poll(async () => (await server.client.chats.messages({ chatId: bot.chatId })).length).toBe(2)
     await expect.poll(async () => (await server.client.bots.list())[0]!.working).toBe(false)
-    server.providers.script(callsTools(['askQuestion', { prompt: 'Which one?', options: [{ label: 'This' }] }]))
+    server.providers.script(
+      callsTools(['askQuestion', { prompt: 'Which one?', options: [{ label: 'This' }] }], ['askQuestion', { prompt: 'Why?', options: [{ label: 'Because' }] }]),
+    )
     await server.client.chats.send({ chatId: bot.chatId, text: 'Pick for me' })
-    await expect.poll(async () => (await server.client.chats.messages({ chatId: bot.chatId })).length).toBe(4)
-    const question = (await server.client.chats.messages({ chatId: bot.chatId })).at(-1)!
+    await expect.poll(async () => (await server.client.chats.messages({ chatId: bot.chatId })).length).toBe(5)
+    const questions = (await server.client.chats.messages({ chatId: bot.chatId })).filter((message) => message.card?.type === 'question')
+    const question = questions.find((message) => message.text === 'Which one?')!
+    const dismissed = questions.find((message) => message.text === 'Why?')!
     server.providers.script(callsTools(['use_computer', { goal: 'Look at the shop', reason: 'Testing' }]), callsTools(['needs_help', { instruction: 'Sign in' }]))
     await server.client.chats.send({ chatId: bot.chatId, text: 'Look at the shop' })
-    await expect.poll(async () => (await server.client.chats.messages({ chatId: bot.chatId })).length).toBe(6)
+    await expect.poll(async () => (await server.client.chats.messages({ chatId: bot.chatId })).length).toBe(7)
     await expect.poll(async () => (await server.client.bots.list())[0]!.working).toBe(false)
     const takeOver = (await server.client.chats.messages({ chatId: bot.chatId })).at(-1)!
     const ana = await server.client.bots.create({ name: 'Ana', title: null, instructions: '', avatarShape: 'hex', avatarColor: 'blue', model: null })
@@ -108,6 +112,7 @@ describe('system credentials', () => {
       'chats.send': sent,
       'chats.attachment': await (await server.client.chats.attachment({ messageId: sent.id, attachmentId: sent.attachments[0]!.id })).body.text(),
       'chats.answer': await server.client.chats.answer({ messageId: question.id, answer: { option: 0 } }),
+      'chats.dismiss': await server.client.chats.dismiss({ messageId: dismissed.id }),
       'chats.handBack': await server.client.chats.handBack({ messageId: takeOver.id, outcome: 'done' }),
       'groups.create': group,
       'groups.update': await server.client.groups.update({ chatId: group.chat.id, title: 'Team' }),

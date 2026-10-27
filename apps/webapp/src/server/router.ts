@@ -16,6 +16,8 @@ import {
   setPinnedChats,
   createBot,
   describeAnswer,
+  dismissMovedOnQuestions,
+  dismissQuestion,
   describeHandBack,
   handBack,
   HandedBackError,
@@ -293,6 +295,10 @@ export const router = os.router({
       })
       const info = toMessageInfo(message)
       context.bus.publish({ type: 'message.created', message: info })
+      // The owner moved on: low-stakes questions they left unanswered are moot now.
+      for (const dismissed of await dismissMovedOnQuestions(context.db, chat!.id, message.id)) {
+        context.bus.publish({ type: 'message.updated', message: toMessageInfo(dismissed) })
+      }
       await publishChat(context, chat!.id)
       await context.runtime.wake(bot.id, { lane: 'owner', text: input.text, attachments, id: message.id })
       return info
@@ -344,6 +350,22 @@ export const router = os.router({
         }
         throw error
       }
+      return info
+    }),
+
+    dismiss: os.chats.dismiss.handler(async ({ context, input }) => {
+      let dismissed
+      try {
+        dismissed = await dismissQuestion(context.db, input.messageId)
+      } catch (error) {
+        if (error instanceof QuestionNotFoundError) throw new ORPCError('NOT_FOUND', { message: error.message })
+        if (error instanceof QuestionAnsweredError) throw new ORPCError('CONFLICT', { message: error.message })
+        throw error
+      }
+      // The bot isn't woken: its next run lists the question as unanswered.
+      const info = toMessageInfo(dismissed)
+      context.bus.publish({ type: 'message.updated', message: info })
+      await publishChat(context, dismissed.chatId)
       return info
     }),
 
