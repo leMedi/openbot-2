@@ -35,23 +35,21 @@ export function QuestionCard({
   const [error, setError] = useState<string>()
   const answerRef = useRef<(answer: QuestionAnswer) => void>(undefined)
 
-  /** Sends the owner's answer, or their dismissal when `chosen` is null. */
-  async function answer(chosen: QuestionAnswer | null) {
+  /** Sends the owner's answer or dismissal, once at a time, and shows the card as the server now has it. */
+  async function close(request: () => Promise<MessageInfo>) {
     if (sending || card.answer || card.dismissed) return
     setSending(true)
     setError(undefined)
     try {
-      onAnswered(
-        chosen
-          ? await api().chats.answer({ messageId: message.id, answer: chosen })
-          : await api().chats.dismiss({ messageId: message.id }),
-      )
+      onAnswered(await request())
     } catch (caught) {
       setError(errorMessage(caught))
     } finally {
       setSending(false)
     }
   }
+  const answer = (chosen: QuestionAnswer) => close(() => api().chats.answer({ messageId: message.id, answer: chosen }))
+  const dismiss = () => close(() => api().chats.dismiss({ messageId: message.id }))
   answerRef.current = (chosen) => void answer(chosen)
 
   useEffect(() => {
@@ -101,7 +99,7 @@ export function QuestionCard({
           aria-label="Dismiss question"
           title="Dismiss"
           disabled={sending}
-          onClick={() => void answer(null)}
+          onClick={() => void dismiss()}
           className="pressable -mt-1 -mr-1 grid size-7 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors duration-100 hover:bg-secondary-hover hover:text-foreground disabled:opacity-60"
         >
           <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden>

@@ -183,8 +183,8 @@ export const chat = z.object({
   /** A bot posted since the owner last opened the chat. */
   unread: z.boolean(),
   /**
-   * The prompt of the newest question card still open (neither answered nor dismissed), or the instruction of a take-over card still waiting: the chat
-   * needs the owner. Null when nothing waits.
+   * The prompt of the newest question card still open (neither answered nor dismissed), or the instruction of a
+   * take-over card still waiting: the chat needs the owner. Null when nothing waits.
    */
   waitingFor: z.string().nullable(),
   /** The newest message, for the sidebar's preview line; null when the chat is empty. */

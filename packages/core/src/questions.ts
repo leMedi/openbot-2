@@ -1,5 +1,5 @@
 import { type Db, type Message, messages } from '@openbot/db'
-import { and, asc, eq, inArray, isNull, lt, type SQL, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, lt, type SQL, sql } from 'drizzle-orm'
 import { getMessage } from './chats.ts'
 
 export const questionOptionStyles = ['default', 'primary', 'danger'] as const
@@ -44,7 +44,7 @@ export function questionAnswerOf(message: Pick<Message, 'cardState'>): QuestionA
   return (message.cardState as QuestionState | null)?.answer ?? null
 }
 
-/** Whether the owner dismissed the card. */
+/** Whether the card was dismissed: by the owner's ×, or when they moved on. */
 export function questionDismissedOf(message: Pick<Message, 'cardState'>): boolean {
   return (message.cardState as QuestionState | null)?.dismissed ?? false
 }

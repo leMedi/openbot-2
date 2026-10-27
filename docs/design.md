@@ -146,7 +146,7 @@ One active run per bot, lanes ordered user > agent > background. Interrupts stee
 
 The model's plain text is private. The only way to reach you is `sendMessage` (several short bubbles, attachments, question widgets, cards). If a run that answers your message ends without a `sendMessage`, a reminder forces a reply (Grok's reply guarantee).
 
-As built (#40), question cards follow Grok's widgets:
+As built (#40), question cards dismiss as Grok's do:
 
 - The owner can dismiss an open card with its ×: it shows "Dismissed", can't be answered any more, and doesn't wake the bot (`chats.dismiss`). Letter keys skip dismissed cards.
 - `askQuestion({ dismissOnMoveOn: true })`, for low-stakes questions only: the owner's next message in the DM dismisses the card if they left it unanswered. Without it a card stays answerable indefinitely.

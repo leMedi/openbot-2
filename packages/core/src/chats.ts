@@ -47,7 +47,10 @@ export type ChatSummary = Chat & {
   /** A group chat's name: its title, or its members' names; null for a DM. */
   name: string | null
   unread: boolean
-  /** The prompt of the newest open (unanswered, undismissed) question card, or the instruction of a take-over card still waiting; else null. */
+  /**
+   * The prompt of the newest open (unanswered, undismissed) question card, or the instruction of a take-over card still
+   * waiting; else null.
+   */
   waitingFor: string | null
   lastMessage: Message | null
 }
