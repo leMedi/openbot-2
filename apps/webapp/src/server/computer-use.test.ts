@@ -275,11 +275,12 @@ describe('computer-use sessions', () => {
     expect(summary?.input).toMatchObject({ outcome: 'needs_help', actions: { browser_screenshot: 1, needs_help: 1 }, screenshots: 1 })
   })
 
-  it('log a navigation they make with browser_navigate, with secrets in its URL redacted', async () => {
+  it('log the navigations they make with browser_navigate, with secrets in their URLs redacted', async () => {
     const { server, bot } = await startWithRex()
     server.providers.script(
       callsTools(['use_computer', { goal: 'Look at the shop', reason: 'Testing' }]),
       callsTools(['browser_navigate', { url: `${shop}?token=abc123secret` }]),
+      callsTools(['browser_navigate', { url: 'https://ana:hunter2@shop.test/callback?code=oauth-code-123&sig=signed-456&page=2' }]),
       callsTools(['browser_snapshot', {}]),
       says('Seen it.'),
       endsSilently(),
@@ -291,6 +292,10 @@ describe('computer-use sessions', () => {
     const navigations = (await server.client.bots.audit({ botId: bot.id })).filter((entry) => entry.kind === 'navigation')
     expect(navigations.map(({ tool, input }) => ({ tool, input }))).toEqual([
       { tool: 'browser_navigate', input: { url: `${shop}?token=[redacted]`, title: expect.any(String) } },
+      {
+        tool: 'browser_navigate',
+        input: { url: 'https://ana:[redacted]@shop.test/callback?code=[redacted]&sig=[redacted]&page=2', title: expect.any(String) },
+      },
     ])
   })
 
@@ -301,8 +306,15 @@ describe('computer-use sessions', () => {
 
     await shopForSocks(server, bot)
 
-    const [session] = await server.client.bots.audit({ botId: bot.id })
-    expect(session).toMatchObject({ kind: 'action', surface: 'computer_session', tool: 'use_computer', input: useComputer, verdict: null, mode: 'off' })
+    const entries = await server.client.bots.audit({ botId: bot.id })
+    expect(entries[0]).toMatchObject({ kind: 'action', surface: 'computer_session', tool: 'use_computer', input: useComputer, verdict: null, mode: 'off' })
+    // Its pages and summary are logged as when it is reviewed.
+    expect(entries.map(({ kind, verdict }) => [kind, verdict])).toEqual([
+      ['action', null],
+      ['navigation', null],
+      ['navigation', null],
+      ['session_summary', null],
+    ])
   })
 
   it('are reviewed by the orchestrator, which can stop one before it starts', async () => {

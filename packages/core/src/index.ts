@@ -44,7 +44,7 @@ export {
   type OrchestratorModes,
   readBotOrchestratorModes,
   readOrchestratorModes,
-  recordActivity,
+  recordUnreviewed,
   reviewAction,
   writeBotOrchestratorModes,
   writeOrchestratorModes,

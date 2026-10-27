@@ -61,7 +61,7 @@ import {
   questionOptionStyles,
   type TakeOverCard,
   readModelSettings,
-  recordActivity,
+  recordUnreviewed,
   reviewAction,
   setBotHistory,
   unansweredQuestions,
@@ -396,7 +396,7 @@ export class BotRuntime implements AgentRuntime {
       screenFree: (bot) => options.screenFree(bot.id),
       waitingTakeOver: async (bot) => (await findWaitingTakeOver(options.db, bot.chatId))?.card.instruction ?? null,
       requestTakeOver: options.requestTakeOver,
-      audit: (bot, entry) => recordActivity(options.db, bot.id, { ...entry, surface: 'computer_session' }),
+      audit: (bot, entry) => recordUnreviewed(options.db, bot.id, { ...entry, surface: 'computer_session' }),
     })
     /** Files on the bot's computer to attach, read before posting so a missing file fails the call and posts nothing. */
     const readAttachments = (bot: BotWithChat, paths: readonly string[]) =>

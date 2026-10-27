@@ -86,6 +86,9 @@ const secretPatterns: [RegExp, string][] = [
   [/\b(\w*(?:pass(?:word)?|secret|token|api[-_]?key)\w*)(\s*[=:]\s*)("[^"]*"|'[^']*'|\S+)/gi, `$1$2${redacted}`],
   [/\b(sk|pk|rk)-[\w-]{16,}/g, redacted],
   [/\b(ghp|gho|ghu|ghs|github_pat|xox[abpr])_[\w-]{16,}/g, redacted],
+  // In URLs: a password before the host, and query parameters carrying OAuth codes, signatures or keys.
+  [/(\/\/[^/\s:@]+:)[^/\s@]+@/g, `$1${redacted}@`],
+  [/([?&](?:code|sig|signature|key|access_token|auth)=)[^&#\s]+/gi, `$1${redacted}`],
 ]
 
 /** `value` with secrets replaced, so they never reach the orchestrator or the audit log. */
@@ -128,7 +131,7 @@ export async function reviewAction(
  * Writes what a bot did that is never reviewed on its own to its audit log, under the surface whose review covered it, e.g. a page a computer-use
  * session's browser opened. Secrets in `input` are redacted.
  */
-export async function recordActivity(
+export async function recordUnreviewed(
   db: Db,
   botId: string,
   entry: { kind: Exclude<AuditKind, 'action'>; surface: Surface; tool: string; input: unknown },

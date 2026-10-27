@@ -97,6 +97,9 @@ export type ComputerUseOptions = {
   audit(bot: BotWithChat, entry: SessionAuditEntry): Promise<void>
 }
 
+/** The session tool that may have loaded the page its browser shows; `evenIfSameUrl` for one that loads a URL it was given. */
+type PageOpener = { tool: string; evenIfSameUrl?: boolean }
+
 /** A page a session's browser opened, by the tool that opened it, or the summary of a session that ended. */
 export type SessionAuditEntry =
   | { kind: 'navigation'; tool: string; input: { url: string; title: string } }
@@ -119,27 +122,32 @@ export type SessionSummary = {
  */
 export function computerUse(options: ComputerUseOptions) {
   const { browser, desktop, images, botOf } = options
-  /** The URL each running session last saw, so a navigation is logged once, when a new page shows. */
-  const pages = new Map<ConversationId, string>()
+  /**
+   * The URL each running session last saw, so a navigation is logged once, when a new page shows. Kept in memory: after
+   * a restart, a session's first look only notes its page.
+   */
+  const lastUrls = new Map<ConversationId, string>()
 
   /**
-   * Notes the page a session's browser shows. When `opener` is a tool that may have loaded it (always logged for
-   * `always`, else when the URL changed), it is written to the audit log as a navigation.
+   * Notes the page a session's browser shows. When `opener` is the tool that may have loaded it, it is written to the
+   * audit log as a navigation: if the session saw another page before it, or always with `evenIfSameUrl` (a tool that
+   * loads a URL it was given).
    */
-  async function sawPage(session: ConversationId, bot: BotWithChat, page: { url: string; title: string }, opener?: string, always = false) {
-    const last = pages.get(session)
-    pages.set(session, page.url)
-    if (!opener || page.url === 'about:blank' || (!always && page.url === last)) return
-    await options.audit(bot, { kind: 'navigation', tool: opener, input: { url: page.url, title: page.title } })
+  async function sawPage(session: ConversationId, bot: BotWithChat, page: { url: string; title: string }, opener?: PageOpener) {
+    const last = lastUrls.get(session)
+    lastUrls.set(session, page.url)
+    if (!opener || page.url === 'about:blank') return
+    if (!opener.evenIfSameUrl && (last === undefined || page.url === last)) return
+    await options.audit(bot, { kind: 'navigation', tool: opener.tool, input: { url: page.url, title: page.title } })
   }
 
   /**
    * The latest snapshot after an action, so the model verifies what it did and gets fresh references; a page `opener`
    * loaded is logged.
    */
-  async function afterAction(api: ToolExecutionApi, bot: BotWithChat, done: string, opener?: string, always = false) {
+  async function afterAction(api: ToolExecutionApi, bot: BotWithChat, done: string, opener?: PageOpener) {
     const snapshot = await browser.snapshot(bot)
-    await sawPage(api.conversationId, bot, snapshot, opener, always)
+    await sawPage(api.conversationId, bot, snapshot, opener)
     return { output: [text(`${done}\n\n${formatSnapshot(snapshot)}`)] }
   }
 
@@ -174,7 +182,7 @@ export function computerUse(options: ComputerUseOptions) {
       execute: async (args, api) => {
         const bot = await botOf(api.conversationId)
         await browser.navigate(bot, args.url)
-        return afterAction(api, bot, `Opened ${args.url}.`, 'browser_navigate', true)
+        return afterAction(api, bot, `Opened ${args.url}.`, { tool: 'browser_navigate', evenIfSameUrl: true })
       },
     }),
     defineTool({
@@ -185,7 +193,7 @@ export function computerUse(options: ComputerUseOptions) {
       execute: async (args, api) => {
         const bot = await botOf(api.conversationId)
         await browser.click(bot, args.ref)
-        return afterAction(api, bot, `Clicked ${args.ref}.`, 'browser_click')
+        return afterAction(api, bot, `Clicked ${args.ref}.`, { tool: 'browser_click' })
       },
     }),
     defineTool({
@@ -200,7 +208,7 @@ export function computerUse(options: ComputerUseOptions) {
       execute: async (args, api) => {
         const bot = await botOf(api.conversationId)
         await browser.type(bot, args.ref, args.text, { submit: args.submit ?? false })
-        return afterAction(api, bot, `Typed into ${args.ref}${args.submit ? ' and pressed Enter' : ''}.`, 'browser_type')
+        return afterAction(api, bot, `Typed into ${args.ref}${args.submit ? ' and pressed Enter' : ''}.`, { tool: 'browser_type' })
       },
     }),
     defineTool({
@@ -224,7 +232,7 @@ export function computerUse(options: ComputerUseOptions) {
         const listed = `Tabs:\n${lines.join('\n')}`
         // A tab change shows the tab now active, with references to act on; only a new tab loads a page.
         if (args.action === 'list') return { output: [text(listed)] }
-        return afterAction(api, bot, listed, args.action === 'new' ? 'browser_tabs' : undefined, args.action === 'new')
+        return afterAction(api, bot, listed, args.action === 'new' ? { tool: 'browser_tabs', evenIfSameUrl: true } : undefined)
       },
     }),
     defineTool({
@@ -420,7 +428,7 @@ export function computerUse(options: ComputerUseOptions) {
             await browser.navigate(bot, args.startUrl)
             start = `\n\nThe browser has opened ${args.startUrl}.`
             const tab = (await browser.tabs(bot)).find((entry) => entry.active)
-            if (tab) await sawPage(session, bot, tab, 'use_computer', true)
+            if (tab) await sawPage(session, bot, tab, { tool: 'use_computer', evenIfSameUrl: true })
           } catch (error) {
             start = `\n\nOpening ${args.startUrl} failed: ${(error as Error).message}`
           }
@@ -479,7 +487,7 @@ export function computerUse(options: ComputerUseOptions) {
         }
         return { output: [text(`${summary}\n\n${screenshot}`)] }
       } finally {
-        pages.delete(session)
+        lastUrls.delete(session)
         if (!(await api.memo<boolean>('summarized', context))) {
           const actions = await sessionActions(api, session)
           const screenshots = Object.entries(actions).reduce((sum, [tool, count]) => sum + (tool.endsWith('_screenshot') ? count : 0), finalScreenshots)
