@@ -17,6 +17,12 @@ export type BotInput = {
    * redelivered once. An owner run is never interrupted.
    */
   priority?: boolean
+  /**
+   * Owner lane only: the input is the bot's turn in this group chat. A turn neither steers a run nor is steered by the
+   * owner's DM: it waits for the bot's current run, and the owner's DM input waits for it. What the bot sends with
+   * `sendMessage` in it goes to the group; it may pass, sending nothing.
+   */
+  groupChatId?: string
 }
 
 /** Runs bots' models and tools. Implemented on pi-durable by `@openbot/agent` (ADR 0005). */
@@ -26,6 +32,11 @@ export interface AgentRuntime {
    * anything else waits for it, then runs in lane order (owner, bot, background), oldest first within a lane.
    */
   wake(botId: string, input: BotInput): Promise<void>
+  /**
+   * Queues `input` as `wake` does and resolves once its run has ended, or it was dropped (Stop, the bot deleted, the
+   * runtime closed). A group chat's rounds wait on each member's turn with it.
+   */
+  takeTurn(botId: string, input: BotInput): Promise<void>
   /** Aborts the bot's current run and drops the work queued behind it. */
   stop(botId: string): Promise<void>
   /** Aborts a deleted bot's run and drops everything the runtime holds for it, its folder on the computer included. */

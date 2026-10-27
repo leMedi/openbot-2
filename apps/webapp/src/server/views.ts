@@ -34,13 +34,17 @@ function toCardInfo(message: Message): CardInfo | null {
   return null
 }
 
-/** What the sidebar shows of a chat; its newest message is cut down to a preview. */
-export function toChatInfo(chat: ChatSummary): ChatInfo {
+/** What the sidebar shows of a chat, with the member taking its turn in a group; its newest message is cut down to a preview. */
+export function toChatInfo(chat: ChatSummary, speaking: string | null): ChatInfo {
   const last = chat.lastMessage && toMessageInfo(chat.lastMessage)
   return {
     id: chat.id,
     kind: chat.kind,
     botId: chat.botId,
+    name: chat.name,
+    title: chat.kind === 'group' ? chat.title : null,
+    members: chat.members,
+    speaking,
     pinnedPosition: chat.pinnedPosition,
     unread: chat.unread,
     waitingFor: chat.waitingFor,

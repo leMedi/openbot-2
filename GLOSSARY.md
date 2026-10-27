@@ -47,8 +47,16 @@ _Avoid_: Conversation, transcript, context
 **Pass**:
 A bot choosing to say nothing on its turn in a group chat.
 
+**Round**:
+One pass through a group chat's members after a message, each taking a turn in order; a message is answered in at most 3 rounds and 10 turns, and a round in which nobody speaks ends it.
+_Avoid_: Cycle, pass (for the round)
+
+**Turn**:
+One member's go in a round of a group chat: it reads what others said since its last turn and posts up to two messages, or passes.
+_Avoid_: Run (for the turn), reply
+
 **Lane**:
-The priority class of a bot's pending work: owner, bot, or background (routines and revivals), in that order. A bot works on one thing at a time; the owner's messages join its current work, everything else waits its turn.
+The priority class of a bot's pending work: owner, bot, or background (routines and revivals), in that order. A bot works on one thing at a time; the owner's messages join its current work (unless it is a turn in a group chat, which they wait for), and everything else waits. Turns in group chats are in the owner lane.
 
 **Teammate**:
 Another of the owner's bots, as a bot sees it: one it can message.

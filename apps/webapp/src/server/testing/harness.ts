@@ -91,6 +91,8 @@ async function open(dir: string, secretKey: string, { shell, pages, realComputer
     model: createFakeModel(),
     /** The agent runtime, e.g. to wake a bot in the background lane as a routine would. */
     runtime: context.runtime,
+    /** Group chats' rounds, e.g. to wait for the members to finish answering. */
+    rounds: context.rounds,
     /** The scripted providers behind the API, and their sign-ins. */
     providers,
     /** pi's model collection the runtime uses, with auth resolved through the credential store. */
@@ -130,6 +132,7 @@ async function open(dir: string, secretKey: string, { shell, pages, realComputer
     /** Stops the runtime and closes the database, keeping the data. */
     async shutdown() {
       for (const http of streamServers.splice(0)) http.close()
+      context.rounds.close()
       await context.runtime.close()
       db.$client.close()
     },
@@ -137,6 +140,7 @@ async function open(dir: string, secretKey: string, { shell, pages, realComputer
     async close() {
       for (const http of streamServers.splice(0)) http.close()
       await computer.close()
+      context.rounds.close()
       await context.runtime.close()
       db.$client.close()
       await rm(dir, { recursive: true, force: true })

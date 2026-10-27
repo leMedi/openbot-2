@@ -168,6 +168,14 @@ export const chat = z.object({
   kind: z.enum(['dm', 'group']),
   /** The DM's bot; null for group chats. */
   botId: z.string().nullable(),
+  /** A group chat's name: its title, or its members' names until renamed; null for a DM. */
+  name: z.string().nullable(),
+  /** A group chat's title, as the owner named it; null when named after its members, and for a DM. */
+  title: z.string().nullable(),
+  /** A group chat's member bots, in their turn order; empty for a DM. */
+  members: z.array(z.string()),
+  /** The member taking its turn in a group chat now; null between turns, and for a DM. */
+  speaking: z.string().nullable(),
   /** Place among pinned chats, 0 first; null when not pinned. Pinned chats sit above the rest. */
   pinnedPosition: z.number().int().nonnegative().nullable(),
   /** A bot posted since the owner last opened the chat. */
@@ -181,6 +189,16 @@ export const chat = z.object({
   lastMessage: message.pick({ author: true, authorName: true, text: true, attachments: true, botMessage: true, createdAt: true }).nullable(),
 })
 export type ChatInfo = z.infer<typeof chat>
+
+/** A group chat is the owner and at least this many bots (the server enforces the same)... */
+export const minGroupMembers = 2
+/** ...and at most this many: Grok's cap. */
+export const maxGroupMembers = 6
+/** Member bot ids; the server says when there are too few or too many. */
+const groupMembers = z.array(z.string()).max(100)
+
+/** A group chat's name as the owner sets it; blank names it after its members again. */
+const groupTitle = z.string().trim().max(120).nullable()
 
 export const onboarding = z.object({
   provider: z.boolean(),
@@ -442,7 +460,7 @@ export const contract = {
         path: '/chats/{chatId}/messages',
         summary:
           "Post the owner's message and wake the bot. Files, sent as a multipart form, are saved to the bot's uploads " +
-          'folder; the bot is told where, and sees images',
+          'folder; the bot is told where, and sees images. In a group chat, the members answer in rounds; files are refused there',
       })
       .input(
         z
@@ -481,6 +499,26 @@ export const contract = {
       })
       .input(z.object({ messageId: z.string(), outcome: handBackOutcome }))
       .output(message),
+  },
+  groups: {
+    create: oc
+      .route({
+        method: 'POST',
+        path: '/groups',
+        summary:
+          "Create a group chat of these bots with the owner's first message, which the members then answer in rounds. " +
+          'It is named after its members until renamed',
+      })
+      .input(z.object({ memberIds: groupMembers, text: z.string().trim().min(1, 'Write a message').max(100_000) }))
+      .output(z.object({ chat, message })),
+    update: oc
+      .route({
+        method: 'PATCH',
+        path: '/groups/{chatId}',
+        summary: "Rename a group chat (null or blank names it after its members) or set its members, in turn order",
+      })
+      .input(z.object({ chatId: z.string(), title: groupTitle.optional(), memberIds: groupMembers.optional() }))
+      .output(chat),
   },
   providers: {
     list: oc

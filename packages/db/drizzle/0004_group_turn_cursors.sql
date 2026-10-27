@@ -1,0 +1,1 @@
+ALTER TABLE `chats` ADD `turn_cursors` text DEFAULT '{}' NOT NULL;

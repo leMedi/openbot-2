@@ -7,6 +7,10 @@ import {
   type AttachmentFile,
   type BotWithChat,
   ChatNotFoundError,
+  createGroup,
+  getGroup,
+  GroupMembersError,
+  listGroups,
   listChatSummaries,
   markChatRead,
   setPinnedChats,
@@ -38,14 +42,15 @@ import {
   TakeOverNotFoundError,
   writeBotOrchestratorModes,
   updateBot,
+  updateGroup,
   writeModelSettings,
   writeOrchestratorModes,
 } from '@openbot/core'
 import { implement, ORPCError } from '@orpc/server'
 import { generateContentDisposition } from '@orpc/standard-server'
-import { publishChat, type ServerContext } from './context.ts'
+import { chatInfoOf, publishChat, type ServerContext } from './context.ts'
 import { screenStreamUrl } from './screen-stream.ts'
-import { toAuditEntryInfo, toBotInfo, toChatInfo, toMessageInfo } from './views.ts'
+import { toAuditEntryInfo, toBotInfo, toMessageInfo } from './views.ts'
 
 const os = implement(contract).$context<ServerContext>()
 
@@ -66,6 +71,41 @@ async function chatMustExist<T>(work: Promise<T>): Promise<T> {
     if (error instanceof ChatNotFoundError) throw new ORPCError('NOT_FOUND', { message: error.message })
     throw error
   }
+}
+
+/** `work`'s result, with members a group chat can't have answered as BAD_REQUEST. */
+async function membersMustFit<T>(work: Promise<T>): Promise<T> {
+  try {
+    return await work
+  } catch (error) {
+    if (error instanceof GroupMembersError) throw new ORPCError('BAD_REQUEST', { message: error.message })
+    throw error
+  }
+}
+
+/** Tells every tab how the group chats `botId` is in look now, e.g. named after it as it was renamed. */
+async function publishGroupsOf(context: ServerContext, botId: string) {
+  for (const group of await listGroups(context.db, botId)) await publishChat(context, group.id)
+}
+
+/**
+ * Posts the owner's message in a group chat and starts the members' rounds answering it. Throws unless every member can
+ * run, so the message is never left without members to answer it.
+ */
+async function sendToGroup(context: ServerContext, chatId: string, text: string) {
+  const group = await getGroup(context.db, chatId)
+  if (!group) throw new ORPCError('NOT_FOUND', { message: 'No such chat' })
+  if (!group.members.length) throw new ORPCError('PRECONDITION_FAILED', { message: 'Add members to this group chat first' })
+  for (const member of group.members) {
+    const bot = await getBot(context.db, member)
+    if (bot) await assertCanRun(context, bot)
+  }
+  const { message } = await postMessage(context.db, { chatId, author: 'owner', authorName: 'You', text })
+  const info = toMessageInfo(message)
+  context.bus.publish({ type: 'message.created', message: info })
+  await publishChat(context, chatId)
+  void context.rounds.start(chatId, message)
+  return info
 }
 
 /** The bot, or NOT_FOUND. */
@@ -152,6 +192,8 @@ export const router = os.router({
         if (!updated) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
         const bot = toBotInfo(updated, context.runtime.status(botId))
         context.bus.publish({ type: 'bot.updated', bot })
+        // Groups not renamed by the owner are named after their members.
+        if (changes.name !== undefined) await publishGroupsOf(context, botId)
         return bot
       } catch (error) {
         if (error instanceof NameTakenError) throw new ORPCError('CONFLICT', { message: error.message })
@@ -171,6 +213,7 @@ export const router = os.router({
       await context.runtime.forget(bot)
       await context.attachments.removeChat(bot.chatId)
       context.bus.publish({ type: 'bot.deleted', botId: bot.id, chatId: bot.chatId })
+      for (const groupId of bot.leftGroups) await publishChat(context, groupId)
     }),
 
     stop: os.bots.stop.handler(async ({ context, input }) => {
@@ -197,7 +240,7 @@ export const router = os.router({
   },
 
   chats: {
-    list: os.chats.list.handler(async ({ context }) => (await listChatSummaries(context.db)).map(toChatInfo)),
+    list: os.chats.list.handler(async ({ context }) => (await listChatSummaries(context.db)).map((summary) => chatInfoOf(context, summary))),
 
     read: os.chats.read.handler(async ({ context, input }) => {
       await chatMustExist(markChatRead(context.db, input.chatId, input.upTo))
@@ -206,7 +249,7 @@ export const router = os.router({
 
     setPinned: os.chats.setPinned.handler(async ({ context, input }) => {
       const changed = await chatMustExist(setPinnedChats(context.db, input.chatIds))
-      const chats = (await listChatSummaries(context.db)).map(toChatInfo)
+      const chats = (await listChatSummaries(context.db)).map((summary) => chatInfoOf(context, summary))
       for (const chat of chats) if (changed.includes(chat.id)) context.bus.publish({ type: 'chat.updated', chat })
       return chats
     }),
@@ -218,6 +261,11 @@ export const router = os.router({
 
     send: os.chats.send.handler(async ({ context, input }) => {
       const chat = await getChat(context.db, input.chatId)
+      if (chat?.kind === 'group') {
+        // Where an owner's file in a group would go is not decided yet (#28).
+        if (input.files.length) throw new ORPCError('BAD_REQUEST', { message: "Files can't be sent to a group chat yet" })
+        return sendToGroup(context, chat.id, input.text)
+      }
       const bot = chat?.botId ? await getBot(context.db, chat.botId) : undefined
       if (!bot) throw new ORPCError('NOT_FOUND', { message: 'No such chat' })
       await assertCanRun(context, bot)
@@ -327,6 +375,20 @@ export const router = os.router({
         throw error
       }
       return info
+    }),
+  },
+
+  groups: {
+    create: os.groups.create.handler(async ({ context, input }) => {
+      for (const member of input.memberIds) await assertCanRun(context, await botMustExist(context, member))
+      const chat = await membersMustFit(createGroup(context.db, { memberIds: input.memberIds }))
+      const message = await sendToGroup(context, chat.id, input.text)
+      return { chat: (await publishChat(context, chat.id))!, message }
+    }),
+
+    update: os.groups.update.handler(async ({ context, input }) => {
+      await chatMustExist(membersMustFit(updateGroup(context.db, input.chatId, { title: input.title, memberIds: input.memberIds })))
+      return (await publishChat(context, input.chatId))!
     }),
   },
 

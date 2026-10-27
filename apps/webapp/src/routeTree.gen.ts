@@ -17,6 +17,8 @@ import { Route as ApiSplatRouteImport } from './routes/api/$'
 import { Route as SettingsModelsRouteImport } from './routes/settings/models'
 import { Route as SettingsProvidersRouteImport } from './routes/settings/providers'
 import { Route as AppBotsBotIdRouteImport } from './routes/_app/bots.$botId'
+import { Route as AppGroupsChatIdRouteImport } from './routes/_app/groups.$chatId'
+import { Route as AppGroupsNewRouteImport } from './routes/_app/groups.new'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -57,6 +59,16 @@ const AppBotsBotIdRoute = AppBotsBotIdRouteImport.update({
   path: '/bots/$botId',
   getParentRoute: () => AppRoute,
 } as any)
+const AppGroupsChatIdRoute = AppGroupsChatIdRouteImport.update({
+  id: '/groups/$chatId',
+  path: '/groups/$chatId',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppGroupsNewRoute = AppGroupsNewRouteImport.update({
+  id: '/groups/new',
+  path: '/groups/new',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -66,6 +78,8 @@ export interface FileRoutesByFullPath {
   '/settings/models': typeof SettingsModelsRoute
   '/settings/providers': typeof SettingsProvidersRoute
   '/bots/$botId': typeof AppBotsBotIdRoute
+  '/groups/$chatId': typeof AppGroupsChatIdRoute
+  '/groups/new': typeof AppGroupsNewRoute
 }
 export interface FileRoutesByTo {
   '/onboarding': typeof OnboardingRoute
@@ -75,6 +89,8 @@ export interface FileRoutesByTo {
   '/settings/providers': typeof SettingsProvidersRoute
   '/': typeof AppIndexRoute
   '/bots/$botId': typeof AppBotsBotIdRoute
+  '/groups/$chatId': typeof AppGroupsChatIdRoute
+  '/groups/new': typeof AppGroupsNewRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -86,6 +102,8 @@ export interface FileRoutesById {
   '/settings/providers': typeof SettingsProvidersRoute
   '/_app/': typeof AppIndexRoute
   '/_app/bots/$botId': typeof AppBotsBotIdRoute
+  '/_app/groups/$chatId': typeof AppGroupsChatIdRoute
+  '/_app/groups/new': typeof AppGroupsNewRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -97,6 +115,8 @@ export interface FileRouteTypes {
     | '/settings/models'
     | '/settings/providers'
     | '/bots/$botId'
+    | '/groups/$chatId'
+    | '/groups/new'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/onboarding'
@@ -106,6 +126,8 @@ export interface FileRouteTypes {
     | '/settings/providers'
     | '/'
     | '/bots/$botId'
+    | '/groups/$chatId'
+    | '/groups/new'
   id:
     | '__root__'
     | '/_app'
@@ -116,6 +138,8 @@ export interface FileRouteTypes {
     | '/settings/providers'
     | '/_app/'
     | '/_app/bots/$botId'
+    | '/_app/groups/$chatId'
+    | '/_app/groups/new'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -183,17 +207,35 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBotsBotIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/groups/$chatId': {
+      id: '/_app/groups/$chatId'
+      path: '/groups/$chatId'
+      fullPath: '/groups/$chatId'
+      preLoaderRoute: typeof AppGroupsChatIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/groups/new': {
+      id: '/_app/groups/new'
+      path: '/groups/new'
+      fullPath: '/groups/new'
+      preLoaderRoute: typeof AppGroupsNewRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
 interface AppRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
   AppBotsBotIdRoute: typeof AppBotsBotIdRoute
+  AppGroupsChatIdRoute: typeof AppGroupsChatIdRoute
+  AppGroupsNewRoute: typeof AppGroupsNewRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppIndexRoute: AppIndexRoute,
   AppBotsBotIdRoute: AppBotsBotIdRoute,
+  AppGroupsChatIdRoute: AppGroupsChatIdRoute,
+  AppGroupsNewRoute: AppGroupsNewRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

@@ -44,7 +44,19 @@ describe('unread chats', () => {
     const { server, bot } = await startWithRex()
 
     expect(await server.client.chats.list()).toEqual([
-      { id: bot.chatId, kind: 'dm', botId: bot.id, pinnedPosition: null, unread: false, waitingFor: null, lastMessage: null },
+      {
+        id: bot.chatId,
+        kind: 'dm',
+        botId: bot.id,
+        name: null,
+        title: null,
+        members: [],
+        speaking: null,
+        pinnedPosition: null,
+        unread: false,
+        waitingFor: null,
+        lastMessage: null,
+      },
     ])
   })
 

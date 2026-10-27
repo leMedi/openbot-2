@@ -66,3 +66,23 @@ export function BotAvatar({
     </span>
   )
 }
+
+/** Grok's group avatar: a mosaic of up to four members' marks, with "+N" when there are more. */
+export function GroupAvatar({ members, size = 28, working = false }: { members: readonly BotInfo[]; size?: number; working?: boolean }) {
+  const shown = members.slice(0, members.length > 4 ? 3 : 4)
+  const more = members.length - shown.length
+  const cell = shown.length <= 1 ? size : Math.floor(size / 2)
+  return (
+    <span className="relative inline-flex shrink-0" style={{ width: size, height: size }}>
+      <span className="grid size-full grid-cols-2 place-content-center place-items-center" aria-hidden>
+        {shown.map((bot) => (
+          <BotAvatar key={bot.id} shape={bot.avatarShape} color={bot.avatarColor} size={cell} />
+        ))}
+        {more > 0 && <span className="text-[9px] font-semibold text-muted-foreground tabular-nums">+{more}</span>}
+      </span>
+      {working && (
+        <span className="absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full border-2 border-sidebar bg-status-working motion-safe:animate-pop-in motion-reduce:animate-fade-in" />
+      )}
+    </span>
+  )
+}

@@ -1,11 +1,12 @@
 import type { BotInfo, ChatInfo } from '@openbot/api-contract'
 import { cn } from '@openbot/ui/lib/utils'
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
-import { type KeyboardEvent, type PointerEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type KeyboardEvent, type PointerEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
 import { useLive } from '../lib/live.tsx'
+import { membersOf } from '../lib/groups.ts'
 import { summarizeAttachments } from './attachments.tsx'
-import { BotAvatar } from './bot-avatar.tsx'
+import { BotAvatar, GroupAvatar } from './bot-avatar.tsx'
 import { NewBotDialog } from './new-bot-dialog.tsx'
 import { ConfirmDelete } from './profile-pane.tsx'
 
@@ -38,25 +39,34 @@ function useSidebarWidth() {
   return [width, commit] as const
 }
 
-/** A bot's DM as one sidebar row. */
-type Row = { bot: BotInfo; chat: ChatInfo | undefined; pinned: boolean }
+/** One sidebar row: a bot's DM (with its bot) or a group chat. */
+type Row = { chatId: string; chat: ChatInfo | undefined; pinned: boolean; bot?: BotInfo }
 
-/** Pinned chats first in the owner's order, then the rest oldest first. */
+/** Pinned chats first in the owner's order, then the rest oldest first: DMs and group chats alike. */
 function sidebarRows(bots: readonly BotInfo[], chats: ReadonlyMap<string, ChatInfo>, pinnedIds: readonly string[]): Row[] {
-  const rows = bots.map((bot) => ({ bot, chat: chats.get(bot.chatId), pinned: pinnedIds.includes(bot.chatId) }))
-  const pinned = pinnedIds.flatMap((id) => rows.filter((row) => row.bot.chatId === id))
+  const dms = bots.map((bot) => ({ chatId: bot.chatId, chat: chats.get(bot.chatId), bot }))
+  const groups = [...chats.values()].filter((chat) => chat.kind === 'group').map((chat) => ({ chatId: chat.id, chat }))
+  // Chat ids are time-ordered.
+  const rows = [...dms, ...groups]
+    .map((row) => ({ ...row, pinned: pinnedIds.includes(row.chatId) }))
+    .sort((a, b) => (a.chatId < b.chatId ? -1 : a.chatId > b.chatId ? 1 : 0))
+  const pinned = pinnedIds.flatMap((id) => rows.filter((row) => row.chatId === id))
   return [...pinned, ...rows.filter((row) => !row.pinned)]
 }
 
-/** Grok's roster: live status dots, Draft / Waiting lines, pinning with drag to reorder, rename and delete. */
+/** A row's name: its bot's, or the group's. */
+const rowName = (row: Row) => row.bot?.name ?? row.chat?.name ?? ''
+
+/** Grok's roster of DMs and group chats: live status dots, Draft / Waiting lines, pinning with drag to reorder, rename and delete. */
 export function Sidebar() {
   const live = useLive()
   const navigate = useNavigate()
   const activeChatId = useActiveChatId()
   const [creating, setCreating] = useState(false)
+  const [newMenu, setNewMenu] = useState(false)
   const [width, setWidth] = useSidebarWidth()
   const [preview, setPreview] = useState<number>()
-  const [menu, setMenu] = useState<{ botId: string; x: number; y: number }>()
+  const [menu, setMenu] = useState<{ chatId: string; x: number; y: number }>()
   const [renaming, setRenaming] = useState<string>()
   const [deleting, setDeleting] = useState<BotInfo>()
   const [error, setError] = useState<string>()
@@ -84,10 +94,10 @@ export function Sidebar() {
     if (order.join() !== pinnedIds.join()) pin(order)
   }
 
-  const openMenu = useCallback((row: Row, x: number, y: number) => setMenu({ botId: row.bot.id, x, y }), [])
+  const openMenu = useCallback((row: Row, x: number, y: number) => setMenu({ chatId: row.chatId, x, y }), [])
   const closeMenu = useCallback(() => setMenu(undefined), [])
   // Read from the rows each render, so the menu follows live changes while open.
-  const menuRow = menu && rows.find((row) => row.bot.id === menu.botId)
+  const menuRow = menu && rows.find((row) => row.chatId === menu.chatId)
 
   return (
     <nav
@@ -97,32 +107,47 @@ export function Sidebar() {
     >
       <header className="flex h-[50px] shrink-0 items-center justify-between border-b border-border-subtle pr-3 pl-4">
         <span className="font-semibold">OpenBot</span>
-        <button type="button" onClick={() => setCreating(true)} className="pressable rounded-md px-2 py-1 hover:bg-secondary-hover">
-          + New bot
-        </button>
+        <span className="relative">
+          <button
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={newMenu}
+            onClick={() => setNewMenu((open) => !open)}
+            className="pressable rounded-md px-2 py-1 hover:bg-secondary-hover"
+          >
+            + New
+          </button>
+          {newMenu && (
+            <NewMenu
+              onClose={() => setNewMenu(false)}
+              onNewBot={() => setCreating(true)}
+              onNewGroup={() => navigate({ to: '/groups/new' })}
+            />
+          )}
+        </span>
       </header>
 
       <ul className="flex flex-1 flex-col gap-[3px] overflow-y-auto px-3 pt-1 pb-6">
         {rows.map((row, index) => {
-          const { bot, chat, pinned } = row
-          const active = bot.chatId === activeChatId
+          const { chatId, pinned } = row
+          const active = chatId === activeChatId
           const lastPinned = pinned && !rows[index + 1]?.pinned
-          const target = dropTarget?.chatId === bot.chatId ? dropTarget : undefined
+          const target = dropTarget?.chatId === chatId ? dropTarget : undefined
           return (
             <li
-              key={bot.id}
+              key={chatId}
               className={cn('relative', lastPinned && 'mb-2 after:absolute after:inset-x-2 after:-bottom-[5px] after:h-px after:bg-border-subtle')}
               onDragOver={(event) => {
                 if (!dragging) return
-                if (!pinned || dragging === bot.chatId) return setDropTarget(undefined)
+                if (!pinned || dragging === chatId) return setDropTarget(undefined)
                 event.preventDefault()
                 const box = event.currentTarget.getBoundingClientRect()
                 const after = event.clientY > box.top + box.height / 2
-                if (target?.after !== after) setDropTarget({ chatId: bot.chatId, after })
+                if (target?.after !== after) setDropTarget({ chatId, after })
               }}
               onDrop={(event) => {
                 event.preventDefault()
-                if (pinned && target) drop(bot.chatId, target.after)
+                if (pinned && target) drop(chatId, target.after)
               }}
             >
               {target && (
@@ -136,13 +161,13 @@ export function Sidebar() {
                 active={active}
                 visible={visible}
                 now={now}
-                draft={live.drafts.get(bot.chatId)}
-                renaming={renaming === bot.id}
-                dragging={dragging === bot.chatId}
+                draft={live.drafts.get(chatId)}
+                renaming={renaming === chatId}
+                dragging={dragging === chatId}
                 onRenamed={() => setRenaming(undefined)}
-                onStartRename={() => setRenaming(bot.id)}
+                onStartRename={() => setRenaming(chatId)}
                 onMenu={openMenu}
-                onDragStart={pinned ? () => setDragging(bot.chatId) : undefined}
+                onDragStart={pinned ? () => setDragging(chatId) : undefined}
                 onDragEnd={() => {
                   setDragging(undefined)
                   setDropTarget(undefined)
@@ -179,7 +204,7 @@ export function Sidebar() {
           onClose={closeMenu}
           onPin={pin}
           onMarkRead={(chatId) => void live.markRead(chatId, undefined).catch((caught) => setError(errorMessage(caught)))}
-          onRename={(bot) => setRenaming(bot.id)}
+          onRename={(row) => setRenaming(row.chatId)}
           onDelete={setDeleting}
         />
       )}
@@ -201,13 +226,68 @@ export function Sidebar() {
   )
 }
 
-/** The chat the owner has open, if any. */
+/** The chat the owner has open, if any: a bot's DM or a group chat. */
 function useActiveChatId(): string | undefined {
   const live = useLive()
-  const botId = useRouterState({
-    select: (state) => state.matches.find((match) => match.routeId === '/_app/bots/$botId')?.params as { botId?: string } | undefined,
-  })?.botId
-  return live.bots?.find((bot) => bot.id === botId)?.chatId
+  const params = useRouterState({
+    select: (state) =>
+      state.matches.find((match) => match.routeId === '/_app/bots/$botId' || match.routeId === '/_app/groups/$chatId')?.params as
+        | { botId?: string; chatId?: string }
+        | undefined,
+  })
+  return params?.chatId ?? live.bots?.find((bot) => bot.id === params?.botId)?.chatId
+}
+
+/** "+ New": a bot, or a group chat. */
+function NewMenu({ onClose, onNewBot, onNewGroup }: { onClose: () => void; onNewBot: () => void; onNewGroup: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus(), [])
+  useEffect(() => {
+    const close = (event: Event) => {
+      if (!ref.current?.parentElement?.contains(event.target as Node)) onClose()
+    }
+    addEventListener('pointerdown', close, true)
+    return () => removeEventListener('pointerdown', close, true)
+  }, [onClose])
+  const items = [
+    { label: 'New bot', run: onNewBot },
+    { label: 'New group chat', run: onNewGroup },
+  ]
+  return (
+    <div
+      ref={ref}
+      role="menu"
+      aria-label="New"
+      onKeyDown={(event) => {
+        const buttons = [...(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])]
+        const index = buttons.indexOf(document.activeElement as HTMLElement)
+        if (event.key === 'Escape' || event.key === 'Tab') {
+          event.preventDefault()
+          onClose()
+        } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault()
+          buttons[(index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length]?.focus()
+        }
+      }}
+      className="absolute top-full right-0 z-40 mt-1 flex min-w-[170px] flex-col rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg motion-safe:animate-pop-in motion-reduce:animate-fade-in"
+    >
+      {items.map((item) => (
+        <button
+          key={item.label}
+          type="button"
+          role="menuitem"
+          tabIndex={-1}
+          onClick={() => {
+            onClose()
+            item.run()
+          }}
+          className="rounded-md px-2.5 py-1.5 text-left text-base outline-none hover:bg-secondary focus-visible:bg-secondary"
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  )
 }
 
 /** Whether this tab is in view. */
@@ -251,22 +331,33 @@ function previewText(markdown: string): string {
     .trim()
 }
 
-/** The row's second line, in Grok's priority: the owner's draft, what the bot waits for, its activity, the latest message. */
-function secondLine(bot: BotInfo, chat: ChatInfo | undefined, draft: string | undefined) {
+/**
+ * The row's second line, in Grok's priority: the owner's draft, what the bot waits for, its activity (in a group, the
+ * member taking its turn), the latest message.
+ */
+function secondLine(row: Row, speaking: BotInfo | undefined, draft: string | undefined) {
+  const { bot, chat } = row
   if (draft?.trim()) return { label: 'Draft: ', text: previewText(draft), className: 'text-muted-foreground', labelClass: 'text-red-foreground' }
   if (chat?.waitingFor) {
     return { label: 'Waiting for you: ', text: previewText(chat.waitingFor), className: 'text-muted-foreground', labelClass: 'text-amber-foreground' }
   }
-  if (bot.working) return { text: 'Working…', className: 'text-green-foreground' }
-  if (bot.error) return { text: "Couldn't reach its model", className: 'text-red-foreground' }
+  if (bot?.working) return { text: 'Working…', className: 'text-green-foreground' }
+  if (bot?.error) return { text: "Couldn't reach its model", className: 'text-red-foreground' }
+  if (speaking) return { text: `${speaking.name} is taking a turn…`, className: 'text-green-foreground' }
   const last = chat?.lastMessage
   if (last) {
     const text = previewText(last.text) || (last.attachments.length ? summarizeAttachments(last.attachments) : '')
-    // A message between bots shows who it went to or came from: "→ Ana: …", "← Rex: …".
-    const prefix = last.botMessage ? `${last.botMessage.direction === 'to' ? '→' : '←'} ${last.botMessage.name}: ` : last.author === 'owner' ? 'You: ' : ''
+    // A message between bots shows who it went to or came from: "→ Ana: …", "← Rex: …"; a group's shows who posted it.
+    const prefix = last.botMessage
+      ? `${last.botMessage.direction === 'to' ? '→' : '←'} ${last.botMessage.name}: `
+      : last.author === 'owner'
+        ? 'You: '
+        : bot
+          ? ''
+          : `${last.authorName}: `
     return { text: prefix + text, className: 'text-muted-foreground' }
   }
-  return { text: bot.title ?? 'No messages yet', className: 'text-muted-foreground' }
+  return { text: bot?.title ?? 'No messages yet', className: 'text-muted-foreground' }
 }
 
 function ChatRow({
@@ -297,24 +388,30 @@ function ChatRow({
   onDragStart: (() => void) | undefined
   onDragEnd: () => void
 }) {
+  const live = useLive()
   const { bot, chat, pinned } = row
-  const line = secondLine(bot, chat, draft)
+  const members = chat && !bot ? membersOf(chat, live.bots) : []
+  const speaking = members.find((member) => member.id === chat?.speaking)
+  const line = secondLine(row, speaking, draft)
+  const working = bot ? bot.working : !!speaking
   // The open chat in a visible tab is being read, so it doesn't show as unread.
   const needsYou = !!chat?.waitingFor
   const unread = !!chat?.unread && !(active && visible)
   const status = needsYou ? 'Needs attention' : unread ? 'Unread activity' : undefined
 
-  if (renaming) return <RenameRow bot={bot} onDone={onRenamed} />
+  const avatar = (working: boolean) =>
+    bot ? <BotAvatar shape={bot.avatarShape} color={bot.avatarColor} working={working} /> : <GroupAvatar members={members} working={working} />
+
+  if (renaming) return <RenameRow row={row} avatar={avatar(working)} onDone={onRenamed} />
 
   return (
     <Link
-      to="/bots/$botId"
-      params={{ botId: bot.id }}
+      {...(bot ? { to: '/bots/$botId', params: { botId: bot.id } } : { to: '/groups/$chatId', params: { chatId: row.chatId } })}
       draggable={!!onDragStart}
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = 'move'
         // Its own type, so dropping the row on the composer types nothing.
-        event.dataTransfer.setData('application/x-openbot-chat', bot.chatId)
+        event.dataTransfer.setData('application/x-openbot-chat', row.chatId)
         onDragStart?.()
       }}
       onDragEnd={onDragEnd}
@@ -339,7 +436,7 @@ function ChatRow({
       activeProps={{ className: 'bg-secondary', 'aria-current': 'page' }}
     >
       {/* Grok's working state: running and not waiting for the owner. */}
-      <BotAvatar shape={bot.avatarShape} color={bot.avatarColor} working={bot.working && !needsYou} />
+      {avatar(working && !needsYou)}
       <span className="flex min-w-0 flex-col">
         <span className="flex min-w-0 items-center gap-1">
           <span
@@ -349,7 +446,7 @@ function ChatRow({
               onStartRename()
             }}
           >
-            {bot.name}
+            {rowName(row)}
           </span>
           {pinned && <PinIcon />}
         </span>
@@ -384,10 +481,12 @@ function PinIcon() {
   )
 }
 
-/** Renames a bot in place: Enter or leaving the field saves, Esc cancels. */
-function RenameRow({ bot, onDone }: { bot: BotInfo; onDone: () => void }) {
+/** Renames a bot or a group chat in place: Enter or leaving the field saves, Esc cancels. */
+function RenameRow({ row, avatar, onDone }: { row: Row; avatar: ReactNode; onDone: () => void }) {
   const live = useLive()
-  const [name, setName] = useState(bot.name)
+  const { bot, chat } = row
+  const current = bot?.name ?? chat?.title ?? ''
+  const [name, setName] = useState(current)
   const [error, setError] = useState<string>()
   const [saving, setSaving] = useState(false)
   const settled = useRef(false)
@@ -395,14 +494,16 @@ function RenameRow({ bot, onDone }: { bot: BotInfo; onDone: () => void }) {
   async function save() {
     const trimmed = name.trim()
     if (settled.current || saving) return
-    if (!trimmed || trimmed === bot.name) {
+    // A bot needs a name; a group without one is named after its members.
+    if ((bot && !trimmed) || trimmed === current) {
       settled.current = true
       return onDone()
     }
     setSaving(true)
     setError(undefined)
     try {
-      live.updateBot(await api().bots.update({ botId: bot.id, name: trimmed }))
+      if (bot) live.updateBot(await api().bots.update({ botId: bot.id, name: trimmed }))
+      else live.setChat(await api().groups.update({ chatId: row.chatId, title: trimmed || null }))
       settled.current = true
       onDone()
     } catch (caught) {
@@ -413,13 +514,14 @@ function RenameRow({ bot, onDone }: { bot: BotInfo; onDone: () => void }) {
 
   return (
     <div className="grid min-h-[58px] grid-cols-[34px_1fr] items-center gap-[9px] rounded-[10px] bg-secondary p-2">
-      <BotAvatar shape={bot.avatarShape} color={bot.avatarColor} working={bot.working} />
+      {avatar}
       <span className="flex min-w-0 flex-col gap-0.5">
         <input
-          aria-label={`Rename ${bot.name}`}
+          aria-label={`Rename ${rowName(row)}`}
           autoFocus
           value={name}
-          maxLength={80}
+          placeholder={bot ? undefined : (chat?.name ?? '')}
+          maxLength={bot ? 80 : 120}
           disabled={saving}
           aria-invalid={!!error}
           onFocus={(event) => event.currentTarget.select()}
@@ -447,9 +549,9 @@ function RenameRow({ bot, onDone }: { bot: BotInfo; onDone: () => void }) {
   )
 }
 
-/** A row's context menu, after Grok's: Pin / Unpin, reorder pinned chats, Mark as read, Rename, Delete. */
+/** A row's context menu, after Grok's: Pin / Unpin, reorder pinned chats, Mark as read, Rename, Delete (bots only). */
 function RowMenu({
-  row: { bot, chat, pinned },
+  row,
   x,
   y,
   pinnedIds,
@@ -466,30 +568,31 @@ function RowMenu({
   onClose: () => void
   onPin: (chatIds: string[]) => void
   onMarkRead: (chatId: string) => void
-  onRename: (bot: BotInfo) => void
+  onRename: (row: Row) => void
   onDelete: (bot: BotInfo) => void
 }) {
+  const { bot, chat, pinned, chatId } = row
   const ref = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState({ left: x, top: y })
   const restoreFocus = useRef<Element | null>(null)
-  const place = pinnedIds.indexOf(bot.chatId)
+  const place = pinnedIds.indexOf(chatId)
 
   const move = (offset: number) => {
     const order = [...pinnedIds]
     order.splice(place, 1)
-    order.splice(place + offset, 0, bot.chatId)
+    order.splice(place + offset, 0, chatId)
     onPin(order)
   }
 
   const items: { label: string; danger?: boolean; run: () => void }[] = [
     pinned
-      ? { label: 'Unpin', run: () => onPin(pinnedIds.filter((id) => id !== bot.chatId)) }
-      : { label: 'Pin', run: () => onPin([...pinnedIds, bot.chatId]) },
+      ? { label: 'Unpin', run: () => onPin(pinnedIds.filter((id) => id !== chatId)) }
+      : { label: 'Pin', run: () => onPin([...pinnedIds, chatId]) },
     ...(pinned && place > 0 ? [{ label: 'Move up', run: () => move(-1) }] : []),
     ...(pinned && place < pinnedIds.length - 1 ? [{ label: 'Move down', run: () => move(1) }] : []),
-    ...(chat?.unread ? [{ label: 'Mark as Read', run: () => onMarkRead(bot.chatId) }] : []),
-    { label: 'Rename', run: () => onRename(bot) },
-    { label: 'Delete', danger: true, run: () => onDelete(bot) },
+    ...(chat?.unread ? [{ label: 'Mark as Read', run: () => onMarkRead(chatId) }] : []),
+    { label: 'Rename', run: () => onRename(row) },
+    ...(bot ? [{ label: 'Delete', danger: true, run: () => onDelete(bot) }] : []),
   ]
 
   // Kept inside the window, and focused so the keyboard works at once.
@@ -525,7 +628,7 @@ function RowMenu({
     <div
       ref={ref}
       role="menu"
-      aria-label={`Actions for ${bot.name}`}
+      aria-label={`Actions for ${rowName(row)}`}
       style={position}
       onKeyDown={(event) => {
         const buttons = [...(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])]

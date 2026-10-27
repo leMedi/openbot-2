@@ -1,5 +1,6 @@
-import { type Chat, type Db, type Message, type NewChat, type NewMessage, chats, messages } from '@openbot/db'
+import { type Chat, type Db, type Message, type NewChat, type NewMessage, bots, chats, messages } from '@openbot/db'
 import { asc, eq, inArray, sql } from 'drizzle-orm'
+import { groupName } from './groups.ts'
 
 /** The longest text one bot can send another (Grok's limit). */
 export const maxBotMessageLength = 8_000
@@ -43,6 +44,8 @@ export class ChatNotFoundError extends Error {}
 
 /** A chat as the sidebar shows it: whether a bot posted since the owner looked, what waits for them, the newest message. */
 export type ChatSummary = Chat & {
+  /** A group chat's name: its title, or its members' names; null for a DM. */
+  name: string | null
   unread: boolean
   /** The prompt of the newest open question card, or the instruction of a take-over card still waiting; else null. */
   waitingFor: string | null
@@ -73,7 +76,14 @@ export async function listChatSummaries(db: Db, chatIds?: readonly string[]): Pr
     .leftJoin(messages, eq(messages.id, newestMessageId))
     .where(chatIds ? inArray(chats.id, [...chatIds]) : undefined)
     .orderBy(asc(chats.id))
-  return rows.map(({ chat, unread, waitingFor, lastMessage }) => ({ ...chat, unread: Boolean(unread), waitingFor, lastMessage }))
+  const names = new Map((await db.select({ id: bots.id, name: bots.name }).from(bots)).map((bot) => [bot.id, bot.name]))
+  return rows.map(({ chat, unread, waitingFor, lastMessage }) => ({
+    ...chat,
+    name: chat.kind === 'group' ? groupName(chat.title, chat.members.flatMap((id) => names.get(id) ?? [])) : null,
+    unread: Boolean(unread),
+    waitingFor,
+    lastMessage,
+  }))
 }
 
 /** One chat with its sidebar state, or undefined when there is no such chat. */

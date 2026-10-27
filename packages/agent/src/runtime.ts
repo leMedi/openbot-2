@@ -40,8 +40,14 @@ import {
   type BotWithChat,
   findBotByHistory,
   findBotByName,
+  findGroupByName,
+  getGroup,
+  othersIn,
   findWaitingTakeOver,
   getBot,
+  type Group,
+  groupRoundRules,
+  listGroups,
   type Lane,
   listBots,
   maxAttachments,
@@ -122,8 +128,16 @@ export type BotRuntimeOptions = {
   desktop: Desktop & { close?(): Promise<void> }
   /** Tools beyond the built-in ones, e.g. a test's. */
   tools?: BotTool[]
-  /** Posts a bot's message, with copies of the files it attached, to its DM; `idempotencyKey` makes a replayed tool call post once. */
-  sendMessage(bot: BotWithChat, message: { text: string; attachments: AttachmentFile[] }, idempotencyKey: string): Promise<void>
+  /**
+   * Posts a bot's message, with copies of the files it attached, to chat `chatId`: its DM, or the group chat whose turn
+   * it is taking. `idempotencyKey` makes a replayed tool call post once.
+   */
+  sendMessage(bot: BotWithChat, chatId: string, message: { text: string; attachments: AttachmentFile[] }, idempotencyKey: string): Promise<void>
+  /**
+   * Posts a bot's message to a group chat it belongs to, outside its turns, as `sendMessage` posts; the members answer
+   * it in rounds, as they answer the owner.
+   */
+  messageGroup(sender: BotWithChat, group: Group, message: { text: string; attachments: AttachmentFile[] }, idempotencyKey: string): Promise<void>
   /**
    * Posts one bot's message to another, as `sendMessage` posts: outgoing in the sender's DM and incoming in the
    * recipient's, each with copies of the files. Returns the recipient's copy, which wakes it.
@@ -202,6 +216,27 @@ function teamPrompt(others: BotWithChat[]): string {
   ].join('\n')
 }
 
+/**
+ * The group chats the bot is in, which it can post to with message_bot, and how to behave in them. Empty when it is in
+ * none.
+ */
+function groupsPrompt(bot: BotWithChat, groups: Group[]): string {
+  if (!groups.length) return ''
+  const { maxMessagesPerMemberTurn } = groupRoundRules
+  return [
+    'Group chats you are in, with the owner and other bots:',
+    ...groups.map((group) => `- "${group.name}", with ${othersIn(group, bot.id)}`),
+    '',
+    'In a group chat:',
+    `- Members take turns in rounds after each message. On your turn, reply with sendMessage (at most ${maxMessagesPerMemberTurn} messages), or pass by sending nothing. Pass unless you have something to add.`,
+    '- Everyone in the group reads what you send there. Never reveal what the owner told you privately, or anything else private from your own chat with them.',
+    "- To start something in a group outside your turn, post to it with message_bot, to: the group's name. Only members can post to a group.",
+  ].join('\n')
+}
+
+/** A message that only says "(pass)": in a group turn, it passes, posting nothing. */
+const isPass = (text: string) => /^\(?pass\)?\.?$/i.test(text.trim())
+
 /** What a bot reads when another bot's message wakes it. */
 function describeBotMessage(sender: BotWithChat, text: string, priority: boolean): string {
   const from = `[Message from ${sender.name}, your teammate${priority ? ', marked priority' : ''}. Answer with message_bot only if it needs an answer; otherwise stay silent.]`
@@ -250,8 +285,17 @@ const reachedOwner = (entry: EntryRecord) =>
         (message.toolName === 'use_computer' && Boolean((message.details as UseComputerDetails | undefined)?.takeOver))),
   )
 
-/** An input waiting for the bot's current run; `redelivered` once a priority input interrupted it. */
-type Queued = BotInput & { redelivered?: boolean }
+/**
+ * An input waiting for the bot's current run; `redelivered` once a priority input interrupted it. `settle` is called
+ * once its run has ended, or it was dropped (see `takeTurn`).
+ */
+type Queued = BotInput & { redelivered?: boolean; settle?: () => void }
+
+/** What an input's entry in the history records: its lane, and the group chat whose turn it is. */
+type InputRecord = { lane: Lane; groupChatId?: string; id?: string }
+
+/** Whether `input` can join a run the owner's DM input started, or `turn` take the owner's DM input: never in a group turn. */
+const steerable = (input: BotInput, turn: Turn) => input.lane === 'owner' && !input.groupChatId && !turn.input.groupChatId
 
 /** The run a bot's driver started, for `input`; an owner's steer makes it theirs, and nothing interrupts it then. */
 type Turn = {
@@ -303,6 +347,8 @@ export class BotRuntime implements AgentRuntime {
   #closed = false
   /** Why each bot's latest run failed. */
   readonly #errors = new Map<string, string>()
+  /** Messages each bot has sent in its current group turn, by the turn's input id. */
+  readonly #groupMessages = new Map<string, { inputId: string; sent: number }>()
 
   private constructor(harness: Harness, options: BotRuntimeOptions, images: ImageProcessor) {
     this.#harness = harness
@@ -369,7 +415,7 @@ export class BotRuntime implements AgentRuntime {
         name: 'sendMessage',
         description:
           'Send the owner one chat message, in Markdown, optionally with files from your computer attached. This is the ' +
-          'only way the owner sees anything from you.',
+          'only way the owner sees anything from you. On your turn in a group chat, it goes to the group.',
         parameters: Type.Object({
           text: Type.String({ description: 'The message, in Markdown; may be empty when you attach files' }),
           attachments: attachmentsParameter,
@@ -380,8 +426,26 @@ export class BotRuntime implements AgentRuntime {
           const bot = await botOf(api.conversationId)
           const paths = args.attachments ?? []
           if (!args.text.trim() && !paths.length) throw new Error('Write a message or attach a file')
-          const attachments = await readAttachments(bot, paths)
-          await options.sendMessage(bot, { text: args.text, attachments }, `${api.conversationId}:${api.callId}`)
+          const turn = await runtime!.inputOf(api.conversationId)
+          const groupChatId = turn?.groupChatId
+          if (groupChatId && isPass(args.text) && !paths.length) return { output: [{ type: 'text', text: 'Passed: nothing was posted.' }] }
+          // The owner may have removed the bot while its turn waited or ran.
+          if (groupChatId && !(await getGroup(options.db, groupChatId))?.members.includes(bot.id)) {
+            throw new Error('You are no longer in this group chat; nothing was posted.')
+          }
+          // Counted before posting, so calls of one round can't all pass the check at once.
+          const release = groupChatId ? runtime!.countGroupMessage(bot.id, turn.id ?? '') : undefined
+          if (release === null) {
+            const { maxMessagesPerMemberTurn } = groupRoundRules
+            throw new Error(`You can send at most ${maxMessagesPerMemberTurn} messages in one turn in a group chat; this one wasn't sent.`)
+          }
+          try {
+            const attachments = await readAttachments(bot, paths)
+            await options.sendMessage(bot, groupChatId ?? bot.chatId, { text: args.text, attachments }, `${api.conversationId}:${api.callId}`)
+          } catch (error) {
+            release?.()
+            throw error
+          }
           // A run ends only when every call of its last round asks it to, so a message sent beside a question must too.
           const round = (await api.snapshot(LiveDoc, api.conversationId, context))?.tools ?? []
           const asks = round.some((slot) => slot.name === 'askQuestion')
@@ -395,10 +459,10 @@ export class BotRuntime implements AgentRuntime {
       tool: defineTool({
         name: 'message_bot',
         description:
-          "Send one of your teammates, the owner's other bots, a message. It returns at once: never wait for an answer; " +
-          'a reply, if any, wakes you later. The owner sees it in both your chats.',
+          "Send one of your teammates, the owner's other bots, a message, or post to a group chat you are in. It returns at " +
+          'once: never wait for an answer; a reply, if any, wakes you later. The owner sees it in both your chats, or in the group.',
         parameters: Type.Object({
-          to: Type.String({ description: "The teammate's name, e.g. Rex" }),
+          to: Type.String({ description: "The teammate's name, e.g. Rex, or a group chat's name, e.g. Launch team" }),
           text: Type.String({ description: `The message, in Markdown, at most ${maxBotMessageLength} characters; may be empty when you attach files` }),
           attachments: attachmentsParameter,
           priority: Type.Optional(
@@ -412,12 +476,18 @@ export class BotRuntime implements AgentRuntime {
         execute: async (args, api) => {
           const sender = await botOf(api.conversationId)
           const recipient = await findBotByName(options.db, args.to)
-          if (!recipient) {
+          const group = recipient ? undefined : await findGroupByName(options.db, args.to)
+          if (!recipient && !group) {
             const others = (await listBots(options.db)).filter((bot) => bot.id !== sender.id).map((bot) => bot.name)
             const team = others.length ? `Your teammates are ${others.join(', ')}.` : 'You have no teammates.'
-            throw new Error(`There is no bot named ${args.to}. ${team}`)
+            const groups = (await listGroups(options.db, sender.id)).map((entry) => `"${entry.name}"`)
+            throw new Error(`There is no bot or group chat named ${args.to}. ${team}${groups.length ? ` Your group chats are ${groups.join(', ')}.` : ''}`)
           }
-          if (recipient.id === sender.id) throw new Error("You can't message yourself")
+          if (recipient?.id === sender.id) throw new Error("You can't message yourself")
+          if (group && !group.members.includes(sender.id)) throw new Error(`You aren't in the group chat "${group.name}"; only its members can post to it.`)
+          if (group && (await runtime!.inputOf(api.conversationId))?.groupChatId === group.id) {
+            throw new Error(`It is your turn in "${group.name}": reply there with sendMessage.`)
+          }
           const paths = args.attachments ?? []
           if (!args.text.trim() && !paths.length) throw new Error('Write a message or attach a file')
           if (args.text.length > maxBotMessageLength) {
@@ -427,6 +497,11 @@ export class BotRuntime implements AgentRuntime {
             )
           }
           const attachments = await readAttachments(sender, paths)
+          // Not a bot, so a group chat.
+          if (!recipient) {
+            await options.messageGroup(sender, group!, { text: args.text, attachments }, `${api.conversationId}:${api.callId}`)
+            return { output: [{ type: 'text', text: `Posted in "${group!.name}". Don't wait for answers: the members answer in turn.` }] }
+          }
           const incoming = await options.messageBot(sender, recipient, { text: args.text, attachments }, `${api.conversationId}:${api.callId}`)
           const priority = args.priority ?? false
           try {
@@ -473,6 +548,9 @@ export class BotRuntime implements AgentRuntime {
         replay: 'safe',
         execute: async (args, api) => {
           const bot = await botOf(api.conversationId)
+          if ((await runtime!.inputOf(api.conversationId))?.groupChatId) {
+            throw new Error("Cards can't be asked in a group chat. Ask in a message with sendMessage instead.")
+          }
           const card: QuestionCard = {
             type: 'question',
             prompt: args.prompt,
@@ -563,28 +641,66 @@ export class BotRuntime implements AgentRuntime {
    * instead of queueing, and the run is theirs from then on.
    */
   async wake(botId: string, input: BotInput): Promise<void> {
+    await this.#wake(botId, input)
+  }
+
+  async takeTurn(botId: string, input: BotInput): Promise<void> {
+    let settle!: () => void
+    const ended = new Promise<void>((resolve) => (settle = resolve))
+    if (!(await this.#wake(botId, { ...input, settle }))) return
+    await ended
+  }
+
+  /** Queues `input`, or steers the run going with it; false when it was there already, or steered. */
+  async #wake(botId: string, input: Queued): Promise<boolean> {
     const bot = await getBot(this.#options.db, botId)
     if (!bot) throw new Error(`Unknown bot ${botId}`)
     await this.#model(bot)
     this.#errors.delete(botId)
     const turn = this.#turns.get(botId)
     const queue = this.#queues.get(botId) ?? []
-    if (input.id && (turn?.input.id === input.id || queue.some((queued) => queued.id === input.id))) return
+    if (input.id && (turn?.input.id === input.id || queue.some((queued) => queued.id === input.id))) return false
     this.#setWorking(botId)
-    if (input.lane === 'owner' && turn) {
+    if (turn && steerable(input, turn)) {
       turn.lane = 'owner'
       turn.steers++
       await this.#submit(bot, input, 'steer')
-      return
+      return false
     }
     enqueue(queue, input)
     this.#queues.set(botId, queue)
     if (input.priority && turn && turn.lane !== 'owner') this.#interrupt(botId, turn)
     this.#drive(botId)
+    return true
+  }
+
+  /** What the input of the bot's current run, the newest in its history, recorded: its lane and group chat. */
+  async inputOf(conversationId: ConversationId): Promise<InputRecord | undefined> {
+    const history = await this.#harness.conversation(conversationId, context)
+    if (!history) return undefined
+    let cursor
+    do {
+      const page = await history.entries({}, 100, cursor, context)
+      for (const entry of page.items) if (entry.kind === inputKind) return entry.data as InputRecord
+      cursor = page.next
+    } while (cursor)
+  }
+
+  /**
+   * Counts a message the bot is about to send in its group turn `inputId`: returns a function taking it back if it
+   * isn't sent, or null when the turn already sent `maxMessagesPerMemberTurn`.
+   */
+  countGroupMessage(botId: string, inputId: string): (() => void) | null {
+    const count = this.#groupMessages.get(botId)
+    const current = count?.inputId === inputId ? count : { inputId, sent: 0 }
+    if (current.sent >= groupRoundRules.maxMessagesPerMemberTurn) return null
+    current.sent++
+    this.#groupMessages.set(botId, current)
+    return () => current.sent--
   }
 
   async stop(botId: string): Promise<void> {
-    this.#queues.delete(botId)
+    this.#drop(botId)
     const turn = this.#turns.get(botId)
     const steers = turn?.steers
     // After any submission under way, so an input being submitted now is aborted too.
@@ -595,7 +711,7 @@ export class BotRuntime implements AgentRuntime {
   }
 
   async forget({ id, name, historyId }: { id: string; name: string; historyId: string | null }): Promise<void> {
-    this.#queues.delete(id)
+    this.#drop(id)
     if (historyId) await (await this.#harness.conversation(toConversationId(historyId), context))?.abort(context)
     try {
       await this.#options.computer.removeFolder({ id, name })
@@ -608,6 +724,14 @@ export class BotRuntime implements AgentRuntime {
     this.#submitting.delete(id)
     this.#working.delete(id)
     this.#errors.delete(id)
+    this.#groupMessages.delete(id)
+  }
+
+  /** Drops the work queued behind the bot's run; those waiting on it are told it ended. */
+  #drop(botId: string) {
+    const queue = this.#queues.get(botId) ?? []
+    this.#queues.delete(botId)
+    for (const input of queue) input.settle?.()
   }
 
   status(botId: string): BotStatus {
@@ -616,6 +740,7 @@ export class BotRuntime implements AgentRuntime {
 
   async close(): Promise<void> {
     this.#closed = true
+    for (const botId of [...this.#queues.keys()]) this.#drop(botId)
     await this.#harness.close(context)
     await this.#options.computer.close()
     await this.#options.desktop.close?.()
@@ -636,7 +761,9 @@ export class BotRuntime implements AgentRuntime {
         if (reachedOwner(entry)) return
         if (isReminder(entry)) reminders++
         if (entry.kind === inputKind) {
-          const owed = (entry.data as { lane?: string } | undefined)?.lane === 'owner'
+          // A group turn may pass: the guarantee covers the owner's own messages to the bot.
+          const data = entry.data as InputRecord | undefined
+          const owed = data?.lane === 'owner' && !data.groupChatId
           return owed && reminders < maxReplyReminders ? { continue: replyReminder } : undefined
         }
       }
@@ -707,7 +834,10 @@ export class BotRuntime implements AgentRuntime {
     return this.#serially(bot.id, async () => {
       const history = await this.#history(bot)
       const others = (await listBots(this.#options.db)).filter((other) => other.id !== bot.id)
-      const instructions = [botPrompt(bot), computerPrompt(this.#options.computer, bot, others), teamPrompt(others)].filter(Boolean).join('\n\n')
+      const groups = await listGroups(this.#options.db, bot.id)
+      const instructions = [botPrompt(bot), computerPrompt(this.#options.computer, bot, others), teamPrompt(others), groupsPrompt(bot, groups)]
+        .filter(Boolean)
+        .join('\n\n')
       await history.configure({ model: await this.#model(bot), instructions }, context)
       const submission = await history.submit(
         {
@@ -715,7 +845,10 @@ export class BotRuntime implements AgentRuntime {
           content: await this.#content(bot, input),
           requestId: input.id,
           whenBusy,
-          entry: { kind: inputKind, data: { lane: input.lane } },
+          entry: {
+            kind: inputKind,
+            data: { lane: input.lane, ...(input.groupChatId && { groupChatId: input.groupChatId }), ...(input.id && { id: input.id }) } satisfies InputRecord,
+          },
         },
         context,
       )
@@ -751,6 +884,7 @@ export class BotRuntime implements AgentRuntime {
           this.#options.onStatus(botId, this.status(botId))
         } finally {
           this.#turns.delete(botId)
+          input.settle?.()
         }
       }
       this.#drivers.delete(botId)
@@ -775,6 +909,8 @@ export class BotRuntime implements AgentRuntime {
       if (!input.redelivered) {
         const queue = this.#queues.get(botId) ?? []
         enqueue(queue, { ...input, text: `${interruptedNote}\n\n${input.text}`, id: input.id && `${input.id}:redelivered`, redelivered: true })
+        // Whoever waits on the work waits for it to be done again.
+        input.settle = undefined
         this.#queues.set(botId, queue)
       }
       await (await this.#existingHistory(botId))?.abort(context)

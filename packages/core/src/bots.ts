@@ -58,13 +58,13 @@ export async function updateBot(
 
 /**
  * Deletes a bot for good (ADR 0009): its row, and through cascades its DM with its messages and its audit entries. It
- * leaves group chats; messages it posted elsewhere keep a copy of its name. Returns the deleted bot, or undefined when
- * there is no such bot.
+ * leaves group chats; messages it posted elsewhere keep a copy of its name. Returns the deleted bot with the group
+ * chats it left, or undefined when there is no such bot.
  */
-export async function deleteBot(db: Db, id: string): Promise<BotWithChat | undefined> {
+export async function deleteBot(db: Db, id: string): Promise<(BotWithChat & { leftGroups: string[] }) | undefined> {
   const bot = await getBot(db, id)
   if (!bot) return undefined
-  await db.transaction(async (tx) => {
+  const leftGroups = await db.transaction(async (tx) => {
     const groups = await tx
       .select({ id: chats.id, members: chats.members })
       .from(chats)
@@ -76,8 +76,9 @@ export async function deleteBot(db: Db, id: string): Promise<BotWithChat | undef
         .where(eq(chats.id, group.id))
     }
     await tx.delete(bots).where(eq(bots.id, id))
+    return groups.map((group) => group.id)
   })
-  return bot
+  return { ...bot, leftGroups }
 }
 
 /** The bot with its screen's display, given one if it has none (bots made before screens). */

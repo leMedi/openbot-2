@@ -106,6 +106,14 @@ export const chats = sqliteTable(
       .$type<string[]>()
       .notNull()
       .default(sql`'[]'`),
+    /**
+     * Group chats only: for each member (bot id), the newest message its latest turn showed it, so its next turn shows
+     * only what came after. A member that has had no turn has no entry.
+     */
+    turnCursors: text('turn_cursors', { mode: 'json' })
+      .$type<Record<string, string>>()
+      .notNull()
+      .default(sql`'{}'`),
     /** Sidebar order of pinned chats; null when not pinned. */
     pinnedPosition: integer('pinned_position'),
     /** The newest message the owner has seen; a bot's message after it makes the chat unread. Null: none seen yet. */
