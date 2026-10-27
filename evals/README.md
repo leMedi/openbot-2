@@ -18,7 +18,8 @@ pnpm eval --model anthropic/claude-sonnet-4-5 --record-baseline
   items. **`--runs`** (default 3), **`--step-timeout`** seconds per owner message (default 300).
 - **Keys:** each model's provider is connected with its usual API key variable from your environment, e.g.
   `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `XAI_API_KEY`. Subscriptions
-  (OAuth sign-ins) aren't supported here.
+  (OAuth sign-ins) aren't supported here. `pnpm eval` also loads `evals/.env` (git-ignored) if it exists, e.g.
+  `OPENCODE_API_KEY=…` for `--model opencode-go/mimo-v2.6-flash`.
 - **Faux:** on the faux model every bot plays its scenario's `faux` script and a stand-in judge passes every rubric
   item. That checks the scenario fits the agent, not a model; `pnpm test` runs every scenario this way.
 - **Baselines:** `--record-baseline` saves the pass rates to `baselines/<model>.json`; later runs on that model show
