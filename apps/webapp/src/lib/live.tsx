@@ -17,11 +17,13 @@ function browserStorage(): Storage | undefined {
 /** The drafts kept in `storage`, by chat id; none if storage is blocked. */
 function loadDrafts(storage: Storage | undefined): Map<string, string> {
   const drafts = new Map<string, string>()
+  if (!storage) return drafts
   try {
-    for (let index = 0; storage && index < storage.length; index++) {
+    for (let index = 0; index < storage.length; index++) {
       const key = storage.key(index)
-      const text = key?.startsWith(draftKeyPrefix) ? storage.getItem(key) : null
-      if (text) drafts.set(key!.slice(draftKeyPrefix.length), text)
+      if (!key?.startsWith(draftKeyPrefix)) continue
+      const text = storage.getItem(key)
+      if (text) drafts.set(key.slice(draftKeyPrefix.length), text)
     }
   } catch {
     // Storage blocked: drafts last until reload.
@@ -160,10 +162,6 @@ export class LiveStore {
       else drafts.delete(chatId)
       this.drafts = drafts
     })
-    this.#storeDraft(chatId, text)
-  }
-
-  #storeDraft(chatId: string, text: string) {
     try {
       if (text) this.#storage?.setItem(draftKeyPrefix + chatId, text)
       else this.#storage?.removeItem(draftKeyPrefix + chatId)
@@ -198,11 +196,8 @@ export class LiveStore {
         )
       }
       this.messages = messages
-      const drafts = new Map(this.drafts)
-      drafts.delete(chatId)
-      this.drafts = drafts
     })
-    this.#storeDraft(chatId, '')
+    this.setDraft(chatId, '')
   }
 
   /** Forgets a deleted group chat, its messages and any draft. */
@@ -214,11 +209,8 @@ export class LiveStore {
       const messages = new Map(this.messages)
       messages.delete(chatId)
       this.messages = messages
-      const drafts = new Map(this.drafts)
-      drafts.delete(chatId)
-      this.drafts = drafts
     })
-    this.#storeDraft(chatId, '')
+    this.setDraft(chatId, '')
   }
 
   async #apply({ epoch, seq, event }: StampedEvent) {
