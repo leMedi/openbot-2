@@ -1,4 +1,4 @@
-import { type BotInfo, type MessageInfo, maxAttachmentBytes, maxAttachments } from '@openbot/api-contract'
+import { type BotInfo, type BotMessageInfo, type MessageInfo, maxAttachmentBytes, maxAttachments } from '@openbot/api-contract'
 import { cn } from '@openbot/ui/lib/utils'
 import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -434,6 +434,7 @@ function MessageList({
                 row.enter && 'motion-safe:animate-message-in motion-reduce:animate-fade-in',
               )}
             >
+              {row.message?.botMessage && <BotMessageLabel botMessage={row.message.botMessage} />}
               {row.message && row.message.attachments.length > 0 && (
                 <Attachments messageId={row.message.id} attachments={row.message.attachments} mine={row.mine} />
               )}
@@ -489,6 +490,15 @@ function MessageList({
         </div>
       )}
     </div>
+  )
+}
+
+/** Above a message between bots: Grok's "→ to Rex" on the sender's side, "← from Ana" on the recipient's. */
+function BotMessageLabel({ botMessage }: { botMessage: BotMessageInfo }) {
+  return (
+    <span className="px-3 text-xs text-muted-foreground">
+      {botMessage.direction === 'to' ? `→ to ${botMessage.name}` : `← from ${botMessage.name}`}
+    </span>
   )
 }
 

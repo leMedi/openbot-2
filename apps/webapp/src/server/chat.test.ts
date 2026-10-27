@@ -138,7 +138,8 @@ describe('chatting in a DM', () => {
 
     const tools = server.providers.requests[0]!.tools
     expect(tools).toContain('sendMessage')
-    expect(tools.filter((tool) => /delete|remove|bot/i.test(tool))).toEqual([])
+    // message_bot only messages a teammate.
+    expect(tools.filter((tool) => tool !== 'message_bot' && /delete|remove|bot/i.test(tool))).toEqual([])
   })
 
   it("refuses the owner's message, without posting it, when the bot's model is unavailable", async () => {

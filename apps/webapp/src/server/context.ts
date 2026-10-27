@@ -120,6 +120,42 @@ export async function createServerContext({
       bus.publish({ type: 'message.created', message: toMessageInfo(message) })
       await publishChat({ db, bus }, bot.chatId)
     },
+    async messageBot(sender, recipient, { text, attachments: files }, idempotencyKey) {
+      // One entry in each DM, each with its own copies of the files: either DM can go with its bot.
+      const sides = [
+        { bot: sender, other: recipient, direction: 'to' as const },
+        { bot: recipient, other: sender, direction: 'from' as const },
+      ]
+      const posted = []
+      for (const { bot, other, direction } of sides) {
+        const saved = await attachments.save(bot.chatId, files)
+        const result = await postMessage(db, {
+          chatId: bot.chatId,
+          author: 'bot',
+          authorBotId: sender.id,
+          authorName: sender.name,
+          text,
+          attachments: saved,
+          direction,
+          peerBotId: other.id,
+          peerName: other.name,
+          idempotencyKey: `${idempotencyKey}:${direction}`,
+        }).catch(async (error) => {
+          await attachments.discard(bot.chatId, saved)
+          throw error
+        })
+        // A replayed call: its message, and the copies it kept, were posted the first time.
+        if (!result.created) await attachments.discard(bot.chatId, saved)
+        posted.push(result)
+      }
+      // Both are told once either is new: a call replayed after the sender's copy alone was posted tells it now.
+      if (!posted.some(({ created }) => created)) return posted[1]!.message
+      for (const { message } of posted) {
+        bus.publish({ type: 'message.created', message: toMessageInfo(message) })
+        await publishChat({ db, bus }, message.chatId)
+      }
+      return posted[1]!.message
+    },
     async askQuestion(bot, card, idempotencyKey) {
       const { message, created } = await postMessage(db, {
         chatId: bot.chatId,

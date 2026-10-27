@@ -107,6 +107,15 @@ export async function getBot(db: Db, id: string): Promise<BotWithChat | undefine
   return row && { ...row.bot, chatId: row.chatId }
 }
 
+/** The bot named `name`, ignoring case and a leading `@`, as bots are mentioned. */
+export async function findBotByName(db: Db, name: string): Promise<BotWithChat | undefined> {
+  const [row] = await db
+    .select({ id: bots.id })
+    .from(bots)
+    .where(sql`lower(${bots.name}) = lower(${name.trim().replace(/^@/, '')})`)
+  return row && getBot(db, row.id)
+}
+
 /** The bot whose one history is `historyId` (ADR 0001). */
 export async function findBotByHistory(db: Db, historyId: string): Promise<BotWithChat | undefined> {
   const [row] = await db.select({ id: bots.id }).from(bots).where(eq(bots.historyId, historyId))

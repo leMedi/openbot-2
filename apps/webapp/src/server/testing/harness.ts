@@ -89,6 +89,8 @@ async function open(dir: string, secretKey: string, { shell, pages, realComputer
     db,
     client,
     model: createFakeModel(),
+    /** The agent runtime, e.g. to wake a bot in the background lane as a routine would. */
+    runtime: context.runtime,
     /** The scripted providers behind the API, and their sign-ins. */
     providers,
     /** pi's model collection the runtime uses, with auth resolved through the credential store. */

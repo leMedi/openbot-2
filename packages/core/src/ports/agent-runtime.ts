@@ -12,13 +12,21 @@ export type BotInput = {
   attachments?: readonly Attachment[]
   /** Makes waking again with the same id a no-op, e.g. the id of the message that woke the bot. */
   id?: string
+  /**
+   * Bot lane only: goes ahead of the bot's other queued work and interrupts a bot- or background-lane run, which is
+   * redelivered once. An owner run is never interrupted.
+   */
+  priority?: boolean
 }
 
 /** Runs bots' models and tools. Implemented on pi-durable by `@openbot/agent` (ADR 0005). */
 export interface AgentRuntime {
-  /** Queues `input` for the bot; returns once queued, not when the run ends. */
+  /**
+   * Queues `input` for the bot; returns once queued, not when the run ends. An owner input steers a run that is going;
+   * anything else waits for it, then runs in lane order (owner, bot, background), oldest first within a lane.
+   */
   wake(botId: string, input: BotInput): Promise<void>
-  /** Aborts the bot's current run. */
+  /** Aborts the bot's current run and drops the work queued behind it. */
   stop(botId: string): Promise<void>
   /** Aborts a deleted bot's run and drops everything the runtime holds for it, its folder on the computer included. */
   forget(bot: { id: string; name: string; historyId: string | null }): Promise<void>

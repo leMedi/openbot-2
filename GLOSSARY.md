@@ -48,7 +48,15 @@ _Avoid_: Conversation, transcript, context
 A bot choosing to say nothing on its turn in a group chat.
 
 **Lane**:
-The priority class of a bot's pending work: owner, bot, or background (routines and revivals), in that order.
+The priority class of a bot's pending work: owner, bot, or background (routines and revivals), in that order. A bot works on one thing at a time; the owner's messages join its current work, everything else waits its turn.
+
+**Teammate**:
+Another of the owner's bots, as a bot sees it: one it can message.
+_Avoid_: Agent, colleague
+
+**Priority message**:
+A message from one bot to another that goes ahead of the recipient's other waiting work and interrupts its bot or background work, which it picks up again once. It never interrupts work for the owner.
+_Avoid_: Urgent message
 
 ### Approvals and access
 

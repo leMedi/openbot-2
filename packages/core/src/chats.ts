@@ -1,6 +1,9 @@
 import { type Chat, type Db, type Message, type NewChat, type NewMessage, chats, messages } from '@openbot/db'
 import { asc, eq, inArray, sql } from 'drizzle-orm'
 
+/** The longest text one bot can send another (Grok's limit). */
+export const maxBotMessageLength = 8_000
+
 export async function getChat(db: Db, id: string): Promise<Chat | undefined> {
   const [chat] = await db.select().from(chats).where(eq(chats.id, id))
   return chat

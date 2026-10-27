@@ -124,6 +124,19 @@ export type AttachmentInfo = z.infer<typeof attachment>
 /** Where the owner downloads an attachment from, under the API's URL. */
 export const attachmentPath = (messageId: string, attachmentId: string) => `/messages/${messageId}/attachments/${attachmentId}`
 
+/**
+ * A message between two bots, as it shows in one of their DMs: sent `to` the other bot (in the sender's DM) or received
+ * `from` it (in the recipient's).
+ */
+export const botMessage = z.object({
+  direction: z.enum(['to', 'from']),
+  /** The other bot; null once it is deleted. */
+  botId: z.string().nullable(),
+  /** The other bot's name when sent, with " (deleted)" once it is deleted. */
+  name: z.string(),
+})
+export type BotMessageInfo = z.infer<typeof botMessage>
+
 /** Something the owner or a bot posted in a chat. A bot's thinking and tool use are never messages. */
 export const message = z.object({
   id: z.string(),
@@ -139,6 +152,8 @@ export const message = z.object({
   attachments: z.array(attachment),
   /** Set when the message is a card. */
   card: card.nullable(),
+  /** Set when one bot sent the message to another; it then shows in both bots' DMs. */
+  botMessage: botMessage.nullable(),
   /** Milliseconds since the epoch. */
   createdAt: z.number(),
 })
@@ -163,7 +178,7 @@ export const chat = z.object({
    */
   waitingFor: z.string().nullable(),
   /** The newest message, for the sidebar's preview line; null when the chat is empty. */
-  lastMessage: message.pick({ author: true, authorName: true, text: true, attachments: true, createdAt: true }).nullable(),
+  lastMessage: message.pick({ author: true, authorName: true, text: true, attachments: true, botMessage: true, createdAt: true }).nullable(),
 })
 export type ChatInfo = z.infer<typeof chat>
 

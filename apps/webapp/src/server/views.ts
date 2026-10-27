@@ -17,6 +17,11 @@ export function toMessageInfo(message: Message): MessageInfo {
     text: message.text,
     attachments: message.attachments,
     card: toCardInfo(message),
+    botMessage: message.direction && {
+      direction: message.direction,
+      botId: message.peerBotId,
+      name: message.peerBotId ? message.peerName! : deletedAuthorName(message.peerName!),
+    },
     createdAt: message.createdAt.getTime(),
   }
 }
@@ -44,6 +49,7 @@ export function toChatInfo(chat: ChatSummary): ChatInfo {
       authorName: last.authorName,
       text: last.text,
       attachments: last.attachments,
+      botMessage: last.botMessage,
       createdAt: last.createdAt,
     },
   }
