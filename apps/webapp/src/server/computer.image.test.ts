@@ -71,7 +71,29 @@ describe.skipIf(!inRuntimeImage)('the real computer', () => {
 /** Calls the DevTools protocol of the browser listening on `port`, once. */
 async function devtools(port: number, method: string, params: object = {}): Promise<Record<string, unknown>> {
   const { webSocketDebuggerUrl } = (await (await fetch(`http://127.0.0.1:${port}/json/version`)).json()) as { webSocketDebuggerUrl: string }
-  const ws = new WebSocket(webSocketDebuggerUrl)
+  return cdp(webSocketDebuggerUrl, method, params)
+}
+
+/** The text of `url` opened in a new tab of the browser listening on `port`, once it contains `until`. */
+async function pageText(port: number, url: string, until: string): Promise<string> {
+  const tab = (await (await fetch(`http://127.0.0.1:${port}/json/new?${url}`, { method: 'PUT' })).json()) as { id: string; webSocketDebuggerUrl: string }
+  try {
+    let text = ''
+    await expect
+      .poll(async () => {
+        const { result } = (await cdp(tab.webSocketDebuggerUrl, 'Runtime.evaluate', { expression: 'document.body.innerText' })) as { result: { value?: string } }
+        return (text = result.value ?? '')
+      }, { timeout: 15_000 })
+      .toContain(until)
+    return text
+  } finally {
+    await fetch(`http://127.0.0.1:${port}/json/close/${tab.id}`)
+  }
+}
+
+/** Calls the DevTools protocol at `endpoint` (a browser's or a tab's), once. */
+async function cdp(endpoint: string, method: string, params: object = {}): Promise<Record<string, unknown>> {
+  const ws = new WebSocket(endpoint)
   await new Promise((resolve, reject) => {
     ws.onopen = resolve
     ws.onerror = reject
@@ -203,6 +225,19 @@ describe.skipIf(!inRuntimeImage)('bots on the real computer', () => {
     const profile = join(server.home, 'bots', rex.id, 'chromium')
     expect(statSync(profile).isDirectory()).toBe(true)
     expect(existsSync(join(server.home, 'bots', ada.id, 'chromium'))).toBe(true)
+  })
+
+  it("run their browser in Chromium's sandbox", { timeout: 120_000 }, async () => {
+    const server = await start()
+    const rex = await server.client.bots.create(newBot('Rex'))
+    await expect.poll(async () => (await server.client.screens.status({ botId: rex.id })).state, { timeout: 60_000 }).toBe('running')
+    const display = (await connectScreens({ socketPath }).status(rex)).display!
+
+    // Chromium's own report: its pages run in their own user namespace, with seccomp-bpf on top.
+    const report = await pageText(9222 + display, 'chrome://sandbox', 'sandboxed')
+
+    expect(report).toContain('You are adequately sandboxed.')
+    expect(report).toMatch(/Layer 1 Sandbox\s+Namespace/)
   })
 
   it('stream their screen on a ticket', { timeout: 120_000 }, async () => {
