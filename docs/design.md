@@ -43,6 +43,7 @@ Not planned: bots creating bots, bot-written or user-written skills (all skills 
   - `openbot-desktopd`: owns every bot's Xvfb, Openbox, Google Chrome, x11vnc and cua-driver. Runs as user `openbot`. Talks to the server over a Unix socket. Displays survive server restarts.
   - pi-env daemons, spawned by the server as user `openbot`, run bots' shell and file tools.
 - Bots have **full passwordless sudo**: it is their computer.
+- **Container only.** Bots run only in the runtime image; other platforms aren't planned. A server started outside it (no `openbot` user, or no pi-env daemon for the machine) still serves the UI but refuses to run bots, with an error saying so, rather than running their commands as its own user (#47). Develop with `pnpm dev:up`.
 
 ### 2.2 Known risks (accepted for now)
 
@@ -151,7 +152,7 @@ As built (#39), in `RunScheduler` (`@openbot/agent`, `run-scheduler.ts`), which 
 
 ### 3.3 The bot's voice
 
-The model's plain text is private. The only way to reach you is `sendMessage` (several short bubbles, attachments, question widgets, cards). If a run that answers your message ends without a `sendMessage`, a reminder forces a reply (Grok's reply guarantee).
+The model's plain text is private. The only way to reach you is `sendMessage` (several short bubbles, attachments, question widgets, cards). If a run that answers your message ends without a `sendMessage`, a reminder forces a reply (Grok's reply guarantee). It holds across restarts as Grok's ack obligations do: your DM message, answer or hand-back marks the bot as owing you a reply (`bots.reply_owed_at`, in the same transaction), and its next message or card in the DM clears it. A bot still owing one when the server starts is woken, once any resumed run has ended, with a recovery note and your messages since its last reply; it gives up after 3 starts.
 
 As built (#40), question cards dismiss as Grok's do:
 
@@ -189,11 +190,12 @@ As built (#18):
 
 As built (#17):
 
-- `message_bot({ to, text, attachments?, priority? })`: `to` is a bot's name (ignoring case and a leading `@`), or a group chat's (§3.4). It refuses, posting nothing, a message to the bot itself, to a name no bot has (listing the teammates), with no text and no files, or over 8,000 characters. Attachments are files on the sender's computer, as with `sendMessage`. It is never reviewed (no surface).
-- It posts one entry in each DM (`messages.direction` `to`/`from`, `peer_bot_id`, `peer_name`; the author is always the sender), each with its own copies of the files, and wakes the recipient in the bot lane with the text behind a hidden cue (`[Message from Rex, your teammate…]`). It returns "Sent to Ana. Don't wait for an answer" at once; a reply is just another `message_bot`, which wakes the sender. Silence is allowed: the reply guarantee covers the owner lane only. A replayed call posts once (idempotency keys) and wakes once (the recipient's message id is the input's request id).
+- `message_bot({ to, text, images?, priority? })`: `to` is a bot's name (ignoring case and a leading `@`), or a group chat's (§3.4). It refuses, posting nothing, a message to the bot itself, to a name no bot has (listing the teammates), with no text and no images, or over 8,000 characters. It is never reviewed (no surface).
+- **Images only (#49)**, as Grok's `SendToAgent`: up to 6 image files on the sender's computer (a path, or `file://`) or `https://` URLs. Anything else, a non-image file, another scheme, a failed or non-image download, refuses the call with nothing posted; other files go through the shared folder. An `https://` image is downloaded (30 s, 20 MB) into the recipient's uploads folder, so the recipient always sees it as image input. Grok accepts `https://` too but never resolves it (`resolveImageSource` is unwired), so its recipient never sees one; we keep its promise instead. A group post is text only: the images are dropped and the tool result says so.
+- It posts one entry in each DM (`messages.direction` `to`/`from`, `peer_bot_id`, `peer_name`; the author is always the sender), each with its own copies of the images, and wakes the recipient in the bot lane with the text behind a hidden cue (`[Message from Rex, your teammate…]`). It returns "Sent to Ana. Don't wait for an answer" at once; a reply is just another `message_bot`, which wakes the sender. Silence is allowed: the reply guarantee covers the owner lane only. A replayed call posts once (idempotency keys) and wakes once (the recipient's message id is the input's request id).
 - **Lanes** (`RunScheduler`, §3.2): a priority input goes ahead of the bot's other bot- and background-lane work and interrupts a bot- or background-lane run, unless it has already ended; the run's input runs again after the priority one with a note (`interruptedNote`), however often it is interrupted. Runs for the owner are never interrupted by it. The queue is in memory: work queued at a restart is lost (#22 follow-up).
 - The prompt lists the teammates (name, title) and Grok's rules: message sparingly, fan out only when the owner asks, never relay the owner's venting verbatim, never wait for an answer, no acknowledgement ping-pong, priority only when it can't wait, only `sendMessage` reaches the owner.
-- The transcript shows "→ to Ana" / "← from Rex" above the message, and the sidebar's preview "→ Ana: …" / "← Rex: …". Either DM's message keeps the other bot's name, as "Name (deleted)" once it is gone.
+- The transcript shows "→ to Ana" / "← from Rex" above the message, and the sidebar's preview "→ Ana: …" / "← Rex: …". Neither entry makes its DM unread (#49): as in Grok, where peer messages raise no activity, only what is for the owner does. Either DM's message keeps the other bot's name, as "Name (deleted)" once it is gone.
 - **Seam 1:** `bot-messages.test.ts`, with `providers.scriptFor(name, …)` scripting each bot's model on its own, since bots now work at the same time.
 
 ---
@@ -210,10 +212,10 @@ As built (#17):
 
 As built (#11), shell and files:
 
-- Every bot has pi-durable's `bash`, `read`, `write` and `edit` tools. They run in a `RemoteExecutionEnv` on one pi-env daemon (`localDaemon()`), which the server starts as `openbot` with `sudo --non-interactive --set-home --user=openbot`, started on the first tool call and stopped with the runtime. A bot's environment starts in `$OPENBOT_HOME/bots/<id>/`, made on first use; it reaches the whole computer. Where there is no `openbot` user (the server running straight on a developer's machine) the daemon runs as the server's user.
+- Every bot has pi-durable's `bash`, `read`, `write` and `edit` tools. They run in a `RemoteExecutionEnv` on one pi-env daemon (`localDaemon()`), which the server starts as `openbot` with `sudo --non-interactive --set-home --user=openbot`, started on the first tool call and stopped with the runtime. A bot's environment starts in `$OPENBOT_HOME/bots/<id>/`, made on first use; it reaches the whole computer. This is the bots' one shell: core's `Computer` port has none (#47). Outside the runtime image `openBotComputer` refuses: sending a bot a message fails with `PRECONDITION_FAILED`, other runs fail before starting, and every environment throws `ComputerUnavailableError`.
 - The prompt tells each bot it works as `openbot` with sudo, and where its folder, `shared/` and every other bot's folder are.
 - `bash`, `write` and `edit` are reviewed under the `shell` surface and written to the audit log; `read` declares none. Deleting a bot deletes its folder.
-- `BotComputer` (`@openbot/agent`) is the seam: Seam 1 uses `fakeBotComputer`, with files in a temporary home and commands sent to the fake `Computer`'s `shell.exec`, so tests script and see them. `computer.image.test.ts` runs the same scenarios on the real computer inside the runtime image (skipped elsewhere).
+- `BotComputer` (`@openbot/agent`) is the seam: Seam 1 uses `fakeBotComputer`, with files in a temporary home and commands answered from a script and recorded instead of run (`server.commands`), so tests script and see them. `computer.image.test.ts` runs the same scenarios on the real computer inside the runtime image (skipped elsewhere).
 
 As built (#13), screens:
 

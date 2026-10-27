@@ -81,9 +81,7 @@ describe('asking the owner a question', () => {
     expect(server.providers.pendingTurns).toBe(1)
   })
 
-  // Flaky (#33): the round's two tool calls run in parallel, so the message and the card post in either order about
-  // one run in ten. Retried so it can't block a release on its own until #33 decides; a real failure fails every try.
-  it('ends the run when the bot sends a message and asks in the same breath', { retry: 2 }, async () => {
+  it('ends the run when the bot sends a message and asks in the same breath', async () => {
     const { server, bot } = await startWithRex()
     server.providers.script(
       callsTools(['sendMessage', { text: 'Quick one before I start.' }], ['askQuestion', whichDatabase as never]),
@@ -93,12 +91,16 @@ describe('asking the owner a question', () => {
     await server.client.chats.send({ chatId: bot.chatId, text: 'Set up storage for the app' })
     await untilIdle(server, bot)
 
-    const messages = await server.client.chats.messages({ chatId: bot.chatId })
-    expect(messages.map((message) => [message.text, message.card?.type ?? null])).toEqual([
-      ['Set up storage for the app', null],
-      ['Quick one before I start.', null],
-      ['Which database should I use?', 'question'],
-    ])
+    // A round's tool calls run in parallel, as Grok's do, so the message and the card post in either order.
+    const [sent, ...posted] = await server.client.chats.messages({ chatId: bot.chatId })
+    expect(sent!.text).toBe('Set up storage for the app')
+    expect(posted.map((message) => [message.text, message.card?.type ?? null])).toEqual(
+      expect.arrayContaining([
+        ['Quick one before I start.', null],
+        ['Which database should I use?', 'question'],
+      ]),
+    )
+    expect(posted).toHaveLength(2)
     expect(server.providers.requests).toHaveLength(1)
   })
 

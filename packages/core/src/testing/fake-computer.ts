@@ -13,7 +13,6 @@ import {
   DesktopUnavailableError,
   type DesktopWindow,
   type DesktopWindowTarget,
-  type ExecResult,
   type ScreenStatus,
   StaleRefError,
   stoppedScreen,
@@ -23,7 +22,6 @@ import type { TestPage } from './pages.ts'
 export type ComputerCall =
   | { bot: string; kind: 'screens.start'; display: number }
   | { bot: string; kind: 'screens.stop' | 'browser.snapshot' | 'browser.screenshot' }
-  | { bot: string; kind: 'shell.exec'; command: string }
   | { bot: string; kind: 'browser.navigate'; url: string }
   | { bot: string; kind: 'browser.click'; ref: string }
   | { bot: string; kind: 'browser.type'; ref: string; text: string; submit?: true }
@@ -37,8 +35,6 @@ export type ComputerCall =
   | { bot: string; kind: 'desktop.scroll'; at: DesktopElement | DesktopWindowTarget; direction: string; amount?: number }
 
 export type FakeComputerScript = {
-  /** Result for a command; `undefined` falls back to an empty success. */
-  shell?: (command: string, bot: ComputerBot) => ExecResult | undefined
   /** Pages the browser shows, by URL; any other URL is an empty page. */
   pages?: Record<string, TestPage>
 }
@@ -363,12 +359,6 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
     },
     async close() {
       await Promise.all([...screens.keys()].map(stop))
-    },
-    shell: {
-      async exec(bot, command) {
-        calls.push({ bot: bot.name, kind: 'shell.exec', command })
-        return script.shell?.(command, bot) ?? { stdout: '', stderr: '', exitCode: 0 }
-      },
     },
     browser,
     desktop,

@@ -1,10 +1,10 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { type ExecutionEnv, getOrThrow } from '@earendil-works/pi-durable/env'
 import { Connection, localDaemon, RemoteExecutionEnv } from '@earendil-works/pi-env'
-import { type ComputerBot, type ExecResult, maxAttachmentBytes, safeFileName } from '@openbot/core'
+import { type ComputerBot, maxAttachmentBytes, safeFileName } from '@openbot/core'
 
 const context = BACKGROUND_CONTEXT
 
@@ -23,7 +23,12 @@ export type BotComputerOptions = {
   env(bot: ComputerBot, cwd: string): ExecutionEnv
   /** Stops whatever runs the environments. */
   close?(): void | Promise<void>
+  /** Why bots can't run on this computer, e.g. the server isn't in the runtime image; every environment refuses. */
+  unavailable?: string
 }
+
+/** Bots can't run on this computer: the server isn't in the runtime image. */
+export class ComputerUnavailableError extends Error {}
 
 /**
  * Where bots work on the computer: each bot's shell and file tools run in an environment that starts in its own folder,
@@ -32,6 +37,8 @@ export type BotComputerOptions = {
 export class BotComputer {
   readonly home: string
   readonly user: string
+  /** Why bots can't run on this computer, if they can't. */
+  readonly unavailable: string | undefined
   readonly #options: BotComputerOptions
   /** Each folder's latest upload; the next waits for it, so two uploads can't both take a free name. */
   readonly #uploads = new Map<string, Promise<unknown>>()
@@ -39,7 +46,13 @@ export class BotComputer {
   constructor(options: BotComputerOptions) {
     this.home = options.home
     this.user = options.user
+    this.unavailable = options.unavailable
     this.#options = options
+  }
+
+  /** Refuses any work on a computer bots can't run on. */
+  #assertAvailable(): void {
+    if (this.unavailable) throw new ComputerUnavailableError(this.unavailable)
   }
 
   /** The folder every bot can use. */
@@ -101,6 +114,7 @@ export class BotComputer {
 
   /** An environment for the server's own work on the bots' files, as the bots' user but for no one bot. */
   #serverEnv(): ExecutionEnv {
+    this.#assertAvailable()
     return this.#options.env(serverWork, this.home)
   }
 
@@ -128,34 +142,16 @@ export class BotComputer {
 
   /** The environment `bot`'s tools run in, once its folder exists; made again if the bot deleted it. */
   async env(bot: ComputerBot): Promise<ExecutionEnv> {
+    this.#assertAvailable()
     const folder = this.folder(bot.id)
     const env = this.#options.env(bot, folder)
     getOrThrow(await env.createDir(folder, { recursive: true }, context))
     return env
   }
 
-  /** Runs a command for `bot` as the bots' user, in its folder: the `Computer` port's `shell`. */
-  async exec(bot: ComputerBot, command: string): Promise<ExecResult> {
-    const env = await this.env(bot)
-    let stdout = ''
-    let stderr = ''
-    const { exitCode } = getOrThrow(
-      await env.exec(
-        command,
-        {
-          onOutput: (text, _context, { stream }) => {
-            if (stream === 'stderr') stderr += text
-            else stdout += text
-          },
-        },
-        context,
-      ),
-    )
-    return { stdout, stderr, exitCode }
-  }
-
   /** Deletes a deleted bot's folder and everything in it. */
   async removeFolder(bot: ComputerBot): Promise<void> {
+    this.#assertAvailable()
     const env = this.#options.env(bot, this.home)
     getOrThrow(await env.remove(this.folder(bot.id), { recursive: true, force: true }, context))
   }
@@ -177,23 +173,45 @@ export function userExists(name: string): boolean {
 }
 
 /**
- * The real computer: one pi-env daemon, started as the bots' user (through sudo when the server runs as another user,
- * as `openbot-server` does in the runtime image), runs every bot's commands and file operations. Where that user doesn't
- * exist, e.g. running the server straight on a developer's machine, the daemon runs as the server's user.
+ * The real computer: one pi-env daemon, started as the bots' user `user` (through sudo when the server runs as another
+ * user, as `openbot-server` does in the runtime image), runs every bot's commands and file operations. Only the runtime
+ * image is supported: outside it (no such user, or no daemon for this machine) bots refuse to run, rather than running
+ * commands as the server's user while their prompt says otherwise.
  */
-export function openBotComputer({ home }: { home: string }): BotComputer {
-  const daemon = localDaemon()
-  const serverUser = userInfo().username
-  const asServer = serverUser === botUser || !userExists(botUser)
-  if (asServer && serverUser !== botUser) console.warn(`[computer] There is no ${botUser} user, so bots' commands run as ${serverUser}`)
+export function openBotComputer({ home, user = botUser }: { home: string; user?: string }): BotComputer {
+  const daemon = packagedDaemon()
+  if (!userExists(user) || !daemon) {
+    const missing = !userExists(user) ? `there is no ${user} user` : 'there is no pi-env daemon for this machine'
+    const unavailable = `Bots run only in OpenBot's runtime image, and this server isn't in it: ${missing}. Start OpenBot with Docker Compose (\`pnpm dev:up\` for development).`
+    console.error(`[computer] ${unavailable}`)
+    return new BotComputer({
+      home,
+      user,
+      // Never reached: every use refuses first.
+      env: () => {
+        throw new ComputerUnavailableError(unavailable)
+      },
+      unavailable,
+    })
+  }
   // `--set-home` so commands see the bots' home as ~, not the server's.
-  const command = asServer ? [daemon] : ['sudo', '--non-interactive', '--set-home', `--user=${botUser}`, '--', daemon]
+  const command = userInfo().username === user ? [daemon] : ['sudo', '--non-interactive', '--set-home', `--user=${user}`, '--', daemon]
   const connection = new Connection({ command, onLog: (text) => console.error(`[pi-env] ${text.trimEnd()}`) })
   return new BotComputer({
     home,
-    user: asServer ? serverUser : botUser,
+    user,
     // One computer: every environment sees the same files.
     env: (_bot, cwd) => new RemoteExecutionEnv({ connection, id: 'openbot:computer', cwd }),
     close: () => connection.close(),
   })
+}
+
+/** The pi-env daemon this package ships for this machine, if there is one. */
+function packagedDaemon(): string | undefined {
+  try {
+    const daemon = localDaemon()
+    return existsSync(daemon) ? daemon : undefined
+  } catch {
+    return undefined
+  }
 }

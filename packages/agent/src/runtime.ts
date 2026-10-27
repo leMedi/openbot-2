@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { type ImageContent, type Models, type TextContent, Type } from '@earendil-works/pi-ai'
 import {
@@ -37,15 +39,20 @@ import {
   type Desktop,
   type BotInput,
   type BotWithChat,
+  botsOwingReplies,
   describeUnanswered,
   findBotByHistory,
   findBotByName,
   findGroupByName,
   getGroup,
   othersIn,
+  pruneTakenInputs,
   findWaitingTakeOver,
   getBot,
   type Group,
+  keepInput,
+  keptInput,
+  type KeptInput,
   groupRoundRules,
   listGroups,
   type Lane,
@@ -58,15 +65,20 @@ import {
   type Orchestrator,
   type QuestionCard,
   questionOptionStyles,
+  queuedInputs,
   type TakeOverCard,
   readModelSettings,
   recordUnreviewed,
+  redriveReply,
+  requeueInput,
   reviewAction,
   setBotHistory,
+  sinceLastReply,
+  takeInputs,
   unansweredQuestions,
 } from '@openbot/core'
 import type { Attachment, Db, Message, Surface } from '@openbot/db'
-import type { BotComputer } from './computer.ts'
+import { type BotComputer, ComputerUnavailableError } from './computer.ts'
 import { computerUse, type UseComputerDetails } from './computer-use.ts'
 import { type QueuedInput, type Run, RunScheduler, type Watchdog } from './run-scheduler.ts'
 
@@ -102,6 +114,13 @@ To send the owner a file from your computer, such as a report or a screenshot, a
 When your screen needs the owner (a login, a captcha, a two-factor code, a payment), use_computer asks them to take it over on a card and ends your turn; their handing the screen back wakes you, and you go on from there.
 
 When you need the owner to decide before you go on, ask with askQuestion: a short prompt and up to six options they can pick with one click. Asking ends your turn, so send anything else first; their answer wakes you as their next message.`
+
+/**
+ * Starts the input waking a bot that owes the owner a reply once the server is back (Grok's ack redrive), before the
+ * owner's messages since its last reply.
+ */
+export const owedReplyNote =
+  "[The server restarted before you replied to the owner. Their messages since your last reply follow; you may have seen some already, or none may be new. If you already did what they asked, confirm it with sendMessage; if not, acknowledge them and go on with it, without repeating anything you already did; if you can't tell what they last asked, say you may have missed their latest message and ask them to resend it. Never claim work is done that you can't see.]"
 
 /** Starts an input that runs again: a newer message interrupted the bot while it worked on it. */
 export const interruptedNote = '[You were interrupted by a newer message while working on this. Pick it up again.]'
@@ -142,13 +161,13 @@ export type BotRuntimeOptions = {
    */
   sendMessage(bot: BotWithChat, chatId: string, message: { text: string; attachments: AttachmentFile[] }, idempotencyKey: string): Promise<void>
   /**
-   * Posts a bot's message to a group chat it belongs to, outside its turns, as `sendMessage` posts; the members answer
-   * it in rounds, as they answer the owner.
+   * Posts a bot's message to a group chat it belongs to, outside its turns, as `sendMessage` posts but text only; the
+   * members answer it in rounds, as they answer the owner.
    */
-  messageGroup(sender: BotWithChat, group: Group, message: { text: string; attachments: AttachmentFile[] }, idempotencyKey: string): Promise<void>
+  messageGroup(sender: BotWithChat, group: Group, message: { text: string }, idempotencyKey: string): Promise<void>
   /**
    * Posts one bot's message to another, as `sendMessage` posts: outgoing in the sender's DM and incoming in the
-   * recipient's, each with copies of the files. Returns the recipient's copy, which wakes it.
+   * recipient's, each with copies of the images. Returns the recipient's copy, which wakes it.
    */
   messageBot(
     sender: BotWithChat,
@@ -164,6 +183,8 @@ export type BotRuntimeOptions = {
   onStatus(botId: string, status: BotStatus): void
   /** When a run the owner's message waits for is interrupted again, then detached; Grok's 120 s and 30 s by default. */
   watchdog?: Watchdog
+  /** Downloads the https:// images bots send each other; the global `fetch` by default. */
+  fetch?: typeof fetch
 }
 
 /** `provider/modelId`, split at the first slash since model ids may contain slashes. */
@@ -262,6 +283,49 @@ const computerTools = (images: ImageProcessor): BotTool[] => [
   { surface: 'shell', tool: createEditTool() },
 ]
 
+/** The largest image message_bot downloads from an https:// URL, and how long it waits for one. */
+const maxDownloadedImageBytes = 20 * 1024 * 1024
+const imageDownloadTimeoutMs = 30_000
+
+/** Downloads an https:// image a bot sends another; throws unless it is an image within the limit. */
+async function downloadImage(fetchImage: typeof fetch, url: string): Promise<Omit<AttachmentFile, 'path'>> {
+  let response: Response
+  try {
+    response = await fetchImage(url, { signal: AbortSignal.timeout(imageDownloadTimeoutMs) })
+  } catch (error) {
+    throw new Error(`Couldn't download ${url}: ${(error as Error).message}`)
+  }
+  if (!response.ok) throw new Error(`Couldn't download ${url}: HTTP ${response.status}`)
+  const mimeType = (response.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase()
+  if (!mimeType.startsWith('image/')) {
+    await response.body?.cancel()
+    throw new Error(`${url} isn't an image (${mimeType || 'no type'}): message_bot only carries images`)
+  }
+  const tooLarge = new Error(`${url} is larger than ${maxDownloadedImageBytes / 1024 / 1024} MB`)
+  if (Number(response.headers.get('content-length')) > maxDownloadedImageBytes) {
+    await response.body?.cancel()
+    throw tooLarge
+  }
+  const chunks: Uint8Array[] = []
+  let size = 0
+  const reader = response.body?.getReader()
+  for (let read = await reader?.read(); read && !read.done; read = await reader!.read()) {
+    size += read.value.byteLength
+    if (size > maxDownloadedImageBytes) {
+      await reader!.cancel()
+      throw tooLarge
+    }
+    chunks.push(read.value)
+  }
+  let name = basename(new URL(url).pathname)
+  try {
+    name = decodeURIComponent(name)
+  } catch {}
+  // Named so the recipient's tools see an image, e.g. a CDN's extensionless `photo` saved as `photo.png`.
+  if (!mimeTypeOf(name).startsWith('image/')) name = `${name || 'image'}.${mimeType.slice('image/'.length).replace(/\+.*/, '').replace('jpeg', 'jpg')}`
+  return { name, mimeType, bytes: Buffer.concat(chunks) }
+}
+
 /** `size` bytes, for people: `512 B`, `12 KB`, `3.4 MB`. */
 function formatSize(size: number): string {
   if (size < 1024) return `${size} B`
@@ -302,6 +366,22 @@ function requestIdOf(inputs: readonly QueuedInput[]): string | undefined {
   return ids.every(Boolean) ? ids.join(' ') : undefined
 }
 
+/** The ids of the inputs of the run whose request id is `requestId` (see `requestIdOf`). */
+const inputIdsOf = (requestId: string) => requestId.split(' ').map((token) => token.replace(/:attempt-\d+$/, ''))
+
+/** What of a queued input is kept across restarts: all but what only this process can use. */
+const toKept = ({ settle: _settle, supersedes: _supersedes, ...input }: QueuedInput) => input as KeptInput
+
+/**
+ * Whether an input is kept across restarts: those of the bot and background lanes. The owner's are not: their messages
+ * are in their DM, and a bot owing them a reply is woken to give it (`owedReplyNote`); a group chat's turns end with its
+ * rounds, as the server stops.
+ */
+const isKept = (input: QueuedInput) => input.lane !== 'owner'
+
+/** The ids of the kept inputs among `inputs`; `#wake` gave each one. */
+const keptIds = (inputs: readonly QueuedInput[]) => inputs.filter(isKept).map((input) => input.id!)
+
 /**
  * Runs bots on pi-durable (ADR 0005): each bot's history is one pi conversation (ADR 0001), and `sendMessage` and
  * `askQuestion` are the only ways a bot reaches a chat.
@@ -319,6 +399,8 @@ export class BotRuntime implements AgentRuntime {
   readonly #errors = new Map<string, string>()
   /** Messages each bot has sent in its current group turn, by the turn's input id. */
   readonly #groupMessages = new Map<string, { inputId: string; sent: number }>()
+  /** Closing: a run that can't start now is queued still, for the next start. */
+  #closing = false
 
   private constructor(harness: Harness, options: BotRuntimeOptions, images: ImageProcessor) {
     this.#harness = harness
@@ -326,7 +408,19 @@ export class BotRuntime implements AgentRuntime {
     this.#images = images
     this.#scheduler = new RunScheduler({
       histories: {
-        submit: (botId, inputs) => this.#submit(botId, inputs),
+        submit: async (botId, inputs) => {
+          let submitted = false
+          try {
+            const run = await this.#submit(botId, inputs)
+            submitted = true
+            return run
+          } finally {
+            // Submitted, pi-durable keeps the run from here on: were this lost, resubmitting the inputs finds their run.
+            // A run that couldn't start is dropped, as it would be without a restart, unless the runtime is closing
+            // under it: it then starts on the next boot.
+            if (submitted || !this.#closing) await takeInputs(this.#options.db, botId, keptIds(inputs))
+          }
+        },
         idle: async (botId) => (await this.#existingHistory(botId))?.waitForIdle(context),
         abort: async (botId) => (await this.#existingHistory(botId))?.abort(context),
       },
@@ -335,6 +429,12 @@ export class BotRuntime implements AgentRuntime {
         console.error(`[agent] Bot ${botId}'s run couldn't start:`, error)
         this.#errors.set(botId, error.message)
         this.#options.onStatus(botId, this.status(botId))
+      },
+      onRequeue: async (botId, input) => {
+        if (!isKept(input)) return
+        await requeueInput(this.#options.db, botId, toKept(input)).catch((error) =>
+          console.error(`[agent] Couldn't keep bot ${botId}'s interrupted input queued:`, error),
+        )
       },
       watchdog: options.watchdog,
     })
@@ -386,6 +486,32 @@ export class BotRuntime implements AgentRuntime {
           return { name, mimeType: mimeTypeOf(name), path: file.path, bytes: file.bytes }
         }),
       )
+    /**
+     * The images a bot sends another, read before posting so a bad one fails the call and posts nothing: image files on
+     * its computer, and https:// images, downloaded into the recipient's uploads folder as the owner's files are.
+     */
+    const readImages = async (sender: BotWithChat, recipient: BotWithChat, sources: readonly string[]): Promise<AttachmentFile[]> => {
+      const read = await Promise.all(
+        sources.map(async (source) => {
+          if (/^https:\/\//i.test(source)) return downloadImage(options.fetch ?? fetch, source)
+          if (/^[a-z][a-z0-9+.-]*:\/\//i.test(source) && !/^file:/i.test(source)) {
+            throw new Error(`${source}: an image is a file on your computer or an https:// URL`)
+          }
+          const [file] = await readAttachments(sender, [/^file:/i.test(source) ? fileURLToPath(source) : source])
+          if (!file!.mimeType.startsWith('image/')) {
+            throw new Error(
+              `${source} isn't an image: message_bot only carries images. Put other files in ${options.computer.sharedFolder} and say where.`,
+            )
+          }
+          return file!
+        }),
+      )
+      return Promise.all(
+        read.map(async (file): Promise<AttachmentFile> =>
+          'path' in file ? (file as AttachmentFile) : { ...file, path: await options.computer.saveUpload(recipient, file.name, file.bytes) },
+        ),
+      )
+    }
     const attachmentsParameter = Type.Optional(
       Type.Array(Type.String(), {
         description: 'Paths of files on your computer to attach, absolute or relative to your folder',
@@ -444,11 +570,19 @@ export class BotRuntime implements AgentRuntime {
         name: 'message_bot',
         description:
           "Send one of your teammates, the owner's other bots, a message, or post to a group chat you are in. It returns at " +
-          'once: never wait for an answer; a reply, if any, wakes you later. The owner sees it in both your chats, or in the group.',
+          'once: never wait for an answer; a reply, if any, wakes you later. The owner sees it in both your chats, or in the group. ' +
+          'A teammate sees the images you send, as it sees the owner\'s; group posts are text only.',
         parameters: Type.Object({
           to: Type.String({ description: "The teammate's name, e.g. Rex, or a group chat's name, e.g. Launch team" }),
-          text: Type.String({ description: `The message, in Markdown, at most ${maxBotMessageLength} characters; may be empty when you attach files` }),
-          attachments: attachmentsParameter,
+          text: Type.String({ description: `The message, in Markdown, at most ${maxBotMessageLength} characters; may be empty when you send images` }),
+          images: Type.Optional(
+            Type.Array(Type.String(), {
+              description:
+                'Images for a teammate, e.g. a screenshot: paths of image files on your computer, absolute or relative to your folder, or https:// URLs. ' +
+                'Only images; a group post drops them.',
+              maxItems: maxAttachments,
+            }),
+          ),
           priority: Type.Optional(
             Type.Boolean({
               description: "Only when it can't wait: it goes ahead of their other work and interrupts it, unless they are working for the owner",
@@ -472,20 +606,23 @@ export class BotRuntime implements AgentRuntime {
           if (group && (await runtime!.inputOf(api.conversationId))?.groupChatId === group.id) {
             throw new Error(`It is your turn in "${group.name}": reply there with sendMessage.`)
           }
-          const paths = args.attachments ?? []
-          if (!args.text.trim() && !paths.length) throw new Error('Write a message or attach a file')
+          const sources = args.images ?? []
+          if (!args.text.trim() && (group || !sources.length)) throw new Error(group ? 'Write a message: group posts are text only' : 'Write a message or send an image')
           if (args.text.length > maxBotMessageLength) {
             throw new Error(
               `Messages to bots are at most ${maxBotMessageLength} characters; this one has ${args.text.length}. ` +
-                'Shorten it, or write the details to a file and attach it.',
+                `Shorten it, or write the details to a file in ${options.computer.sharedFolder} and say where.`,
             )
           }
-          const attachments = await readAttachments(sender, paths)
-          // Not a bot, so a group chat.
+          // Not a bot, so a group chat: text only, as Grok's group posts are.
           if (!recipient) {
-            await options.messageGroup(sender, group!, { text: args.text, attachments }, `${api.conversationId}:${api.callId}`)
-            return { output: [{ type: 'text', text: `Posted in "${group!.name}". Don't wait for answers: the members answer in turn.` }] }
+            await options.messageGroup(sender, group!, { text: args.text }, `${api.conversationId}:${api.callId}`)
+            const dropped = sources.length
+              ? ` Note: the image${sources.length === 1 ? ' was' : 's were'} NOT delivered: group posts are text only; send images to a teammate directly.`
+              : ''
+            return { output: [{ type: 'text', text: `Posted in "${group!.name}". Don't wait for answers: the members answer in turn.${dropped}` }] }
           }
+          const attachments = await readImages(sender, recipient, sources)
           const incoming = await options.messageBot(sender, recipient, { text: args.text, attachments }, `${api.conversationId}:${api.callId}`)
           const priority = args.priority ?? false
           try {
@@ -638,8 +775,78 @@ export class BotRuntime implements AgentRuntime {
       context,
     )
     runtime = new BotRuntime(harness, options, images)
+    // Read before pi-durable resumes runs, whose replayed calls may queue inputs: those are woken as they are queued.
+    await pruneTakenInputs(options.db)
+    const queued = await queuedInputs(options.db)
+    const resuming = await runtime.#resumingRuns()
     harness.resume()
+    // At once, so no replayed call wakes a bot first. The runs pi-durable resumes are the bots' runs going on, which the
+    // queued inputs, back in the order they were queued and sorted by lane, wait for or interrupt.
+    for (const { botId, inputs, run } of resuming) runtime.#scheduler.adopt(botId, inputs, run)
+    for (const { botId, input } of queued) runtime.#scheduler.wake(botId, input)
+    for (const botId of await botsOwingReplies(options.db)) void runtime.#redriveReply(botId)
     return runtime
+  }
+
+  /**
+   * The runs of bots' histories pi-durable is about to resume, with the inputs they were for (see `RunScheduler.adopt`).
+   * Those kept are read back, so an interrupt queues them again; of the others, only the lane and id are known, so they
+   * run once. Read before pi-durable resumes them.
+   */
+  async #resumingRuns(): Promise<{ botId: string; inputs: QueuedInput[]; run: Run }[]> {
+    const runs = []
+    for (const bot of await listBots(this.#options.db)) {
+      const history = bot.historyId ? await this.#harness.conversation(toConversationId(bot.historyId), context) : undefined
+      if (!history) continue
+      const submissionIds = await history.commit(async (tx) => [...((await tx.doc(LiveDoc, history.id)).run?.inputs ?? [])], context)
+      if (!submissionIds.length) continue
+      const submissions = () => Promise.all(submissionIds.map(async (id) => (await this.#harness.submission(id, context))?.status(context)))
+      const requestId = (await submissions()).find((submission) => submission?.requestId)?.requestId
+      const record = await this.inputOf(history.id)
+      const inputs = await Promise.all(
+        (requestId ? inputIdsOf(requestId) : [record?.id]).map(
+          async (id): Promise<QueuedInput> =>
+            (id && (await keptInput(this.#options.db, bot.id, id))) || {
+              lane: record?.lane ?? 'owner',
+              text: '',
+              ...(id && { id }),
+              ...(record?.groupChatId && { groupChatId: record.groupChatId }),
+              runsOnce: true,
+            },
+        ),
+      )
+      const statuses = async () => (await submissions()).map((submission) => submission?.status)
+      runs.push({
+        botId: bot.id,
+        inputs,
+        run: {
+          ended: async () => (await statuses()).every((status) => status === 'done' || status === 'unanswered'),
+          answered: async () => (await statuses()).every((status) => status === 'done'),
+        },
+      })
+    }
+    return runs
+  }
+
+  /**
+   * Wakes a bot that owes the owner a reply as the server starts, once any run pi-durable resumed has ended: that run
+   * may reply yet. It reads `owedReplyNote`, then the owner's messages since its last reply.
+   */
+  async #redriveReply(botId: string) {
+    try {
+      await (await this.#existingHistory(botId))?.waitForIdle(context)
+      const bot = await getBot(this.#options.db, botId)
+      if (!bot || !(await redriveReply(this.#options.db, botId))) return
+      const unanswered = await sinceLastReply(this.#options.db, bot.chatId)
+      await this.wake(botId, {
+        lane: 'owner',
+        text: [owedReplyNote, ...unanswered.map((message) => message.text)].filter(Boolean).join('\n\n'),
+        attachments: unanswered.flatMap((message) => message.attachments),
+        id: `owed-reply:${randomUUID()}`,
+      })
+    } catch (error) {
+      console.error(`[agent] Couldn't wake bot ${botId} for the reply it owes the owner:`, error)
+    }
   }
 
   /** Queues `input` (see `AgentRuntime.wake` and `RunScheduler`). */
@@ -654,13 +861,19 @@ export class BotRuntime implements AgentRuntime {
     await ended
   }
 
-  /** Queues `input`; false when it was there already. */
+  /**
+   * Queues `input`, kept in the database across restarts unless it is a group chat's turn; false when it was queued
+   * before, here or before a restart.
+   */
   async #wake(botId: string, input: QueuedInput): Promise<boolean> {
     const bot = await getBot(this.#options.db, botId)
     if (!bot) throw new Error(`Unknown bot ${botId}`)
     await this.#model(bot)
     this.#errors.delete(botId)
-    return this.#scheduler.wake(botId, input)
+    if (!isKept(input)) return this.#scheduler.wake(botId, input)
+    const queued = { ...input, id: input.id ?? randomUUID() }
+    if (!(await keepInput(this.#options.db, botId, toKept(queued)))) return false
+    return this.#scheduler.wake(botId, queued)
   }
 
   /** What the input of the bot's current run, the newest in its history, recorded: its lane and group chat. */
@@ -733,6 +946,7 @@ export class BotRuntime implements AgentRuntime {
   }
 
   async close(): Promise<void> {
+    this.#closing = true
     this.#scheduler.close()
     await this.#harness.close(context)
     await this.#options.computer.close()
@@ -838,6 +1052,7 @@ export class BotRuntime implements AgentRuntime {
     const [first] = inputs as [QueuedInput]
     // A turn in a group chat deleted while it waited, e.g. queued by rounds that were ending, has nothing to do either.
     if (!bot || (first.groupChatId && !(await getGroup(this.#options.db, first.groupChatId)))) return { ended: async () => true, answered: async () => true }
+    if (this.#options.computer.unavailable) throw new ComputerUnavailableError(this.#options.computer.unavailable)
     const history = await this.#history(bot)
     const others = (await listBots(this.#options.db)).filter((other) => other.id !== bot.id)
     const groups = await listGroups(this.#options.db, bot.id)

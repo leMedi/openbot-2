@@ -30,8 +30,6 @@ export type ScreenListing = ScreenStatus & { botId: string }
 
 export const stoppedScreen: ScreenStatus = { state: 'stopped', display: null, startedAt: null, streamPort: null }
 
-export type ExecResult = { stdout: string; stderr: string; exitCode: number }
-
 /**
  * An accessibility snapshot of the bot's current page: one line per element, indented by nesting, e.g.
  * `- link "Pricing" [ref=e12]` or `- textbox "Email" [ref=e14]: ada@example.com`. Only the references of a tab's latest
@@ -147,16 +145,13 @@ export interface Screens {
 }
 
 /**
- * The machine all bots share. The real one is the screen daemon's client, the browser over CDP and the desktop through
- * each screen's cua-driver (`@openbot/computer`), plus the bots' shell from `@openbot/agent`; Seam 1 tests use the
- * in-memory fake from `@openbot/core/testing`. Both pass the contract suite there.
+ * The machine all bots share: their screens, browsers and desktops. The real one is the screen daemon's client, the
+ * browser over CDP and the desktop through each screen's cua-driver (`@openbot/computer`); Seam 1 tests use the
+ * in-memory fake from `@openbot/core/testing`. Both pass the contract suite there. Bots' shell and files are not here:
+ * they run only through `BotComputer` (`@openbot/agent`).
  */
 export interface Computer {
   screens: Screens
-  /** Runs a command as the `openbot` user, in the bot's folder. */
-  shell: {
-    exec(bot: ComputerBot, command: string): Promise<ExecResult>
-  }
   browser: Browser
   desktop: Desktop
 }

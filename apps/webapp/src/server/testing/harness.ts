@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { botUser, type BotTool, type ModelProvider, openBotComputer, type Watchdog } from '@openbot/agent'
-import { createFakeModel, createFakeProviders, fakeBotComputer } from '@openbot/agent/testing'
+import { createFakeModel, createFakeProviders, fakeBotComputer, type FakeBotComputer, type FakeProviders, type FakeShellScript } from '@openbot/agent/testing'
 import { connectBrowser, connectDesktop, connectScreens, defaultDaemonSocket } from '@openbot/computer'
 import type { Orchestrator, Screens, ScreenStatus } from '@openbot/core'
 import { createFakeComputer, type FakeComputer, type FakeComputerScript } from '@openbot/core/testing'
@@ -43,15 +43,21 @@ export type TestServerOptions = {
   /** Tools bots get beyond the built-in ones. */
   tools?: BotTool[]
   /** Results of bots' shell commands; empty successes otherwise. */
-  shell?: FakeComputerScript['shell']
+  shell?: FakeShellScript
   /** Pages bots' browsers show, by URL. */
   pages?: FakeComputerScript['pages']
   /** Runs bots' tools on this machine's real computer, in `$OPENBOT_HOME`, instead of the fake; for the runtime image. */
   realComputer?: boolean
+  /** Uses the real computer as a server outside the runtime image finds it: without the bots' user, so bots can't run. */
+  outsideImage?: boolean
   /** Model providers beside the scripted fakes, e.g. pi's built-in ones for evals on real models. */
   modelProviders?: readonly ModelProvider[]
   /** Shorter watchdog timings than Grok's 120 s and 30 s. */
   watchdog?: Watchdog
+  /** Answers bots' downloads, e.g. of the https:// images they send each other. */
+  fetch?: typeof fetch
+  /** Scripts the model before the server starts, e.g. for the runs and queued inputs a restart resumes. */
+  script?: (providers: FakeProviders) => void
 }
 
 /**
@@ -62,13 +68,23 @@ export async function createTestServer(options: TestServerOptions = {}) {
   return open(await mkdtemp(join(tmpdir(), 'openbot-test-')), testSecretKey, options)
 }
 
-async function open(dir: string, secretKey: string, { shell, pages, realComputer, modelProviders = [], ...options }: TestServerOptions, kept?: FakeComputer) {
+/** The fakes that outlive a server, as the computer does. */
+type KeptComputers = { computer: FakeComputer; botComputer: FakeBotComputer }
+
+async function open(
+  dir: string,
+  secretKey: string,
+  { shell, pages, realComputer, outsideImage, modelProviders = [], script, ...options }: TestServerOptions,
+  kept?: KeptComputers,
+) {
   const db = await openDb(join(dir, 'openbot.db'))
   const providers = createFakeProviders()
-  // The computer outlives the server, as the screen daemon does.
-  const computer = kept ?? createFakeComputer({ shell, pages })
-  const screenTickets = new ScreenTickets()
+  script?.(providers)
   const home = realComputer ? process.env.OPENBOT_HOME! : join(dir, 'home')
+  // The computer outlives the server, as the screen daemon does.
+  const computer = kept?.computer ?? createFakeComputer({ pages })
+  const botComputer = kept?.botComputer ?? fakeBotComputer(home, shell)
+  const screenTickets = new ScreenTickets()
   // The real screens without the test's display offset, so the browser finds each screen's DevTools where it is.
   const realScreens = realComputer ? connectScreens({ socketPath: process.env.OPENBOT_DESKTOPD_SOCKET || defaultDaemonSocket }) : undefined
   const context = await createServerContext({
@@ -76,7 +92,11 @@ async function open(dir: string, secretKey: string, { shell, pages, realComputer
     secretKey,
     providers: [...providers.providers, ...modelProviders],
     agentStoragePath: join(dir, 'agent.sqlite'),
-    computer: realComputer ? openBotComputer({ home }) : fakeBotComputer(computer, home),
+    computer: realComputer
+      ? openBotComputer({ home })
+      : outsideImage
+        ? openBotComputer({ home, user: 'openbot-missing' })
+        : botComputer,
     browser: realScreens ? connectBrowser({ screens: realScreens }) : computer.browser,
     desktop: realScreens ? connectDesktop({ screens: realScreens, runAs: botUser }) : computer.desktop,
     attachmentsDir: join(dir, 'attachments'),
@@ -101,8 +121,12 @@ async function open(dir: string, secretKey: string, { shell, pages, realComputer
     providers,
     /** pi's model collection the runtime uses, with auth resolved through the credential store. */
     models: context.providers.models,
-    /** The in-memory computer: every screen and shell command bots used, keyed by bot name; kept across restarts. */
+    /** The in-memory computer: every screen, browser and desktop call bots made, keyed by bot name; kept across restarts. */
     computer,
+    /** Every shell command bots ran, keyed by bot name; kept across restarts. */
+    commands: botComputer.commands,
+    /** The fakes, to keep across a restart. */
+    kept: { computer, botComputer } satisfies KeptComputers,
     /** The bots' home, a temporary folder: `shared/`, `bots/<id>/`. */
     home,
     /** An HTTP request against the API, e.g. `fetch('/api/health')`. */
@@ -167,5 +191,5 @@ export async function restartTestServer(
   { secretKey = testSecretKey, ...options }: TestServerOptions & { secretKey?: string } = {},
 ): Promise<TestServer> {
   await server.shutdown()
-  return open(server.dataDir, secretKey, options, server.computer)
+  return open(server.dataDir, secretKey, options, server.kept)
 }
