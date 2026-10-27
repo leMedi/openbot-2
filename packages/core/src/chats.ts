@@ -1,4 +1,4 @@
-import { type Chat, type Db, type Message, type NewMessage, chats, messages } from '@openbot/db'
+import { type Chat, type Db, type Message, type NewChat, type NewMessage, chats, messages } from '@openbot/db'
 import { asc, eq, inArray, sql } from 'drizzle-orm'
 
 export async function getChat(db: Db, id: string): Promise<Chat | undefined> {
@@ -25,6 +25,14 @@ export async function postMessage(db: Db, values: NewMessage): Promise<{ message
   if (inserted) return { message: inserted, created: true }
   const [existing] = await db.select().from(messages).where(eq(messages.idempotencyKey, values.idempotencyKey!))
   return { message: existing!, created: false }
+}
+
+/** What a group chat starts with: a null title names the group from its members (bot ids). */
+export type GroupChatValues = Pick<NewChat, 'title' | 'members'>
+
+export async function createGroupChat(db: Db, values: GroupChatValues): Promise<Chat> {
+  const [chat] = await db.insert(chats).values({ kind: 'group', ...values }).returning()
+  return chat!
 }
 
 /** There is no chat with that id. */

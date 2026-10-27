@@ -4,11 +4,12 @@
   "type": "module",
   "scripts": {
     "with-env": "dotenv -e ../../.env --",
-    "dev": "pnpm with-env vite dev --port 3000",
+    "dev": "pnpm with-env vite dev",
     "build": "pnpm with-env vite build",
-    "start": "pnpm with-env vite preview --port 3000",
+    "start": "pnpm with-env vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "seed": "pnpm with-env node scripts/seed.ts"
   },
   "dependencies": {
     "@openbot/agent": "workspace:*",

@@ -10,7 +10,13 @@
     "test": "turbo run test",
     "db:generate": "turbo run db:generate",
     "db:migrate": "turbo run db:migrate",
-    "db:studio": "turbo run db:studio"
+    "db:studio": "turbo run db:studio",
+    "dev:up": "docker compose -f docker/compose.dev.yml up --build --detach --wait --wait-timeout 900 && echo \"OpenBot dev is up on http://localhost:${OPENBOT_DEV_PORT:-3000}\"",
+    "dev:down": "docker compose -f docker/compose.dev.yml down",
+    "dev:logs": "docker compose -f docker/compose.dev.yml logs --follow",
+    "dev:sh": "docker compose -f docker/compose.dev.yml exec --user openbot-server openbot bash",
+    "dev:reset": "docker compose -f docker/compose.dev.yml down --volumes --remove-orphans",
+    "dev:seed": "docker compose -f docker/compose.dev.yml exec --user openbot-server openbot pnpm --filter @openbot/webapp seed"
   },
   "devDependencies": {
     "turbo": "^2.11.9"
