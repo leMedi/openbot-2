@@ -1,6 +1,7 @@
 import type { ProviderInfo, SignInStep } from '@openbot/api-contract'
 import { useEffect, useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
+import { Dialog } from './dialog.tsx'
 
 type Prompt = Extract<SignInStep, { type: 'prompt' }>
 type Method = ProviderInfo['methods'][number]
@@ -48,42 +49,40 @@ export function SignInWizard({
   const openPrompt = steps.filter((step): step is Prompt => step.type === 'prompt' && !closed.has(step.promptId)).at(-1)
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-scrim p-4">
-      <div
-        role="dialog"
-        aria-label={`Connect ${provider.name}`}
-        className="flex w-full max-w-md flex-col gap-4 rounded-xl bg-popover p-5 text-popover-foreground shadow-lg"
-      >
-        <header>
-          <h2 className="text-lg font-semibold">Connect {provider.name}</h2>
-          <p className="text-sm text-muted-foreground">{method.label}</p>
-        </header>
+    <Dialog label={`Connect ${provider.name}`} onClose={() => onClose(connected)}>
+      {(close) => (
+        <>
+          <header>
+            <h2 className="text-lg font-semibold">Connect {provider.name}</h2>
+            <p className="text-sm text-muted-foreground">{method.label}</p>
+          </header>
 
-        <ol className="flex flex-col gap-3 text-base">
-          {steps.map((step, index) => (
-            <StepView key={index} step={step} />
-          ))}
-        </ol>
+          <ol className="flex flex-col gap-3 text-base">
+            {steps.map((step, index) => (
+              <StepView key={index} step={step} />
+            ))}
+          </ol>
 
-        {openPrompt && signInId && !connected && !failed && (
-          <PromptForm key={openPrompt.promptId} prompt={openPrompt} signInId={signInId} onError={setError} />
-        )}
+          {openPrompt && signInId && !connected && !failed && (
+            <PromptForm key={openPrompt.promptId} prompt={openPrompt} signInId={signInId} onError={setError} />
+          )}
 
-        {connected && <p className="text-green-foreground">Connected.</p>}
-        {failed && <p className="text-destructive-foreground">{failed.message}</p>}
-        {error && <p className="text-destructive-foreground">{error}</p>}
+          {connected && <p className="text-green-foreground">Connected.</p>}
+          {failed && <p className="text-destructive-foreground">{failed.message}</p>}
+          {error && <p className="text-destructive-foreground">{error}</p>}
 
-        <footer className="flex justify-end">
-          <button
-            type="button"
-            className="rounded-md bg-secondary px-3 py-1.5 text-base hover:bg-secondary-hover"
-            onClick={() => onClose(connected)}
-          >
-            {connected || failed ? 'Done' : 'Cancel'}
-          </button>
-        </footer>
-      </div>
-    </div>
+          <footer className="flex justify-end">
+            <button
+              type="button"
+              className="pressable rounded-md bg-secondary px-3 py-1.5 text-base hover:bg-secondary-hover"
+              onClick={close}
+            >
+              {connected || failed ? 'Done' : 'Cancel'}
+            </button>
+          </footer>
+        </>
+      )}
+    </Dialog>
   )
 }
 
@@ -182,13 +181,13 @@ function PromptForm({ prompt, signInId, onError }: { prompt: Prompt; signInId: s
           placeholder={prompt.placeholder}
           value={value}
           onChange={(event) => setValue(event.target.value)}
-          className="rounded-md border border-input bg-input-fill px-2.5 py-1.5 text-base outline-none focus:border-ring"
+          className="rounded-md border border-input bg-input-fill px-2.5 py-1.5 text-base outline-offset-0"
         />
       )}
       <button
         type="submit"
         disabled={sending || !value}
-        className="self-end rounded-md bg-primary px-3 py-1.5 text-base text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
+        className="pressable self-end rounded-md bg-primary px-3 py-1.5 text-base text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
       >
         Continue
       </button>

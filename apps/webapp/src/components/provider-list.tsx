@@ -1,6 +1,7 @@
 import type { ProviderInfo } from '@openbot/api-contract'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
+import { Dialog } from './dialog.tsx'
 import { SignInWizard } from './sign-in-wizard.tsx'
 
 type Method = ProviderInfo['methods'][number]
@@ -10,6 +11,7 @@ export function ProviderList({ onChange }: { onChange?: (providers: ProviderInfo
   const [providers, setProviders] = useState<ProviderInfo[]>()
   const [error, setError] = useState<string>()
   const [signIn, setSignIn] = useState<{ provider: ProviderInfo; method: Method }>()
+  const [disconnecting, setDisconnecting] = useState<ProviderInfo>()
 
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
@@ -65,8 +67,8 @@ export function ProviderList({ onChange }: { onChange?: (providers: ProviderInfo
             {provider.connection ? (
               <button
                 type="button"
-                className="rounded-md bg-secondary px-3 py-1.5 text-base hover:bg-secondary-hover"
-                onClick={() => disconnect(provider)}
+                className="pressable rounded-md bg-secondary px-3 py-1.5 text-base hover:bg-secondary-hover"
+                onClick={() => setDisconnecting(provider)}
               >
                 Disconnect
               </button>
@@ -76,7 +78,7 @@ export function ProviderList({ onChange }: { onChange?: (providers: ProviderInfo
                   <button
                     key={method.method}
                     type="button"
-                    className="rounded-md bg-primary px-3 py-1.5 text-base text-primary-foreground hover:bg-primary-hover"
+                    className="pressable rounded-md bg-secondary px-3 py-1.5 text-base hover:bg-secondary-hover"
                     onClick={() => setSignIn({ provider, method })}
                   >
                     {method.method === 'api_key' ? 'Add API key' : method.label}
@@ -87,6 +89,37 @@ export function ProviderList({ onChange }: { onChange?: (providers: ProviderInfo
           </li>
         ))}
       </ul>
+
+      {disconnecting && (
+        <Dialog label={`Disconnect ${disconnecting.name}`} onClose={() => setDisconnecting(undefined)}>
+          {(close) => (
+            <>
+              <header className="flex flex-col gap-1">
+                <h2 className="text-lg font-semibold">Disconnect {disconnecting.name}?</h2>
+                <p className="text-muted-foreground">
+                  Bots using its models stop working until you connect it again.{' '}
+                  {disconnecting.connection?.method === 'oauth' ? "You'll need to sign in again." : "You'll need to enter the API key again."}
+                </p>
+              </header>
+              <footer className="flex justify-end gap-2">
+                <button type="button" data-autofocus onClick={close} className="pressable rounded-md bg-secondary px-3 py-1.5 text-base hover:bg-secondary-hover">
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    close()
+                    void disconnect(disconnecting)
+                  }}
+                  className="pressable rounded-md bg-destructive px-3 py-1.5 text-base text-on-color hover:bg-destructive/90"
+                >
+                  Disconnect
+                </button>
+              </footer>
+            </>
+          )}
+        </Dialog>
+      )}
 
       {signIn && (
         <SignInWizard

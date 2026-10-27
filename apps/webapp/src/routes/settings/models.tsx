@@ -102,7 +102,7 @@ function ModelField({
         id={id}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="rounded-md border border-input bg-input-fill px-2.5 py-1.5 text-base"
+        className="rounded-md border border-input bg-input-fill px-2.5 py-1.5 text-base outline-offset-0"
       >
         <option value={sameAsDefault}>{placeholder}</option>
         {/* A chosen model whose provider was since disconnected. */}

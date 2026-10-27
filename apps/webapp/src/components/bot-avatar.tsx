@@ -61,7 +61,7 @@ export function BotAvatar({
         <path d="M43 70Q50 76 57 70" stroke="#141414" strokeWidth="3" strokeLinecap="round" fill="none" />
       </svg>
       {working && (
-        <span className="absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full border-2 border-sidebar bg-status-working" />
+        <span className="absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full border-2 border-sidebar bg-status-working motion-safe:animate-pop-in motion-reduce:animate-fade-in" />
       )}
     </span>
   )

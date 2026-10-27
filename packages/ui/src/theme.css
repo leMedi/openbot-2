@@ -76,6 +76,7 @@
   --elevation-lg: 0 22px 70px 4px #0000008f, 0 0 0 0.5px #0000001a;
 
   --radius: 10px;
+  color-scheme: light;
 }
 
 .dark {
@@ -123,6 +124,7 @@
   --elevation-sm: 0 0 #0000;
   --elevation-md: 0 0 #0000;
   --elevation-lg: 0 0 #0000;
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -208,11 +210,81 @@
   --text-lg: 14px;
   --text-lg--line-height: 22px;
   --text-lg--letter-spacing: -0.15px;
+  /* Page headings only; large text gets tighter tracking */
+  --text-xl: 20px;
+  --text-xl--line-height: 26px;
+  --text-xl--letter-spacing: -0.3px;
 
   --ease-out-strong: cubic-bezier(0.165, 0.84, 0.44, 1);
   --ease-out-quint: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-strong: cubic-bezier(0.895, 0.03, 0.685, 0.22);
   --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
+  /* Replaces Tailwind's weak default, so `ease-out` reads as responsive (and matches message enter) */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+
+  /* Motion (05-ui.md §7.6). Each has a fade-only twin for reduced motion. */
+  --animate-message-in: message-in 240ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  --animate-rise-in: rise-in 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-pop-in: pop-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-fade-in: fade-in 120ms ease-out both;
+  --animate-typing: typing 1s ease-in-out infinite;
+  --animate-typing-fade: typing-fade 1s ease-in-out infinite;
+
+  @keyframes message-in {
+    from {
+      opacity: 0;
+      transform: translateY(12px) scale(0.94);
+    }
+  }
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.9);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes typing {
+    0%,
+    60%,
+    100% {
+      opacity: 0.35;
+      transform: none;
+    }
+    30% {
+      opacity: 1;
+      transform: translateY(-2px);
+    }
+  }
+  @keyframes typing-fade {
+    0%,
+    60%,
+    100% {
+      opacity: 0.35;
+    }
+    30% {
+      opacity: 1;
+    }
+  }
+}
+
+/* Press feedback for anything clickable: it answers on pointer-down. Hover colours ease in 100ms (§7.6). */
+@utility pressable {
+  transition-property: transform, background-color, color, opacity;
+  transition-duration: 100ms;
+  transition-timing-function: ease-out;
+  &:active:not(:disabled) {
+    transform: scale(0.97);
+  }
 }
 
 @layer base {
@@ -232,5 +304,10 @@
   }
   button {
     font: inherit;
+  }
+  /* Blue is for focus (see Fills); keyboard focus is always visible */
+  :focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
   }
 }

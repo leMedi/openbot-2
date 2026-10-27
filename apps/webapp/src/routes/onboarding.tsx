@@ -42,13 +42,19 @@ function OnboardingPage() {
             <li key={step.key} className="flex items-center gap-3">
               <span
                 className={cn(
-                  'grid size-6 place-items-center rounded-full text-sm',
+                  'grid size-6 place-items-center rounded-full text-sm transition-colors duration-200',
                   status?.[step.key] ? 'bg-green/15 text-green-foreground' : step === current ? 'bg-primary text-primary-foreground' : 'bg-secondary',
                 )}
               >
-                {status?.[step.key] ? '✓' : index + 1}
+                {status?.[step.key] ? (
+                  <span key="done" className="motion-safe:animate-pop-in motion-reduce:animate-fade-in">
+                    ✓
+                  </span>
+                ) : (
+                  index + 1
+                )}
               </span>
-              <span className={step === current ? 'font-medium' : 'text-muted-foreground'}>{step.title}</span>
+              <span className={cn('transition-colors duration-200', step === current ? 'font-medium' : 'text-muted-foreground')}>{step.title}</span>
             </li>
           ))}
         </ol>
@@ -56,7 +62,10 @@ function OnboardingPage() {
         {error && <p className="text-destructive-foreground">{error}</p>}
 
         {current && (
-          <section className="flex flex-col gap-4 rounded-xl border border-border p-5">
+          <section
+            key={current.key}
+            className="flex flex-col gap-4 rounded-xl border border-border p-5 motion-safe:animate-rise-in motion-reduce:animate-fade-in"
+          >
             <header>
               <h2 className="text-lg font-semibold">{current.title}</h2>
               <p className="text-muted-foreground">{current.description}</p>
@@ -78,7 +87,7 @@ function OnboardingPage() {
           <button
             type="button"
             onClick={() => navigate({ to: '/' })}
-            className="self-start rounded-md bg-primary px-3 py-1.5 text-primary-foreground hover:bg-primary-hover"
+            className="pressable self-start rounded-md bg-primary px-3 py-1.5 text-primary-foreground hover:bg-primary-hover"
           >
             Open OpenBot
           </button>
@@ -121,7 +130,7 @@ function DefaultModelStep({ onChosen }: { onChosen: () => void }) {
         aria-label="Default model"
         value={choice}
         onChange={(event) => setChoice(event.target.value)}
-        className="rounded-md border border-input bg-input-fill px-2.5 py-1.5 text-base"
+        className="rounded-md border border-input bg-input-fill px-2.5 py-1.5 text-base outline-offset-0"
       >
         {models?.map((model) => (
           <option key={model.ref} value={model.ref}>
@@ -133,7 +142,7 @@ function DefaultModelStep({ onChosen }: { onChosen: () => void }) {
       <button
         type="submit"
         disabled={!choice}
-        className="self-end rounded-md bg-primary px-3 py-1.5 text-base text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
+        className="pressable self-end rounded-md bg-primary px-3 py-1.5 text-base text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
       >
         Continue
       </button>

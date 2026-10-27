@@ -13,7 +13,7 @@ import { avatarPalette, BotAvatar } from './bot-avatar.tsx'
 
 const followDefault = ''
 
-const inputClass = 'rounded-md border border-input bg-input-fill px-2.5 py-1.5 text-base outline-none focus:border-ring'
+const inputClass = 'rounded-md border border-input bg-input-fill px-2.5 py-1.5 text-base outline-offset-0'
 
 /** Name, title, instructions, avatar and model of a new bot. */
 export function NewBotForm({
@@ -83,7 +83,7 @@ export function NewBotForm({
                 aria-checked={entry === shape}
                 aria-label={entry}
                 onClick={() => setShape(entry)}
-                className={cn('rounded-md p-0.5', entry === shape ? 'bg-selected' : 'hover:bg-secondary')}
+                className={cn('pressable rounded-md p-0.5', entry === shape ? 'bg-selected' : 'hover:bg-secondary')}
               >
                 <BotAvatar shape={entry} color={color} size={22} />
               </button>
@@ -98,7 +98,7 @@ export function NewBotForm({
                 aria-checked={entry === color}
                 aria-label={entry}
                 onClick={() => setColor(entry)}
-                className={cn('size-5 rounded-full ring-offset-2 ring-offset-popover', entry === color && 'ring-2 ring-ring')}
+                className={cn('pressable size-5 rounded-full ring-offset-2 ring-offset-popover', entry === color && 'ring-2 ring-ring')}
                 style={{ background: `linear-gradient(135deg, ${avatarPalette[entry].join(', ')})` }}
               />
             ))}
@@ -107,7 +107,7 @@ export function NewBotForm({
       </div>
 
       <Field label="Name" htmlFor="bot-name" hint="How you and other bots mention it; no two bots share one.">
-        <input id="bot-name" required autoFocus placeholder="Rex" value={name} onChange={(event) => setName(event.target.value)} className={inputClass} />
+        <input id="bot-name" required autoFocus data-autofocus placeholder="Rex" value={name} onChange={(event) => setName(event.target.value)} className={inputClass} />
       </Field>
 
       <Field label="Title" htmlFor="bot-title">
@@ -140,14 +140,14 @@ export function NewBotForm({
 
       <footer className="flex justify-end gap-2">
         {onCancel && (
-          <button type="button" onClick={onCancel} className="rounded-md bg-secondary px-3 py-1.5 text-base hover:bg-secondary-hover">
+          <button type="button" onClick={onCancel} className="pressable rounded-md bg-secondary px-3 py-1.5 text-base hover:bg-secondary-hover">
             Cancel
           </button>
         )}
         <button
           type="submit"
           disabled={saving || !name.trim()}
-          className="rounded-md bg-primary px-3 py-1.5 text-base text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
+          className="pressable rounded-md bg-primary px-3 py-1.5 text-base text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
         >
           {submitLabel}
         </button>
