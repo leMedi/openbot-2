@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { interruptedNote } from '@openbot/agent'
+import { interruptedNote, supersededNote } from '@openbot/agent'
 import { callsTools, endsSilently, held, says } from '@openbot/agent/testing'
 import type { BotInfo, NewBot } from '@openbot/api-contract'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -244,16 +244,18 @@ describe('waking a busy bot', () => {
     expect(server.providers.pendingTurns).toBe(0)
   })
 
-  it('never interrupts a run the owner steered, even one a bot started', async () => {
+  it("is interrupted by the owner's message, and its work runs again after it; a priority message never interrupts the owner's run", async () => {
     const { server, rex, ana } = await startWithTeam()
     const digest = held(callsTools(['sendMessage', { text: 'Half a digest' }]))
+    const reply = held(callsTools(['sendMessage', { text: 'Release noted.' }]))
     server.providers.scriptFor(
       'Ana',
       digest,
-      // Steered: the owner's message joined the run, which goes on.
-      callsTools(['sendMessage', { text: 'Digest, with the release.' }]),
+      reply,
       endsSilently(),
-      // Then the priority message.
+      // The priority message, then the digest again.
+      endsSilently(),
+      callsTools(['sendMessage', { text: 'Digest, with the release.' }]),
       endsSilently(),
     )
     server.providers.scriptFor('Rex', callsTools(['message_bot', { to: 'Ana', text: 'The build is down!', priority: true }]), endsSilently())
@@ -261,45 +263,68 @@ describe('waking a busy bot', () => {
     await server.runtime.wake(ana.id, { lane: 'background', text: 'Write the daily digest', id: 'digest-1' })
     await digest.requested
     await server.client.chats.send({ chatId: ana.chatId, text: 'Also mention the release' })
+    await reply.requested
     await server.runtime.wake(rex.id, { lane: 'bot', text: 'Warn Ana', id: 'warn-1' })
     await untilIdle(server, rex)
-    digest.release()
+    reply.release()
     await untilIdle(server, ana)
 
-    expect((await transcript(server, ana)).map(([, , text]) => text)).toEqual(['Also mention the release', 'The build is down!', 'Digest, with the release.'])
+    expect((await transcript(server, ana)).map(([, , text]) => text)).toEqual([
+      'Also mention the release',
+      'The build is down!',
+      'Release noted.',
+      'Digest, with the release.',
+    ])
     const requests = requestsOf(server, 'Ana')
-    expect(requests).toHaveLength(4)
-    expect(JSON.stringify(requests.map(lastMessage))).not.toContain(interruptedNote)
+    expect(requests).toHaveLength(6)
+    expect(lastMessage(requests[1]!)).toContain('Also mention the release')
     expect(lastMessage(requests[3]!)).toContain('The build is down!')
+    expect(lastMessage(requests[4]!)).toContain('Write the daily digest')
+    expect(lastMessage(requests[4]!)).toContain(interruptedNote)
     expect(server.providers.pendingTurns).toBe(0)
   })
 
-  it('drops the queued messages when the owner stops it, keeping them in its DM', async () => {
+  it("delivers the work queued behind a run the owner's message interrupts, in lane order", async () => {
     const { server, rex, ana } = await startWithTeam()
     const working = held(callsTools(['sendMessage', { text: 'Still writing…' }]))
-    server.providers.scriptFor('Ana', working)
+    server.providers.scriptFor(
+      'Ana',
+      working,
+      callsTools(['sendMessage', { text: 'Summary ready.' }]),
+      endsSilently(),
+      // Rex's message, then the routine.
+      endsSilently(),
+      endsSilently(),
+    )
     server.providers.scriptFor('Rex', callsTools(['message_bot', { to: 'Ana', text: 'Lunch?' }]), endsSilently())
 
     await server.client.chats.send({ chatId: ana.chatId, text: 'Write the report' })
     await working.requested
+    await server.runtime.wake(ana.id, { lane: 'background', text: 'Write the daily digest', id: 'digest-1' })
     await server.runtime.wake(rex.id, { lane: 'bot', text: 'Ask Ana about lunch', id: 'lunch-1' })
     await untilIdle(server, rex)
-    await server.client.bots.stop({ botId: ana.id })
+    await server.client.chats.send({ chatId: ana.chatId, text: 'Actually, just summarise it' })
     await untilIdle(server, ana)
 
-    expect(requestsOf(server, 'Ana')).toHaveLength(1)
     expect(await transcript(server, ana)).toEqual([
       ['You', null, 'Write the report'],
       ['Rex', '← Rex', 'Lunch?'],
+      ['You', null, 'Actually, just summarise it'],
+      ['Ana', null, 'Summary ready.'],
     ])
+    const requests = requestsOf(server, 'Ana')
+    expect(requests).toHaveLength(5)
+    expect(lastMessage(requests[1]!)).toContain(supersededNote)
+    expect(lastMessage(requests[3]!)).toContain('Lunch?')
+    expect(lastMessage(requests[4]!)).toContain('Write the daily digest')
     expect(server.providers.pendingTurns).toBe(0)
   })
 
-  it('drops work interrupted a second time', async () => {
+  it('runs work again however often it is interrupted', async () => {
     const { server, rex, ana } = await startWithTeam()
     const first = held(callsTools(['sendMessage', { text: 'Half a digest' }]))
     const again = held(callsTools(['sendMessage', { text: 'Half a digest, again' }]))
-    server.providers.scriptFor('Ana', first, endsSilently(), again, endsSilently())
+    server.providers.scriptFor('Ana', first, endsSilently(), again, endsSilently(), endsSilently())
     server.providers.scriptFor(
       'Rex',
       callsTools(['message_bot', { to: 'Ana', text: 'The build is down!', priority: true }]),
@@ -316,8 +341,10 @@ describe('waking a busy bot', () => {
     await untilIdle(server, rex, ana)
 
     const requests = requestsOf(server, 'Ana')
-    expect(requests).toHaveLength(4)
+    expect(requests).toHaveLength(5)
     expect(lastMessage(requests[3]!)).toContain('The build is down again!')
+    expect(lastMessage(requests[4]!)).toContain('Write the daily digest')
+    expect(lastMessage(requests[4]!)).toContain(interruptedNote)
     expect(await transcript(server, ana)).toEqual([
       ['Rex', '← Rex', 'The build is down!'],
       ['Rex', '← Rex', 'The build is down again!'],

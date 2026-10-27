@@ -1,8 +1,8 @@
-import { replyReminder, steerPending } from '@openbot/agent'
-import { callsTools, endsSilently, fails, held, says } from '@openbot/agent/testing'
+import { replyReminder, supersededNote } from '@openbot/agent'
+import { callsTools, endsSilently, fails, held, says, slowTool } from '@openbot/agent/testing'
 import type { BotInfo, NewBot } from '@openbot/api-contract'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createTestServer, restartTestServer, type TestServer } from './testing/harness.ts'
+import { createTestServer, restartTestServer, type TestServer, type TestServerOptions } from './testing/harness.ts'
 
 const servers: TestServer[] = []
 afterEach(async () => {
@@ -19,8 +19,8 @@ const rex: NewBot = {
 }
 
 /** A finished onboarding: the `fake` provider connected, `fake/fake-model` as default, and Rex. */
-async function startWithRex() {
-  const server = await createTestServer()
+async function startWithRex(options: TestServerOptions = {}) {
+  const server = await createTestServer(options)
   servers.push(server)
   await server.connectProvider()
   await server.client.models.updateSettings({ defaultModel: 'fake/fake-model' })
@@ -269,11 +269,11 @@ describe('the reply guarantee', () => {
   })
 })
 
-describe('steering', () => {
-  it("delivers a message sent while the bot works to its current run, holding back its answer to the old request", async () => {
+describe('a new message while the bot works', () => {
+  it('supersedes its run, holding back its answer to the old request; the next run answers both', async () => {
     const { server, bot } = await startWithRex()
     const stale = held(callsTools(['sendMessage', { text: 'Done, I fixed it with npm.' }]))
-    server.providers.script(stale, callsTools(['sendMessage', { text: 'Switching to pnpm.' }]), endsSilently())
+    server.providers.script(stale, callsTools(['sendMessage', { text: 'Fixed it, with pnpm.' }]), endsSilently())
 
     await server.client.chats.send({ chatId: bot.chatId, text: 'Fix the build' })
     await stale.requested
@@ -284,50 +284,48 @@ describe('steering', () => {
     expect(await texts(server, bot)).toEqual([
       ['owner', 'Fix the build'],
       ['owner', 'Use pnpm, not npm'],
-      ['bot', 'Switching to pnpm.'],
+      ['bot', 'Fixed it, with pnpm.'],
     ])
-    // One run: the steer joined it after the held-back message, instead of starting a run of its own.
-    expect(server.providers.requests).toHaveLength(3)
-    const steered = JSON.stringify(server.providers.requests[1]!.messages)
-    expect(steered).toContain('Done, I fixed it with npm.')
-    expect(steered).toContain(steerPending)
-    expect(steered).toContain('Use pnpm, not npm')
+    const superseding = JSON.stringify(server.providers.requests[1]!.messages)
+    expect(superseding).toContain('Fix the build')
+    expect(superseding).toContain(supersededNote)
+    expect(superseding).toContain('Use pnpm, not npm')
     expect(server.providers.pendingTurns).toBe(0)
   })
-})
 
-describe('stopping', () => {
-  it('aborts the current run, leaving the bot idle and ready for the next message', async () => {
-    const { server, bot } = await startWithRex()
-    const runaway = held(callsTools(['sendMessage', { text: 'Still deleting files…' }]))
-    server.providers.script(runaway)
+  it('interrupts a long tool call, and the next run sees every message the old one had not answered', async () => {
+    const slow = slowTool('long_task')
+    const { server, bot } = await startWithRex({ tools: [slow.tool] })
+    server.providers.script(callsTools(['long_task', {}]), callsTools(['sendMessage', { text: 'Dropped that; deploying now.' }]), endsSilently())
 
-    await server.client.chats.send({ chatId: bot.chatId, text: 'Clean up the disk' })
-    await runaway.requested
-    await server.client.bots.stop({ botId: bot.id })
-
-    const [stopped] = await server.client.bots.list()
-    expect(stopped).toMatchObject({ working: false, error: null })
-    expect(await texts(server, bot)).toEqual([['owner', 'Clean up the disk']])
-
-    server.providers.script(callsTools(['sendMessage', { text: 'Stopped. What next?' }]), endsSilently())
-    await server.client.chats.send({ chatId: bot.chatId, text: 'Sorry, wrong disk' })
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Rebuild the index' })
+    await slow.started
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Actually, skip that' })
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Deploy instead' })
     await untilIdle(server, bot)
-    expect((await texts(server, bot)).at(-1)).toEqual(['bot', 'Stopped. What next?'])
+
+    expect(slow.interrupted).toBe(true)
+    expect((await texts(server, bot)).at(-1)).toEqual(['bot', 'Dropped that; deploying now.'])
+    const next = JSON.stringify(server.providers.requests[1]!.messages)
+    for (const text of ['Rebuild the index', 'Actually, skip that', 'Deploy instead']) expect(next).toContain(text)
+    expect(server.providers.requests).toHaveLength(3)
     expect(server.providers.pendingTurns).toBe(0)
   })
 
-  it('does nothing to an idle bot', async () => {
-    const { server, bot } = await startWithRex()
+  it('detaches a run that ignores its interrupt, after the watchdog gives it time, and runs the message', async () => {
+    const wedged = slowTool('long_task', { ignoresInterrupt: true })
+    const { server, bot } = await startWithRex({ tools: [wedged.tool], watchdog: { interruptAfterMs: 200, detachAfterMs: 100 } })
+    server.providers.script(callsTools(['long_task', {}]), callsTools(['sendMessage', { text: 'Here now.' }]), endsSilently())
 
-    await server.client.bots.stop({ botId: bot.id })
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Rebuild the index' })
+    await wedged.started
+    const sent = Date.now()
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Are you there?' })
+    await untilIdle(server, bot)
 
-    expect((await server.client.bots.list())[0]).toMatchObject({ working: false, error: null })
-  })
-
-  it('refuses an unknown bot', async () => {
-    const { server } = await startWithRex()
-
-    await expect(server.client.bots.stop({ botId: 'nobody' })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(Date.now() - sent).toBeGreaterThanOrEqual(300)
+    expect((await texts(server, bot)).at(-1)).toEqual(['bot', 'Here now.'])
+    expect(server.providers.pendingTurns).toBe(0)
+    wedged.finish()
   })
 })

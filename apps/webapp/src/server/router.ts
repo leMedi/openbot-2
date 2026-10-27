@@ -219,11 +219,6 @@ export const router = os.router({
       for (const groupId of bot.leftGroups) await publishChat(context, groupId)
     }),
 
-    stop: os.bots.stop.handler(async ({ context, input }) => {
-      if (!(await getBot(context.db, input.botId))) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
-      await context.runtime.stop(input.botId)
-    }),
-
     getOrchestratorModes: os.bots.getOrchestratorModes.handler(async ({ context, input }) => {
       const modes = await readBotOrchestratorModes(context.db, input.botId)
       if (!modes) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })

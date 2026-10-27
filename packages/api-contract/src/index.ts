@@ -409,10 +409,6 @@ export const contract = {
       })
       .input(z.object({ botId: z.string() }))
       .output(z.void()),
-    stop: oc
-      .route({ method: 'POST', path: '/bots/{botId}/stop', summary: "Abort the bot's current run; returns once it is idle" })
-      .input(z.object({ botId: z.string() }))
-      .output(z.void()),
     getOrchestratorModes: oc
       .route({ method: 'GET', path: '/bots/{botId}/orchestrator', summary: "The bot's orchestrator modes" })
       .input(z.object({ botId: z.string() }))

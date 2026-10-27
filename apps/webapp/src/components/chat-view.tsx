@@ -58,7 +58,6 @@ export function ChatView({
   composerLabel,
   emptyText,
   typing,
-  stopBot,
   allowFiles,
   showAuthors,
   onScreen,
@@ -74,8 +73,6 @@ export function ChatView({
   emptyText: string
   /** The bot shown typing at the end: a DM's bot while it works, a group's member taking its turn. */
   typing: BotInfo | undefined
-  /** The bot the composer's stop button stops while it works, in a DM. */
-  stopBot?: BotInfo
   /** Whether the owner can attach files. */
   allowFiles: boolean
   /** Shows each bot's name above its messages, as in a group chat. */
@@ -272,7 +269,6 @@ export function ChatView({
       <Composer
         chatId={chatId}
         label={composerLabel}
-        stopBot={stopBot}
         allowFiles={allowFiles}
         files={files}
         notice={notice}
@@ -475,14 +471,13 @@ function FileChip({ file, onRemove }: { file: File; onRemove?: () => void }) {
 }
 
 /**
- * Writes to the chat. In a DM, a message sent while the bot works steers its run; with nothing typed or attached, the
- * button stops the run instead. Files come from the + button, a paste, or a drop anywhere on the chat. The chat's unsent text
- * is kept by the live store, so switching chats doesn't lose it.
+ * Writes to the chat. In a DM, a message sent while the bot works supersedes its run: there is no Stop, as in Grok.
+ * Files come from the + button, a paste, or a drop anywhere on the chat. The chat's unsent text is kept by the live
+ * store, so switching chats doesn't lose it.
  */
 function Composer({
   chatId,
   label,
-  stopBot,
   allowFiles,
   files,
   notice,
@@ -492,7 +487,6 @@ function Composer({
 }: {
   chatId: string
   label: string
-  stopBot: BotInfo | undefined
   allowFiles: boolean
   files: File[]
   notice: string | undefined
@@ -502,8 +496,6 @@ function Composer({
 }) {
   const live = useLive()
   const text = live.drafts.get(chatId) ?? ''
-  const [error, setError] = useState<string>()
-  const [stopping, setStopping] = useState(false)
   const picker = useRef<HTMLInputElement>(null)
 
   function send() {
@@ -513,24 +505,8 @@ function Composer({
     onSend(draft)
   }
 
-  async function stop() {
-    if (!stopBot) return
-    setStopping(true)
-    setError(undefined)
-    try {
-      await api().bots.stop({ botId: stopBot.id })
-    } catch (caught) {
-      setError(errorMessage(caught))
-    } finally {
-      setStopping(false)
-    }
-  }
-
-  const canStop = !!stopBot?.working && !text.trim() && !files.length
-
   return (
     <div className="px-[max(24px,calc((100%-700px)/2))] pt-2 pb-[18px]">
-      {error && <p className="pb-1 text-sm text-destructive-foreground">{error}</p>}
       {notice && <p className="pb-1 text-[10px] text-muted-foreground">{notice}</p>}
       <form
         onSubmit={(event) => {
@@ -593,24 +569,11 @@ function Composer({
             }}
             className="max-h-60 min-h-12 flex-1 resize-none bg-transparent px-1 leading-[1.4] outline-none [field-sizing:content]"
           />
-          {canStop ? (
-            <button
-              type="button"
-              aria-label={`Stop ${stopBot?.name}`}
-              title="Stop"
-              disabled={stopping}
-              onClick={() => void stop()}
-              className={roundButton}
-            >
-              <span className="size-2.5 rounded-[2px] bg-current motion-safe:animate-pop-in motion-reduce:animate-fade-in" />
-            </button>
-          ) : (
-            <button type="submit" aria-label="Send" disabled={!text.trim() && !files.length} className={roundButton}>
-              <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" />
-              </svg>
-            </button>
-          )}
+          <button type="submit" aria-label="Send" disabled={!text.trim() && !files.length} className={roundButton}>
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" />
+            </svg>
+          </button>
         </div>
       </form>
     </div>
