@@ -1,4 +1,4 @@
-import { BotRuntime, type BotTool, type ModelProvider, Providers } from '@openbot/agent'
+import { type BotComputer, BotRuntime, type BotTool, type ModelProvider, Providers } from '@openbot/agent'
 import type { ChatInfo, LiveEvent } from '@openbot/api-contract'
 import { AllowAllOrchestrator, EventBus, getChatSummary, type Orchestrator, postMessage, SecretBox } from '@openbot/core'
 import type { Db } from '@openbot/db'
@@ -27,6 +27,7 @@ export async function createServerContext({
   providers: modelProviders,
   agentStoragePath,
   orchestrator = new AllowAllOrchestrator(),
+  computer,
   tools,
 }: {
   db: Db
@@ -38,6 +39,8 @@ export async function createServerContext({
   agentStoragePath?: string
   /** Reviews bots' side-effecting actions; allows everything in P0. */
   orchestrator?: Orchestrator
+  /** Where bots' shell and file tools run: the real computer, or a fake in tests. */
+  computer: BotComputer
   /** Tools beyond the built-in ones, e.g. a test's. */
   tools?: BotTool[]
 }): Promise<ServerContext> {
@@ -48,6 +51,7 @@ export async function createServerContext({
     models: providers.models,
     storagePath: agentStoragePath,
     orchestrator,
+    computer,
     tools,
     async sendMessage(bot, text, idempotencyKey) {
       const { message, created } = await postMessage(db, {

@@ -10,3 +10,4 @@ export {
   type SignInStep,
 } from './providers.ts'
 export { BotRuntime, type BotStatus, type BotTool, NoModelError, replyReminder, steerPending, type BotRuntimeOptions } from './runtime.ts'
+export { BotComputer, botUser, openBotComputer, userExists } from './computer.ts'

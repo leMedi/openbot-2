@@ -142,6 +142,13 @@ Grok's rules: at most 3 rounds and 10 member turns per human message, speaker or
   - **Desktop:** cua-driver (MIT), one per display, over MCP: accessibility tree with element tokens, then act, then verify the effect.
 - When stuck (login, captcha, 2FA) the subagent returns `needs_help` and the bot posts a **Take over** card that opens noVNC; the bot waits for "Done".
 
+As built (#11), shell and files:
+
+- Every bot has pi-durable's `bash`, `read`, `write` and `edit` tools. They run in a `RemoteExecutionEnv` on one pi-env daemon (`localDaemon()`), which the server starts as `openbot` with `sudo --non-interactive --set-home --user=openbot`, started on the first tool call and stopped with the runtime. A bot's environment starts in `$OPENBOT_HOME/bots/<id>/`, made on first use; it reaches the whole computer. Where there is no `openbot` user (the server running straight on a developer's machine) the daemon runs as the server's user.
+- The prompt tells each bot it works as `openbot` with sudo, and where its folder, `shared/` and every other bot's folder are.
+- `bash`, `write` and `edit` are reviewed under the `shell` surface and written to the audit log; `read` declares none. Deleting a bot deletes its folder.
+- `BotComputer` (`@openbot/agent`) is the seam: Seam 1 uses `fakeBotComputer`, with files in a temporary home and commands sent to the fake `Computer`'s `shell.exec`, so tests script and see them. `computer.image.test.ts` runs the same scenarios on the real computer inside the runtime image (skipped elsewhere).
+
 ---
 
 ## 5. Agent runtime (offload to pi)
