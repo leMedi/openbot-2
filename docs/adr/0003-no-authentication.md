@@ -1,6 +1,6 @@
 # No authentication; private networks only
 
-OpenBot has no login. An instance belongs to one owner and is expected to run on a private network, so anyone who can reach the port is the owner. How the network is kept private (a home LAN, a VPN such as Tailscale, a firewall) is the owner's business: OpenBot knows nothing about it and ships no network setup. Securing or protecting ports is not a priority for now. All owner resolution goes through a single `getOwner(request)` seam so authentication can be added in one place later.
+OpenBot has no login. An instance belongs to one owner and is expected to run on a private network, so anyone who can reach the port is the owner. How the network is kept private (a home LAN, a VPN, a firewall) is the owner's business: OpenBot knows nothing about it and ships no network setup. Securing or protecting ports is not a priority for now. All owner resolution goes through a single `getOwner(request)` seam so authentication can be added in one place later.
 
 ## Consequences
 

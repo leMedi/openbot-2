@@ -4,9 +4,9 @@
 #   curl -fsSL <site URL>/install.sh | bash -s -- --yes --dir /srv/openbot --port 3000
 #
 # It checks the host (Linux x86_64 or arm64, Docker, Compose v2; offers to install Docker with get.docker.com), asks for
-# the install dir, port and an optional Tailscale auth key (or takes them as flags), downloads the latest release's
-# compose.yml and writes an .env beside it with a generated secret key and the runtime image the release pins, starts
-# OpenBot, waits until it's healthy and prints its URL.
+# the install dir and port (or takes them as flags), downloads the latest release's compose.yml and writes an .env
+# beside it with a generated secret key and the runtime image the release pins, starts OpenBot, waits until it's healthy
+# and prints its URL.
 #
 # Re-running it in the same dir keeps the .env: the only line it ever changes there is OPENBOT_IMAGE, and only when you
 # accept the runtime update it offers. It refreshes compose.yml from the latest release (keeping the old one as
@@ -14,8 +14,7 @@
 #
 # Environment (all optional): OPENBOT_SITE_URL (where this script is served from), OPENBOT_RELEASES_URL (where releases
 # are downloaded from: <url>/latest/download/<file>, or <url>/download/v<version>/<file> with --version),
-# OPENBOT_GET_DOCKER_URL (Docker's install script), OPENBOT_HEALTH_TIMEOUT (seconds, 600) and
-# OPENBOT_TAILSCALE_TIMEOUT (seconds, 90).
+# OPENBOT_GET_DOCKER_URL (Docker's install script) and OPENBOT_HEALTH_TIMEOUT (seconds, 600).
 set -euo pipefail
 
 # Set from release.env when a release is packaged (scripts/src/install-script.ts); OPENBOT_SITE_URL and
@@ -36,10 +35,7 @@ Options:
   --dir <dir>               Install dir, holding compose.yml and .env (default: ~/openbot).
   --port <port>             Host port OpenBot listens on (default: 3000).
   --public-url <url>        The URL you open OpenBot at, used for links and sign-in redirects
-                            (default: http://<this host's address>:<port>, or the tailnet URL with Tailscale).
-  --tailscale-key <key>     Add the Tailscale sidecar, joining your tailnet with this auth key, to serve OpenBot over
-                            HTTPS at https://<hostname>.<tailnet>.ts.net.
-  --tailscale-hostname <n>  The sidecar's name on your tailnet (default: openbot).
+                            (default: http://<this host's address>:<port>).
   --version <version>       Install this release instead of the latest, e.g. 0.1.42.
   --image <image>           Run this runtime image instead of the one the release pins.
   -h, --help                Show this help.
@@ -70,17 +66,6 @@ ask() {
     IFS= read -r answer < /dev/tty || true
   fi
   printf '%s' "${answer:-$2}"
-}
-
-# ask_secret <question>: like ask, without echoing; empty by default.
-ask_secret() {
-  local answer=
-  if can_ask; then
-    printf '%s: ' "$1" > /dev/tty
-    IFS= read -rs answer < /dev/tty || true
-    printf '\n' > /dev/tty
-  fi
-  printf '%s' "${answer}"
 }
 
 # confirm <question> <y|n>: yes with --yes; no without a terminal, so nothing is installed or changed unasked.
@@ -190,43 +175,6 @@ replace_file() {
   cp "${file}" "${target}"
 }
 
-write_tailscale_files() {
-  cat > "${work}/compose.tailscale.yml" << 'EOF'
-# The Tailscale sidecar, added by the installer when given an auth key (COMPOSE_FILE in .env lists this file). It joins
-# your tailnet as $OPENBOT_TAILSCALE_HOSTNAME and serves OpenBot over HTTPS at https://<hostname>.<tailnet>.ts.net,
-# with a certificate from Tailscale (MagicDNS and HTTPS must be on for the tailnet). The auth key is only used to join;
-# the node's state is kept in the tailscale-state volume.
-services:
-  tailscale:
-    image: ${OPENBOT_TAILSCALE_IMAGE:-tailscale/tailscale:stable}
-    restart: unless-stopped
-    hostname: ${OPENBOT_TAILSCALE_HOSTNAME:-openbot}
-    environment:
-      TS_AUTHKEY: ${TS_AUTHKEY:-}
-      TS_HOSTNAME: ${OPENBOT_TAILSCALE_HOSTNAME:-openbot}
-      TS_STATE_DIR: /var/lib/tailscale
-      TS_USERSPACE: "true"
-      TS_SERVE_CONFIG: /config/serve.json
-    volumes:
-      - tailscale-state:/var/lib/tailscale
-      - ./tailscale-serve.json:/config/serve.json:ro
-    depends_on:
-      - openbot
-
-volumes:
-  tailscale-state:
-EOF
-  # Tailscale fills in TS_CERT_DOMAIN, the node's tailnet name; screens' streams are WebSockets, which it proxies too.
-  cat > "${work}/tailscale-serve.json" << 'EOF'
-{
-  "TCP": { "443": { "HTTPS": true } },
-  "Web": { "${TS_CERT_DOMAIN}:443": { "Handlers": { "/": { "Proxy": "http://openbot:3000" } } } }
-}
-EOF
-  replace_file "${work}/compose.tailscale.yml" "${dir}/compose.tailscale.yml"
-  replace_file "${work}/tailscale-serve.json" "${dir}/tailscale-serve.json"
-}
-
 # 32 random bytes, base64url, like the key the server generates itself when none is given.
 generate_secret() {
   head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n'
@@ -258,14 +206,8 @@ write_env() {
     printf 'OPENBOT_PUBLIC_URL=%s\n' "${public_url}"
     printf '%s\n' "${secret_note}"
     printf 'OPENBOT_SECRET_KEY=%s\n' "${secret}"
-    if [[ -n "${tailscale_key}" ]]; then
-      printf '\n# The Tailscale sidecar (compose.tailscale.yml).\n'
-      printf 'COMPOSE_FILE=compose.yml:compose.tailscale.yml\n'
-      printf 'OPENBOT_TAILSCALE_HOSTNAME=%s\n' "${tailscale_hostname}"
-      printf 'TS_AUTHKEY=%s\n' "${tailscale_key}"
-    fi
   } > "${work}/.env"
-  # Only this user may read it: it holds the secret key and the Tailscale auth key.
+  # Only this user may read it: it holds the secret key.
   install -m 0600 "${work}/.env" "${dir}/.env"
 }
 
@@ -328,50 +270,32 @@ wait_for_health() {
   die "OpenBot didn't become healthy on port ${port} within ${health_timeout}s; its logs are above (docker compose logs in ${dir})."
 }
 
-# The sidecar's name on the tailnet (e.g. openbot.tail1234.ts.net), once it has joined.
-tailscale_name() {
-  local deadline=$((SECONDS + tailscale_timeout)) name
-  while ((SECONDS < deadline)); do
-    name="$(compose exec -T tailscale tailscale status --json 2> /dev/null \
-      | sed -n 's/^ *"DNSName": "\([^"]*\)".*/\1/p' | head -n 1)" || true
-    if [[ -n "${name}" ]]; then
-      printf '%s' "${name%.}"
-      return 0
-    fi
-    sleep 3
-  done
-  return 1
-}
-
 main() {
   site_url="${OPENBOT_SITE_URL:-${default_site_url}}"
   releases_url="${OPENBOT_RELEASES_URL:-${default_releases_url}}"
   releases_url="${releases_url%/}"
   get_docker_url="${OPENBOT_GET_DOCKER_URL:-https://get.docker.com}"
   health_timeout="${OPENBOT_HEALTH_TIMEOUT:-600}"
-  tailscale_timeout="${OPENBOT_TAILSCALE_TIMEOUT:-90}"
 
   yes=false
-  local dir_flag="" port_flag="" public_url_flag="" tailscale_key_flag="" tailscale_hostname_flag=""
+  local dir_flag="" port_flag="" public_url_flag=""
   image_flag=""
   version=""
   while (($# > 0)); do
     case "$1" in
       -y | --yes) yes=true ;;
-      --dir | --port | --public-url | --tailscale-key | --tailscale-hostname | --version | --image)
+      --dir | --port | --public-url | --version | --image)
         (($# >= 2)) || die "$1 needs a value."
         case "$1" in
           --dir) dir_flag="$2" ;;
           --port) port_flag="$2" ;;
           --public-url) public_url_flag="$2" ;;
-          --tailscale-key) tailscale_key_flag="$2" ;;
-          --tailscale-hostname) tailscale_hostname_flag="$2" ;;
           --version) version="$2" ;;
           --image) image_flag="$2" ;;
         esac
         shift
         ;;
-      --dir=* | --port=* | --public-url=* | --tailscale-key=* | --tailscale-hostname=* | --version=* | --image=*)
+      --dir=* | --port=* | --public-url=* | --version=* | --image=*)
         set -- "${1%%=*}" "${1#*=}" "${@:2}"
         continue
         ;;
@@ -397,16 +321,13 @@ main() {
   mkdir -p "${dir}"
   dir="$(cd "${dir}" && pwd)"
 
-  local fresh=true
   if [[ -f "${dir}/.env" ]]; then
-    fresh=false
     say "Found an install in ${dir}: keeping its .env"
     local flag
-    for flag in "${port_flag:+--port}" "${public_url_flag:+--public-url}" "${tailscale_key_flag:+--tailscale-key}" "${tailscale_hostname_flag:+--tailscale-hostname}"; do
+    for flag in "${port_flag:+--port}" "${public_url_flag:+--public-url}"; do
       if [[ -n "${flag}" ]]; then warn "${flag} is ignored on a re-run; change ${dir}/.env instead."; fi
     done
     replace_file "${work}/compose.yml" "${dir}/compose.yml"
-    if [[ "$(env_value COMPOSE_FILE)" == *compose.tailscale.yml* ]]; then write_tailscale_files; fi
     offer_runtime_update
     port="$(env_value OPENBOT_PORT)"
     port="${port:-3000}"
@@ -415,12 +336,9 @@ main() {
     if ! [[ "${port}" =~ ^[0-9]+$ ]] || ((port < 1 || port > 65535)); then
       die "the port must be a number from 1 to 65535: ${port}."
     fi
-    tailscale_key="${tailscale_key_flag:-$(ask_secret "Tailscale auth key, to serve OpenBot on your tailnet over HTTPS (Enter to skip)")}"
-    tailscale_hostname="${tailscale_hostname_flag:-openbot}"
     public_url="${public_url_flag:-http://$(host_address):${port}}"
     image="${image_flag:-${release_image}}"
     replace_file "${work}/compose.yml" "${dir}/compose.yml"
-    if [[ -n "${tailscale_key}" ]]; then write_tailscale_files; fi
     write_env
     say "Wrote ${dir}/compose.yml and ${dir}/.env (release ${release_version}, ${image})"
   fi
@@ -433,19 +351,6 @@ main() {
   local url
   url="$(env_value OPENBOT_PUBLIC_URL)"
   url="${url:-http://localhost:${port}}"
-  if [[ "$(env_value COMPOSE_FILE)" == *compose.tailscale.yml* ]]; then
-    local name
-    if name="$(tailscale_name)"; then
-      if [[ "${fresh}" == true && -z "${public_url_flag}" ]]; then
-        set_env_value OPENBOT_PUBLIC_URL "https://${name}"
-        compose up --detach
-        running="$(wait_for_health "${port}")"
-      fi
-      url="https://${name}"
-    else
-      warn "the Tailscale sidecar hasn't joined your tailnet yet (docker compose logs tailscale in ${dir}). Once it has, OpenBot is at https://<hostname>.<tailnet>.ts.net; set OPENBOT_PUBLIC_URL in ${dir}/.env to that."
-    fi
-  fi
 
   printf '\nOpenBot %s is running.\n\n  Open %s\n' "${running}" "${url}" >&2
   if [[ "${url}" != "http://localhost:${port}" ]]; then printf '  or http://localhost:%s on this machine\n' "${port}" >&2; fi

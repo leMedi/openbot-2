@@ -89,21 +89,21 @@ As built (#19):
 `curl -fsSL https://github.com/leMedi/openbot-2/releases/latest/download/install.sh | bash` for now (later `https://openbot.lemedi.dev/install.sh`). The URL comes from `OPENBOT_SITE_URL` in shared repo config and a GitHub Actions variable.
 
 1. Check Linux x86_64/arm64, Docker and Compose v2. Offer `get.docker.com` if Docker is missing.
-2. Ask (or take flags): install dir (`~/openbot`), port, Tailscale sidecar and auth key.
+2. Ask (or take flags): install dir (`~/openbot`) and port.
 3. Write `docker-compose.yml` and `.env` (generated secret, pinned runtime tag).
 4. `docker compose pull && up -d`, wait for `/api/health`, print the URL.
 
-Re-running never overwrites `.env`; it offers a runtime update. Flags: `--yes --dir --port --tailscale-key`.
+Re-running never overwrites `.env`; it offers a runtime update. Flags: `--yes --dir --port`.
 
 As built (#20):
 
 - **`scripts/install.sh`**, published by packaging as the release's `install.sh` with `default_site_url` and `default_releases_url` set from the release config (`scripts/src/install-script.ts`). The site is meant to serve it at `<site URL>/install.sh`, e.g. by redirecting to `<releases URL>/latest/download/install.sh`. `OPENBOT_SITE_URL` and `OPENBOT_RELEASES_URL` in the environment override the defaults.
 - **Release files**: `release.json` and `compose.yml` from `<releases URL>/latest/download/` (or `download/v<version>/` with `--version`), checked against the release's `SHA256SUMS`. The image pinned in `.env` is `release.json`'s `runtimeImage`.
-- **Prompts** read `/dev/tty`, so they work under `curl … | bash`: install dir, port, Tailscale auth key (hidden; empty skips). With `--yes`, or without a terminal, the defaults and flags are taken; but Docker is only installed, and the image only changed, with `--yes` or a yes on the terminal. Flags: `--yes --dir --port --public-url --tailscale-key --tailscale-hostname --version --image`.
+- **Prompts** read `/dev/tty`, so they work under `curl … | bash`: install dir and port. With `--yes`, or without a terminal, the defaults and flags are taken; but Docker is only installed, and the image only changed, with `--yes` or a yes on the terminal. Flags: `--yes --dir --port --public-url --version --image`.
 - **Docker**: missing → `get.docker.com` (`OPENBOT_GET_DOCKER_URL`) as root or with sudo; a user outside the docker group gets `sudo docker`; Compose v2 is required.
-- **`.env`** (mode 0600): `OPENBOT_IMAGE`, `OPENBOT_PORT`, `OPENBOT_PUBLIC_URL` (`http://<host's first address>:<port>`, or the tailnet URL), and `OPENBOT_SECRET_KEY` (32 random bytes, base64url, like the server's own). If the `openbot_openbot-data` volume already exists, the key is left empty with a warning, so the server keeps the key it generated there rather than a new one that can't read the stored credentials.
+- **`.env`** (mode 0600): `OPENBOT_IMAGE`, `OPENBOT_PORT`, `OPENBOT_PUBLIC_URL` (`http://<host's first address>:<port>`, or `--public-url`), and `OPENBOT_SECRET_KEY` (32 random bytes, base64url, like the server's own). If the `openbot_openbot-data` volume already exists, the key is left empty with a warning, so the server keeps the key it generated there rather than a new one that can't read the stored credentials.
 - **Re-run** (an `.env` in the dir): the `.env` is kept and flags that would change it are ignored with a warning. `compose.yml` is refreshed from the release (the old one kept as `.bak` if it differed). When the release pins a newer `r<N>` of the same image, it offers to update and changes only the `OPENBOT_IMAGE` line.
-- **Tailscale sidecar**, only with an auth key: `compose.tailscale.yml` (`tailscale/tailscale:stable`, userspace, state in the `tailscale-state` volume) and `tailscale-serve.json` (HTTPS on 443 proxying to `http://openbot:3000`), enabled by `COMPOSE_FILE=compose.yml:compose.tailscale.yml` in `.env`. After start it waits for the node's tailnet name, and on a first install sets `OPENBOT_PUBLIC_URL` to `https://<name>`.
+- **No network setup** (#50, ADR 0003): OpenBot serves plain HTTP on the port. Keeping that port on a private network is the owner's business.
 - **Start**: `docker compose up --detach` (pulls the image if it isn't there yet), then polls `http://127.0.0.1:<port>/api/health` until it reports `"status":"ok"` (`OPENBOT_HEALTH_TIMEOUT`, 600 s), and prints the version and URL. On timeout or if the container exits, it prints the logs and fails.
 - **Tests**: `scripts/smoke-install.sh <release dir>` serves the release from a `file://` URL laid out like GitHub's, then does an unattended install, a re-run (checking the `.env` didn't change), and an interactive install through `script`. CI's `install` job runs it.
 
@@ -389,7 +389,7 @@ As built (#21):
 
 ## 9. Mobile (P2)
 
-Expo app over the same oRPC API and SSE stream: bots, groups, chat, cards and approvals, a view-only computer preview, and Expo Push notifications. Dictation uses on-device Whisper (`whisper.rn`, model downloaded on first use); the webapp's mic uses whisper WASM. The phone must be on the tailnet.
+Expo app over the same oRPC API and SSE stream: bots, groups, chat, cards and approvals, a view-only computer preview, and Expo Push notifications. Dictation uses on-device Whisper (`whisper.rn`, model downloaded on first use); the webapp's mic uses whisper WASM. The phone must reach the instance's private network.
 
 ---
 

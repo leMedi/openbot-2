@@ -7,7 +7,7 @@ import { z } from 'zod'
 import { handleScreenUpgrade, serverScreenTickets } from './src/server/screen-stream.ts'
 
 // The one port (OPENBOT_PORT) and listen address (OPENBOT_HOST; 0.0.0.0 in the container). Requests for the public URL's
-// host are allowed too, e.g. a tailnet name.
+// host are allowed too, e.g. a host name.
 const env = z
   .object({
     OPENBOT_HOST: z.string().optional(),

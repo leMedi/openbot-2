@@ -49,7 +49,10 @@ env_file="${dir}/.env"
 grep -qx "OPENBOT_IMAGE=${image}" "${env_file}" || fail ".env doesn't pin ${image}"
 grep -qx "OPENBOT_PORT=${port}" "${env_file}" || fail ".env doesn't set the port"
 grep -qE '^OPENBOT_SECRET_KEY=[A-Za-z0-9_-]{43}$' "${env_file}" || fail ".env has no generated secret key"
-if [[ -e "${dir}/compose.tailscale.yml" ]] || grep -q TS_AUTHKEY "${env_file}"; then fail "the Tailscale sidecar was added unasked"; fi
+grep -qE "^OPENBOT_PUBLIC_URL=http://[^/]+:${port}\$" "${env_file}" || fail ".env has no public URL on the port"
+settings="$(sed -n 's/^\([A-Z_]*\)=.*/\1/p' "${env_file}" | sort | tr '\n' ' ')"
+[[ "${settings}" == "OPENBOT_IMAGE OPENBOT_PORT OPENBOT_PUBLIC_URL OPENBOT_SECRET_KEY " ]] \
+  || fail ".env should set only the image, port, public URL and secret key: ${settings}"
 cmp -s "${release}/compose.yml" "${dir}/compose.yml" || fail "compose.yml isn't the release's"
 
 echo "smoke-install: 2. re-run keeps the .env"
@@ -70,8 +73,8 @@ if command -v script > /dev/null; then
   echo "smoke-install: 3. interactive install, piped from curl"
   (cd "${dir}" && docker compose down --volumes --remove-orphans)
   rm -rf "${dir}"
-  # The answers: install dir, port, no Tailscale key. `script` gives the installer a terminal to read them from.
-  printf '%s\n%s\n\n' "${dir}" "$((port + 1))" \
+  # The answers: install dir and port. `script` gives the installer a terminal to read them from.
+  printf '%s\n%s\n' "${dir}" "$((port + 1))" \
     | script --quiet --return --command "curl -fsSL '${install_url}' | bash" /dev/null \
     || fail "the interactive install failed"
   grep -qx "OPENBOT_PORT=$((port + 1))" "${dir}/.env" || fail "the interactive install didn't take the port answered"
