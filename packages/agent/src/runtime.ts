@@ -34,6 +34,7 @@ import {
 import {
   type AgentRuntime,
   type AttachmentFile,
+  type Browser,
   type BotInput,
   type BotWithChat,
   findBotByHistory,
@@ -51,6 +52,7 @@ import {
 } from '@openbot/core'
 import type { Attachment, Db, Surface } from '@openbot/db'
 import type { BotComputer } from './computer.ts'
+import { computerUse } from './computer-use.ts'
 
 const context = BACKGROUND_CONTEXT
 
@@ -103,6 +105,8 @@ export type BotRuntimeOptions = {
   orchestrator: Orchestrator
   /** Where bots' shell and file tools run; the runtime closes it. */
   computer: BotComputer
+  /** Each bot's own browser, which only computer-use sessions drive. */
+  browser: Browser
   /** Tools beyond the built-in ones, e.g. a test's. */
   tools?: BotTool[]
   /** Posts a bot's message, with copies of the files it attached, to its DM; `idempotencyKey` makes a replayed tool call post once. */
@@ -129,7 +133,10 @@ function botPrompt(bot: BotWithChat): string {
   return bot.instructions.trim() ? `${who}\n\n${bot.instructions.trim()}` : who
 }
 
-/** The bot's computer: who it is there, and where its folder, the shared folder and the other bots' folders are. */
+/**
+ * The bot's computer: who it is there, where its folder, the shared folder and the other bots' folders are, and which
+ * tools to reach for first.
+ */
 function computerPrompt(computer: BotComputer, bot: BotWithChat, others: BotWithChat[]): string {
   const lines = [
     `You have a Linux computer, shared with the owner's other bots. You work on it as the user \`${computer.user}\`, with passwordless sudo: it is your computer, so install what you need. Use bash to run commands, and read, write and edit for files.`,
@@ -139,6 +146,12 @@ function computerPrompt(computer: BotComputer, bot: BotWithChat, others: BotWith
     `- Shared with every bot: ${computer.sharedFolder}`,
   ]
   if (others.length) lines.push(`- The other bots' folders:`, ...others.map((other) => `  - ${other.name}: ${computer.folder(other.id)}`))
+  lines.push(
+    '',
+    'You also have a screen with your own web browser, which the owner can watch. You use it only through use_computer, which hands a goal to a computer-use helper and gives you back its summary and a final screenshot. Its work never shows in the chat.',
+    '',
+    'Choose tools in this order: plugin tools first, then the shell and fetching the web from it (curl, scripts), then the browser through use_computer, then the desktop. The browser is slow and costly: use it only when the shell can\'t do the job, e.g. pages that need JavaScript, signing in or clicking through, and say why in its reason.',
+  )
   return lines.join('\n')
 }
 
@@ -205,11 +218,34 @@ export class BotRuntime implements AgentRuntime {
     const images = await createNodePhotonImages()
     // The hook needs the Harness, which needs the registry; it only runs once the Harness is open.
     let runtime: BotRuntime | undefined
-    const botOf = async (conversationId: ConversationId) => {
+    let harness: Harness | undefined
+    /** The conversation that started each computer-use session. */
+    const owners = new Map<ConversationId, ConversationId>()
+    const botOf = async (conversationId: ConversationId): Promise<BotWithChat> => {
       const bot = await findBotByHistory(options.db, toHistoryId(conversationId))
-      if (!bot) throw new Error('This history belongs to no bot')
-      return bot
+      if (bot) return bot
+      // A computer-use session belongs to the bot whose history started it.
+      let owner = owners.get(conversationId)
+      if (owner === undefined) {
+        const session = harness && (await harness.conversation(conversationId, context))
+        owner = session ? (await session.commit((tx) => tx.conversation(conversationId), context))?.owner?.conversationId : undefined
+        if (owner === undefined) throw new Error('This history belongs to no bot')
+        owners.set(conversationId, owner)
+      }
+      return botOf(owner)
     }
+    const computerUseSessions = computerUse({
+      browser: options.browser,
+      computer: options.computer,
+      images,
+      botOf,
+      model: async () => {
+        const { computerUseModel, defaultModel } = await readModelSettings(options.db)
+        const model = computerUseModel ?? defaultModel
+        if (!model) throw new NoModelError('Choose a computer-use or default model first')
+        return parseModelRef(model)
+      },
+    })
     const sendMessage: BotTool = {
       // Messages are never reviewed, whether to the owner or another bot.
       surface: null,
@@ -295,49 +331,58 @@ export class BotRuntime implements AgentRuntime {
         },
       }),
     }
-    const tools = [sendMessage, askQuestion, ...computerTools(images), ...(options.tools ?? [])]
-    const toolSurfaces = new Map(tools.map(({ surface, tool }) => [tool.name, surface]))
-    registry.install(
-      defineExtension({
-        name: 'openbot',
-        sections: [section('voice', () => voice, { tag: false })],
-        tools: tools.map(({ tool }) => tool),
-        hooks: [
-          hook(GenerationTask, { onYield: (_answer, api) => runtime?.remindIfOwed(api.conversationId) }),
-          // A steer joins the run after this tool round; until then the bot can't answer the request it replaces.
-          hook(ToolTask, {
-            beforeTool: async (call, api) => {
-              if (!ownerTools.has(call.name)) return
-              const inbox = await api.snapshot(InboxDoc, api.conversationId, context)
-              return inbox?.items.some((item) => item.mode === 'steer') ? { block: steerPending } : undefined
-            },
-          }),
-          // The orchestrator hook: every call of a tool with a side effect is reviewed before it runs. It stays last, so
-          // it reviews the arguments the call will run with, and no other hook may rewrite arguments after it.
-          hook(ToolTask, {
-            beforeTool: async (call, api) => {
-              const surface = toolSurfaces.get(call.name)
-              if (surface === null) return
-              // Fails closed: a tool that never declared its surface can't run unreviewed.
-              if (surface === undefined) return { block: `${call.name} declares no surface, so it can't be reviewed` }
-              const bot = await botOf(api.conversationId)
-              const blocked = await reviewAction(options.db, options.orchestrator, bot.id, {
-                surface,
-                tool: call.name,
-                input: call.arguments,
-              })
-              return blocked ? { block: blocked } : undefined
-            },
-          }),
-        ],
-      }),
-    )
+    // A computer-use session is reviewed, and logged with its reason, as a whole; its browser tools are not one by one.
+    const useComputer: BotTool = { surface: 'computer_session', tool: computerUseSessions.useComputer }
+    const tools = [sendMessage, askQuestion, ...computerTools(images), useComputer, ...(options.tools ?? [])]
+    const toolSurfaces = new Map<string, Surface | null>([
+      ...tools.map(({ surface, tool }) => [tool.name, surface] as const),
+      // Sessions don't select this extension, so its hooks shouldn't see browser tools; if they ever do, those calls
+      // were covered by the session's review.
+      ...computerUseSessions.browserToolNames.map((name) => [name, null] as const),
+    ])
+    const bots = defineExtension({
+      name: 'openbot',
+      sections: [section('voice', () => voice, { tag: false })],
+      tools: tools.map(({ tool }) => tool),
+      hooks: [
+        hook(GenerationTask, { onYield: (_answer, api) => runtime?.remindIfOwed(api.conversationId) }),
+        // A steer joins the run after this tool round; until then the bot can't answer the request it replaces.
+        hook(ToolTask, {
+          beforeTool: async (call, api) => {
+            if (!ownerTools.has(call.name)) return
+            const inbox = await api.snapshot(InboxDoc, api.conversationId, context)
+            return inbox?.items.some((item) => item.mode === 'steer') ? { block: steerPending } : undefined
+          },
+        }),
+        // The orchestrator hook: every call of a tool with a side effect is reviewed before it runs. It stays last, so
+        // it reviews the arguments the call will run with, and no other hook may rewrite arguments after it.
+        hook(ToolTask, {
+          beforeTool: async (call, api) => {
+            const surface = toolSurfaces.get(call.name)
+            if (surface === null) return
+            // Fails closed: a tool that never declared its surface can't run unreviewed.
+            if (surface === undefined) return { block: `${call.name} declares no surface, so it can't be reviewed` }
+            const bot = await botOf(api.conversationId)
+            const blocked = await reviewAction(options.db, options.orchestrator, bot.id, {
+              surface,
+              tool: call.name,
+              input: call.arguments,
+            })
+            return blocked ? { block: blocked } : undefined
+          },
+        }),
+      ],
+    })
+    // Bots' histories select only their own extension; the browser tools are only in computer-use sessions (ADR 0008).
+    registry.install(bots)
+    registry.install(computerUseSessions.extension)
     const storage: Storage = options.storagePath ? await openNodeSqliteStorage(options.storagePath) : new MemoryStorage()
-    const harness = await Harness.open(
+    harness = await Harness.open(
       storage,
       {
         models: options.models,
         registry,
+        settings: { extensions: [bots] },
         // Each tool call runs in its bot's environment on the computer.
         env: async ({ conversationId }) => options.computer.env(await botOf(conversationId)),
         onReport: (error) => console.error('[agent]', error),

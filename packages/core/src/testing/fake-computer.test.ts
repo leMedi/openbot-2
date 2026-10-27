@@ -20,27 +20,36 @@ describeComputerContract('the fake computer', async () => {
     crash: (bot) => computer.crash(bot),
     user: 'openbot',
     folder: (bot) => join('/home/openbot/bots', bot.id),
+    page: (name, page) => {
+      const url = `https://contract.test/${name}`
+      computer.pages.set(url, page)
+      return url
+    },
     close: () => computer.close(),
   }
 })
 
 describe('fake computer', () => {
   it('records screen, shell and browser calls in order', async () => {
-    const computer = createFakeComputer()
+    const computer = createFakeComputer({
+      pages: { 'https://example.com/': { title: 'Example', elements: [{ role: 'link', name: 'More', href: 'https://example.com/more' }, { role: 'textbox', name: 'Search' }] } },
+    })
 
     await computer.screens.start(rex)
     await computer.shell.exec(rex, 'ls ~')
-    await computer.browser.navigate(rex, 'https://example.com')
-    await computer.browser.click(rex, 'e3')
-    await computer.browser.type(rex, 'e4', 'hello')
+    await computer.browser.navigate(rex, 'https://example.com/')
+    await computer.browser.snapshot(rex)
+    await computer.browser.type(rex, 'e2', 'hello', { submit: true })
+    await computer.browser.click(rex, 'e1')
     await computer.close()
 
     expect(computer.calls).toEqual([
       { bot: 'Rex', kind: 'screens.start', display: 1 },
       { bot: 'Rex', kind: 'shell.exec', command: 'ls ~' },
-      { bot: 'Rex', kind: 'browser.navigate', url: 'https://example.com' },
-      { bot: 'Rex', kind: 'browser.click', ref: 'e3' },
-      { bot: 'Rex', kind: 'browser.type', ref: 'e4', text: 'hello' },
+      { bot: 'Rex', kind: 'browser.navigate', url: 'https://example.com/' },
+      { bot: 'Rex', kind: 'browser.snapshot' },
+      { bot: 'Rex', kind: 'browser.type', ref: 'e2', text: 'hello', submit: true },
+      { bot: 'Rex', kind: 'browser.click', ref: 'e1' },
     ])
   })
 
@@ -66,9 +75,11 @@ describe('fake computer', () => {
 
   it('reports the page the browser navigated to', async () => {
     const computer = createFakeComputer()
+    await computer.screens.start(rex)
 
     await computer.browser.navigate(rex, 'https://example.com')
 
     expect((await computer.browser.snapshot(rex)).url).toBe('https://example.com')
+    await computer.close()
   })
 })

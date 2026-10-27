@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { connect } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { Computer, ComputerBot, ScreenBot, ScreenStatus } from '../ports/computer.ts'
+import type { BrowserSnapshot, Computer, ComputerBot, ScreenBot, ScreenStatus } from '../ports/computer.ts'
+import type { TestPage } from './pages.ts'
 
-/** The parts of the computer the contract covers; the browser joins with its tools. */
-export type ContractComputer = Pick<Computer, 'screens' | 'shell'>
+/** The parts of the computer the contract covers; a screen daemon tested on its own has no browser to drive. */
+export type ContractComputer = Pick<Computer, 'screens' | 'shell'> & Partial<Pick<Computer, 'browser'>>
 
 /** A computer under test, and what the contract needs to poke at it. */
 export type ContractWorld = {
@@ -17,6 +18,8 @@ export type ContractWorld = {
   user: string
   /** The bot's own folder, where its commands start. */
   folder(bot: ComputerBot): string
+  /** Puts `page` where the computer's browsers can load it; returns its URL. Needed to cover the browser. */
+  page?(name: string, page: TestPage): string
   close?(): Promise<void>
 }
 
@@ -27,6 +30,8 @@ export type ContractOptions = {
   timeout?: number
   /** Whether to cover the shell; off for a screen daemon tested on its own. */
   shell?: boolean
+  /** Whether to cover the browser; off for a screen daemon tested with stand-in programs. */
+  browser?: boolean
 }
 
 /** The first bytes of the screen's stream: the VNC protocol's greeting, e.g. `RFB 003.008\n`. */
@@ -50,6 +55,16 @@ export function readStreamGreeting(port: number, timeout = 5_000): Promise<strin
 }
 
 const greeting = /^RFB \d{3}\.\d{3}\n/
+
+/** The reference of the element on a snapshot's line `- <role> "<name>" [ref=eN]`. */
+export function refOf(snapshot: BrowserSnapshot, role: string, name: string): string {
+  const line = snapshot.tree.split('\n').find((text) => text.trimStart().startsWith(`- ${role} ${JSON.stringify(name)} [ref=`))
+  const ref = line?.match(/\[ref=(e\d+)\]/)?.[1]
+  if (!ref) throw new Error(`No ${role} "${name}" on the snapshot of ${snapshot.url}:\n${snapshot.tree}`)
+  return ref
+}
+
+const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
 
 /**
  * Seam 2: what every `Computer` must do, run against the in-memory fake and against the real screen daemon in the
@@ -184,6 +199,128 @@ export function describeComputerContract(name: string, open: () => Promise<Contr
 
       expect(result).toEqual({ stdout: `${world.user}\nroot\n${world.folder(rex)}\n`, stderr: '', exitCode: 0 })
       expect(failed).toEqual({ stdout: '', stderr: 'oops\n', exitCode: 3 })
+    })
+
+    describe.runIf(options.browser ?? true)('the browser', () => {
+      /** A bot whose screen is running, and two linked pages. */
+      async function browsing() {
+        const world = await setup()
+        const rex = newBot('Rex')
+        await world.computer.screens.start(rex)
+        await untilRunning(world.computer, rex)
+        const page = world.page!.bind(world)
+        const next = page('next', { title: 'Next page', elements: [{ role: 'heading', name: 'You made it' }] })
+        const home = page('home', {
+          title: 'Home',
+          elements: [
+            { role: 'heading', name: 'Welcome' },
+            { role: 'link', name: 'Next', href: next },
+            { role: 'textbox', name: 'Search' },
+          ],
+        })
+        return { world, browser: world.computer.browser!, rex, home, next }
+      }
+
+      it('navigates, and snapshots the page with element references', { timeout: timeout * 2 }, async () => {
+        const { browser, rex, home } = await browsing()
+
+        await browser.navigate(rex, home)
+        const snapshot = await browser.snapshot(rex)
+
+        expect(snapshot).toMatchObject({ url: home, title: 'Home' })
+        expect(snapshot.tree).toMatch(/- heading "Welcome" \[ref=e\d+\]/)
+        expect(snapshot.tree).toMatch(/- link "Next" \[ref=e\d+\]/)
+        expect(snapshot.tree).toMatch(/- textbox "Search" \[ref=e\d+\]/)
+      })
+
+      it('types into fields and clicks links by reference', { timeout: timeout * 2 }, async () => {
+        const { browser, rex, home, next } = await browsing()
+        await browser.navigate(rex, home)
+
+        await browser.type(rex, refOf(await browser.snapshot(rex), 'textbox', 'Search'), 'hello')
+        const typed = await browser.snapshot(rex)
+        await browser.click(rex, refOf(typed, 'link', 'Next'))
+        const clicked = await browser.snapshot(rex)
+
+        expect(typed.tree).toMatch(/- textbox "Search" \[ref=e\d+\]: hello/)
+        expect(clicked).toMatchObject({ url: next, title: 'Next page' })
+        expect(clicked.tree).toMatch(/- heading "You made it"/)
+      })
+
+      it('refuses element references from an older snapshot', { timeout: timeout * 2 }, async () => {
+        const { browser, rex, home, next } = await browsing()
+        await browser.navigate(rex, home)
+        const old = refOf(await browser.snapshot(rex), 'link', 'Next')
+        const latest = refOf(await browser.snapshot(rex), 'link', 'Next')
+
+        await expect(browser.click(rex, old)).rejects.toThrow(/latest snapshot/)
+        await expect(browser.type(rex, old, 'hello')).rejects.toThrow(/latest snapshot/)
+        await expect(browser.click(rex, 'e99999')).rejects.toThrow(/latest snapshot/)
+        await browser.click(rex, latest)
+        expect((await browser.snapshot(rex)).url).toBe(next)
+      })
+
+      it('opens, lists, selects and closes tabs', { timeout: timeout * 2 }, async () => {
+        const { browser, rex, home, next } = await browsing()
+        await browser.navigate(rex, home)
+        const [first] = await browser.tabs(rex)
+
+        const opened = await browser.newTab(rex, next)
+        const both = await browser.tabs(rex)
+        const onNew = await browser.snapshot(rex)
+        await browser.selectTab(rex, first!.id)
+        const onFirst = await browser.snapshot(rex)
+        await browser.closeTab(rex, opened.id)
+
+        expect(opened).toMatchObject({ url: next, active: true })
+        expect(both.map((tab) => [tab.id, tab.active]).sort()).toEqual(
+          [
+            [first!.id, false],
+            [opened.id, true],
+          ].sort(),
+        )
+        expect(onNew.url).toBe(next)
+        expect(onFirst.url).toBe(home)
+        expect(await browser.tabs(rex)).toEqual([{ id: first!.id, url: home, title: 'Home', active: true }])
+      })
+
+      it("refuses references from another tab's snapshot", { timeout: timeout * 2 }, async () => {
+        const { browser, rex, home } = await browsing()
+        await browser.navigate(rex, home)
+        const ref = refOf(await browser.snapshot(rex), 'link', 'Next')
+
+        await browser.newTab(rex, home)
+
+        await expect(browser.click(rex, ref)).rejects.toThrow(/latest snapshot/)
+      })
+
+      it('takes screenshots as PNG', { timeout: timeout * 2 }, async () => {
+        const { browser, rex, home } = await browsing()
+        await browser.navigate(rex, home)
+
+        const screenshot = await browser.screenshot(rex)
+
+        expect([...screenshot.subarray(0, 8)]).toEqual(png)
+      })
+
+      it("keeps each bot's browser apart", { timeout: timeout * 3 }, async () => {
+        const { world, browser, rex, home, next } = await browsing()
+        const ada = newBot('Ada')
+        await world.computer.screens.start(ada)
+        await untilRunning(world.computer, ada)
+
+        await browser.navigate(rex, home)
+        await browser.navigate(ada, next)
+
+        expect((await browser.snapshot(rex)).url).toBe(home)
+        expect((await browser.snapshot(ada)).url).toBe(next)
+      })
+
+      it("can't browse without a running screen", async () => {
+        const world = await setup()
+
+        await expect(world.computer.browser!.snapshot({ id: `contract-${randomUUID()}`, name: 'Nobody' })).rejects.toThrow(/screen/)
+      })
     })
   })
 }

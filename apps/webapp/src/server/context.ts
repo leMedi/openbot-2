@@ -3,6 +3,7 @@ import type { ChatInfo, LiveEvent } from '@openbot/api-contract'
 import {
   AllowAllOrchestrator,
   AttachmentStore,
+  type Browser,
   EventBus,
   getChatSummary,
   type Orchestrator,
@@ -49,6 +50,7 @@ export async function createServerContext({
   agentStoragePath,
   orchestrator = new AllowAllOrchestrator(),
   computer,
+  browser,
   attachmentsDir,
   screens,
   screenTickets,
@@ -65,6 +67,8 @@ export async function createServerContext({
   orchestrator?: Orchestrator
   /** Where bots' shell and file tools run: the real computer, or a fake in tests. */
   computer: BotComputer
+  /** Each bot's own browser on its screen: over CDP, or the fake's in tests. */
+  browser: Browser
   /** Where the server keeps copies of messages' files, in its data dir. */
   attachmentsDir: string
   /** Every bot's screen: the screen daemon's, or the fake's in tests. */
@@ -82,6 +86,7 @@ export async function createServerContext({
     storagePath: agentStoragePath,
     orchestrator,
     computer,
+    browser,
     tools,
     async sendMessage(bot, { text, attachments: files }, idempotencyKey) {
       const saved = await attachments.save(bot.chatId, files)

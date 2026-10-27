@@ -48,7 +48,11 @@ export {
 export { readModelSettings, writeModelSettings, type ModelSettings } from './settings.ts'
 export { lanes, type AgentRuntime, type BotInput, type Lane } from './ports/agent-runtime.ts'
 export {
+  type Browser,
+  BrowserUnavailableError,
   type BrowserSnapshot,
+  type BrowserTab,
+  StaleRefError,
   type Computer,
   type ComputerBot,
   type ExecResult,

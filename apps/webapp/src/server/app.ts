@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { builtinModelProviders, openBotComputer } from '@openbot/agent'
-import { connectScreens } from '@openbot/computer'
+import { connectBrowser, connectScreens } from '@openbot/computer'
 import { openDb } from '@openbot/db'
 import { env, paths } from '@openbot/db/env'
 import { createServerContext, type ServerContext } from './context.ts'
@@ -30,14 +30,16 @@ async function loadSecretKey(): Promise<string> {
 
 async function open(): Promise<ServerContext> {
   const [db, secretKey, providers] = await Promise.all([openDb(paths.database), loadSecretKey(), builtinModelProviders()])
+  const screens = connectScreens({ socketPath: paths.desktopdSocket })
   return createServerContext({
     db,
     secretKey,
     providers,
     agentStoragePath: join(paths.dataDir, 'agent.sqlite'),
     computer: openBotComputer({ home: paths.home }),
+    browser: connectBrowser({ screens }),
     attachmentsDir: join(paths.dataDir, 'attachments'),
-    screens: connectScreens({ socketPath: paths.desktopdSocket }),
+    screens,
     screenTickets: serverScreenTickets(),
   })
 }

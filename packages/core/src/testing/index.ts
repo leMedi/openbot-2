@@ -5,4 +5,6 @@ export {
   type ContractWorld,
   describeComputerContract,
   readStreamGreeting,
+  refOf,
 } from './computer-contract.ts'
+export { type PageElement, renderPage, servePages, type TestPage } from './pages.ts'
