@@ -4,6 +4,9 @@
   "globalDependencies": [
     ".env"
   ],
+  "globalPassThroughEnv": [
+    "OPENBOT_*"
+  ],
   "tasks": {
     "build": {
       "dependsOn": [

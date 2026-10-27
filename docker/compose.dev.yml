@@ -1,0 +1,49 @@
+# Dev environment: the runtime image's `dev` target running this repo with hot reload. Use the root scripts:
+#   pnpm dev:up     build and start, wait until the app answers on http://localhost:${OPENBOT_DEV_PORT:-3000}
+#   pnpm dev:sh     a shell in the container, as the server's user, in the repo
+#   pnpm dev:seed   add sample bots and a group chat
+#   pnpm dev:logs   follow the server's output
+#   pnpm dev:down   stop (state stays in the volumes)
+#   pnpm dev:reset  stop and delete the dev volumes (data, bots' home, node_modules)
+# The volumes belong to the `openbot-dev` project, apart from a real install's.
+name: openbot-dev
+
+services:
+  openbot:
+    build:
+      context: .
+      target: dev
+    image: openbot-runtime:dev
+    hostname: openbot
+    ports:
+      - "${OPENBOT_DEV_PORT:-3000}:3000"
+    environment:
+      OPENBOT_PUBLIC_URL: http://localhost:${OPENBOT_DEV_PORT:-3000}
+      # Empty means generate one into the data volume; set (≥ 32 characters) in your shell to use your own. Empty also
+      # keeps the repo's .env from supplying one, since dotenv never overrides a variable that is set.
+      OPENBOT_SECRET_KEY: ${OPENBOT_SECRET_KEY:-}
+    volumes:
+      - ..:/opt/openbot/current
+      - data:/var/lib/openbot
+      - home:/home/openbot
+      # One volume per workspace package's node_modules, so the host's (macOS) installs are never touched.
+      - node-modules:/opt/openbot/current/node_modules
+      - webapp-node-modules:/opt/openbot/current/apps/webapp/node_modules
+      - agent-node-modules:/opt/openbot/current/packages/agent/node_modules
+      - api-contract-node-modules:/opt/openbot/current/packages/api-contract/node_modules
+      - core-node-modules:/opt/openbot/current/packages/core/node_modules
+      - db-node-modules:/opt/openbot/current/packages/db/node_modules
+      - ui-node-modules:/opt/openbot/current/packages/ui/node_modules
+    # Chromium needs more shared memory than Docker's 64 MB default.
+    shm_size: 1gb
+
+volumes:
+  data:
+  home:
+  node-modules:
+  webapp-node-modules:
+  agent-node-modules:
+  api-contract-node-modules:
+  core-node-modules:
+  db-node-modules:
+  ui-node-modules:

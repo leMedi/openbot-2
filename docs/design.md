@@ -59,7 +59,8 @@ Only values needed before the database opens are env vars. Everything else lives
 | `OPENBOT_HOME` | `/home/openbot` | Bots' world: `shared/`, `bots/<id>/` (workspace, uploads, Chromium profile), installed tools |
 | `OPENBOT_APP_DIR` | `/opt/openbot` | `releases/<version>/`, `current` symlink |
 | `OPENBOT_SECRET_KEY` | generated on first boot | Encryption of vault and system credentials |
-| `OPENBOT_PUBLIC_URL`, `OPENBOT_PORT` | `3000` | Links and OAuth redirects |
+| `OPENBOT_PUBLIC_URL`, `OPENBOT_PORT` | `3000` | Links and OAuth redirects; the public URL's host is also allowed by the dev server |
+| `OPENBOT_HOST` | `0.0.0.0` in the image, localhost on the host | Listen address of the one port |
 | `OPENBOT_DEV` | unset | Dev mode: disables the updater |
 
 The compose sample mounts three named volumes: `openbot-data`, `openbot-home`, `openbot-app`. Only one port is exposed; noVNC goes through the server.
@@ -84,6 +85,14 @@ Re-running never overwrites `.env`; it offers a runtime update. Flags: `--yes --
 ### 2.6 Dev setup
 
 `docker/compose.dev.yml` uses the same runtime image with a `dev` target (pnpm, build tools). The repo is bind-mounted at `/opt/openbot/current`, `node_modules` lives in a named volume, and supervisord runs `pnpm dev` (Vite HMR, `tsx watch` for desktopd). Separate dev volumes. Commands: `pnpm dev:up`, `dev:sh`, `dev:reset`, `dev:seed`. An optional `.devcontainer/` points at the same compose file. Evals run on the host.
+
+As built (#10):
+
+- `docker/Dockerfile` has two targets: `runtime` (Ubuntu 24.04, Node from nodejs.org checked by SHA-256, Chromium from Playwright since Ubuntu only ships it as a snap, Xvfb, Openbox, x11vnc + websockify, supervisord) and `dev` (adds pnpm and build tools). The noVNC web client will be served by the web app.
+- Users: `openbot` (uid 2000, passwordless sudo) and `openbot-server` (uid 2001, may run commands as `openbot` only). The entrypoint sets the data dir to 0700 for the server, makes `$OPENBOT_HOME/{shared,bots}` for `openbot`, and the server generates `secret.key` there on its first start when `OPENBOT_SECRET_KEY` is empty.
+- The `runtime` target starts `$OPENBOT_APP_DIR/current/bin/start` as `openbot-server`; the release pipeline provides it. Without one the server waits.
+- In dev, every workspace package's `node_modules` is its own volume (the entrypoint refuses to start if one is missing, so Linux binaries never land in the host's checkout), the server runs `pnpm install` then `pnpm dev`, and on a Linux host `openbot-server` takes the repo owner's uid. Turbo passes `OPENBOT_*` through to tasks.
+- Commands: `pnpm dev:up` (build, start, wait until healthy), `dev:sh`, `dev:seed` (sample bots Ada, Linus and Grace, and a "Launch team" group), `dev:logs`, `dev:down`, `dev:reset` (deletes the `openbot-dev_*` volumes). `OPENBOT_DEV_PORT` picks the host port.
 
 ---
 

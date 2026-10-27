@@ -4,6 +4,8 @@ export { groupRoundRules } from './group-rules.ts'
 export { createBot, deleteBot, findBotByHistory, getBot, NameTakenError, listBots, setBotHistory, updateBot, type BotProfile, type BotWithChat } from './bots.ts'
 export {
   ChatNotFoundError,
+  createGroupChat,
+  type GroupChatValues,
   type ChatSummary,
   getChat,
   getChatSummary,
