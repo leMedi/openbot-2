@@ -20,7 +20,7 @@ set -euo pipefail
 
 # Set from release.env when a release is packaged (scripts/src/install-script.ts); OPENBOT_SITE_URL and
 # OPENBOT_RELEASES_URL override them.
-default_site_url=https://openbot.lemedi.dev
+default_site_url=https://github.com/leMedi/openbot-2/releases/latest/download
 default_releases_url=https://github.com/leMedi/openbot-2/releases
 
 usage() {
