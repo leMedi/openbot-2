@@ -2,9 +2,11 @@ import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { builtinModelProviders, openBotComputer } from '@openbot/agent'
+import { connectScreens } from '@openbot/computer'
 import { openDb } from '@openbot/db'
 import { env, paths } from '@openbot/db/env'
 import { createServerContext, type ServerContext } from './context.ts'
+import { serverScreenTickets } from './screen-stream.ts'
 
 /** `OPENBOT_SECRET_KEY`, or the key generated into the data dir on first boot. */
 async function loadSecretKey(): Promise<string> {
@@ -35,6 +37,8 @@ async function open(): Promise<ServerContext> {
     agentStoragePath: join(paths.dataDir, 'agent.sqlite'),
     computer: openBotComputer({ home: paths.home }),
     attachmentsDir: join(paths.dataDir, 'attachments'),
+    screens: connectScreens({ socketPath: paths.desktopdSocket }),
+    screenTickets: serverScreenTickets(),
   })
 }
 

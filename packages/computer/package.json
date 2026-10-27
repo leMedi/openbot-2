@@ -1,0 +1,18 @@
+{
+  "name": "@openbot/computer",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@openbot/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "typescript": "^7.0.2"
+  }
+}

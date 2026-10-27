@@ -26,6 +26,8 @@ export const env = createEnv({
       .min(1)
       .default('/home/openbot')
       .transform((path) => resolve(findRepoRoot(), path)),
+    /** The screen daemon's Unix socket. */
+    OPENBOT_DESKTOPD_SOCKET: z.string().min(1).default('/run/openbot/desktopd.sock'),
     /** Encrypts system credentials; when unset, one is generated into the data dir on first boot. */
     OPENBOT_SECRET_KEY: z.string().min(32).optional(),
   },
@@ -38,4 +40,5 @@ export const paths = {
   database: join(env.OPENBOT_DATA_DIR, 'openbot.db'),
   secretKey: join(env.OPENBOT_DATA_DIR, 'secret.key'),
   home: env.OPENBOT_HOME,
+  desktopdSocket: env.OPENBOT_DESKTOPD_SOCKET,
 }
