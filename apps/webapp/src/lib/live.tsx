@@ -3,6 +3,31 @@ import { type ReactNode, createContext, useContext, useEffect, useState, useSync
 import { api } from './api.ts'
 
 const reconnectDelayMs = 1000
+const draftKeyPrefix = 'openbot.draft.'
+
+/** This browser's localStorage, or undefined where it's missing or blocked (reading the global can throw). */
+function browserStorage(): Storage | undefined {
+  try {
+    return globalThis.localStorage
+  } catch {
+    return undefined
+  }
+}
+
+/** The drafts kept in `storage`, by chat id; none if storage is blocked. */
+function loadDrafts(storage: Storage | undefined): Map<string, string> {
+  const drafts = new Map<string, string>()
+  try {
+    for (let index = 0; storage && index < storage.length; index++) {
+      const key = storage.key(index)
+      const text = key?.startsWith(draftKeyPrefix) ? storage.getItem(key) : null
+      if (text) drafts.set(key!.slice(draftKeyPrefix.length), text)
+    }
+  } catch {
+    // Storage blocked: drafts last until reload.
+  }
+  return drafts
+}
 
 /** Merges `incoming` into `messages`, once each, oldest first (ids are time-ordered). */
 function mergeMessages(messages: readonly MessageInfo[], incoming: readonly MessageInfo[]): MessageInfo[] {
@@ -20,12 +45,18 @@ export class LiveStore {
   /** Every chat's sidebar state (pinned, unread, waiting), by chat id. */
   chats: ReadonlyMap<string, ChatInfo> = new Map()
   messages: ReadonlyMap<string, MessageInfo[]> = new Map()
-  /** What the owner has typed but not sent, per chat; kept while the app is open. */
-  drafts: ReadonlyMap<string, string> = new Map()
+  /** What the owner has typed but not sent, per chat; kept in this browser's storage, or while the app is open if it's blocked. */
+  drafts: ReadonlyMap<string, string>
   connected = false
   #stamp: { epoch: string; seq: number } | undefined
   #listeners = new Set<() => void>()
   #version = 0
+  readonly #storage: Storage | undefined
+
+  constructor(storage = browserStorage()) {
+    this.#storage = storage
+    this.drafts = loadDrafts(storage)
+  }
 
   subscribe = (listener: () => void) => {
     this.#listeners.add(listener)
@@ -129,6 +160,16 @@ export class LiveStore {
       else drafts.delete(chatId)
       this.drafts = drafts
     })
+    this.#storeDraft(chatId, text)
+  }
+
+  #storeDraft(chatId: string, text: string) {
+    try {
+      if (text) this.#storage?.setItem(draftKeyPrefix + chatId, text)
+      else this.#storage?.removeItem(draftKeyPrefix + chatId)
+    } catch {
+      // Storage blocked or full: the draft lasts until reload.
+    }
   }
 
   addBot(bot: BotInfo) {
@@ -161,6 +202,7 @@ export class LiveStore {
       drafts.delete(chatId)
       this.drafts = drafts
     })
+    this.#storeDraft(chatId, '')
   }
 
   /** Forgets a deleted group chat, its messages and any draft. */
@@ -176,6 +218,7 @@ export class LiveStore {
       drafts.delete(chatId)
       this.drafts = drafts
     })
+    this.#storeDraft(chatId, '')
   }
 
   async #apply({ epoch, seq, event }: StampedEvent) {
