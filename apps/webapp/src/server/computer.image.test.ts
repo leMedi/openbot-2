@@ -224,17 +224,28 @@ describe.skipIf(!inRuntimeImage)('bots on the real computer', () => {
     expect(existsSync(join(server.home, 'bots', ada.id, 'chromium'))).toBe(true)
   })
 
-  it("run their browser in Chrome's sandbox", { timeout: 120_000 }, async () => {
+  it("run their browser in Chrome's sandbox where the host allows it, and without it elsewhere", { timeout: 120_000 }, async () => {
     const server = await start()
     const rex = await server.client.bots.create(newBot('Rex'))
     await expect.poll(async () => (await server.client.screens.status({ botId: rex.id })).state, { timeout: 60_000 }).toBe('running')
     const display = (await connectScreens({ socketPath }).status(rex)).display!
+    // The sandbox needs user namespaces, which some hosts' Docker keeps from containers (GitHub's Ubuntu runners do).
+    let userNamespaces = true
+    try {
+      execFileSync('sudo', ['--non-interactive', `--user=${botUser}`, 'unshare', '--user', 'true'])
+    } catch {
+      userNamespaces = false
+    }
 
-    // Chrome's own report: its pages run in their own user namespace, with seccomp-bpf on top.
+    // Chrome's own report: sandboxed, its pages run in their own user namespace, with seccomp-bpf on top.
     const report = await pageText(9222 + display, 'chrome://sandbox', 'sandboxed')
 
-    expect(report).toContain('You are adequately sandboxed.')
-    expect(report).toMatch(/Layer 1 Sandbox\s+Namespace/)
+    if (userNamespaces) {
+      expect(report).toContain('You are adequately sandboxed.')
+      expect(report).toMatch(/Layer 1 Sandbox\s+Namespace/)
+    } else {
+      expect(report).toContain('You are NOT adequately sandboxed.')
+    }
   })
 
   it('stream their screen on a ticket', { timeout: 120_000 }, async () => {

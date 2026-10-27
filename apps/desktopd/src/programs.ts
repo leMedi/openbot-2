@@ -53,7 +53,7 @@ const freshSocket = (socket: string, command: string[]) => ({
 
 /**
  * Whether this user may create user namespaces, which Chrome's sandbox needs in a container (its setuid helper can't
- * work without privileges Docker drops). Some hosts block them, e.g. Ubuntu 24.04's AppArmor restriction.
+ * work without privileges Docker drops). Some hosts' Docker keeps them from containers, e.g. GitHub's Ubuntu 24.04 runners.
  */
 export const userNamespacesAllowed = () => new Promise<boolean>((resolve) => execFile('unshare', ['--user', 'true'], (error) => resolve(!error)))
 
