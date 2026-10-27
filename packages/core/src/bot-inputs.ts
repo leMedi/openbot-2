@@ -29,6 +29,15 @@ export async function requeueInput(db: Db, botId: string, input: KeptInput): Pro
     .where(and(eq(botInputs.botId, botId), eq(botInputs.inputId, input.id)))
 }
 
+/** The bot's kept input of id `inputId`, queued or not, e.g. that of a run resumed after a restart. */
+export async function keptInput(db: Db, botId: string, inputId: string): Promise<KeptInput | undefined> {
+  const [row] = await db
+    .select({ input: botInputs.input })
+    .from(botInputs)
+    .where(and(eq(botInputs.botId, botId), eq(botInputs.inputId, inputId)))
+  return row?.input as KeptInput | undefined
+}
+
 /** Takes the bot's inputs `inputIds` off its queue: their run was submitted, or couldn't start. */
 export async function takeInputs(db: Db, botId: string, inputIds: readonly string[]): Promise<void> {
   if (!inputIds.length) return

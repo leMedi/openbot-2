@@ -8,6 +8,8 @@ export type QueuedInput = BotInput & {
   supersedes?: boolean
   /** Called once its run has ended for good, or it was dropped (the bot deleted, the scheduler closed). */
   settle?: () => void
+  /** Interrupted, it doesn't run again: the input of a run resumed after a restart, when only its lane and id are known. */
+  runsOnce?: boolean
 }
 
 /** A run of a bot's history that the scheduler started. */
@@ -94,6 +96,8 @@ type BotState = {
   working: boolean
   /** A run the watchdog detached is still ending, and the next waits to be submitted after it. */
   detachedEnding: boolean
+  /** A run resumed after a restart, which the driver takes on before the queue (see `adopt`). */
+  adopted?: { inputs: QueuedInput[]; run: Run }
   /** Submissions and aborts, in order, so an abort reaches the run it was meant for. */
   chain: Promise<unknown>
 }
@@ -123,6 +127,18 @@ export class RunScheduler {
   constructor(options: RunSchedulerOptions) {
     this.#options = options
     this.#watchdog = options.watchdog ?? defaultWatchdog
+  }
+
+  /**
+   * Takes on a run of the bot's history that pi-durable resumed after a restart, for `inputs`, as the bot's run going on
+   * (Grok's resumed turns): newer inputs interrupt it, or wait for it, as they would any run. Call it before waking the
+   * bot.
+   */
+  adopt(botId: string, inputs: QueuedInput[], run: Run) {
+    const bot = this.#bot(botId)
+    bot.adopted = { inputs, run }
+    this.#setWorking(botId, bot, true)
+    this.#drive(botId, bot)
   }
 
   /** Queues `input`, interrupting the bot's run when it should; false when the input is there already. */
@@ -217,6 +233,15 @@ export class RunScheduler {
     return done
   }
 
+  /** The next run: one resumed after a restart, which is going on already, or the inputs to submit next. */
+  #take(bot: BotState): { inputs: QueuedInput[]; run?: Run } | undefined {
+    const { adopted } = bot
+    bot.adopted = undefined
+    if (adopted) return adopted
+    const inputs = this.#next(bot)
+    return inputs.length ? { inputs } : undefined
+  }
+
   /** The inputs of the next run: the next input, or every owner's message waiting, which run together. */
   #next(bot: BotState): QueuedInput[] {
     const first = bot.queue.shift()
@@ -231,7 +256,8 @@ export class RunScheduler {
     if (bot.driving) return
     bot.driving = true
     void (async () => {
-      for (let inputs; !this.#closed && (inputs = this.#next(bot)).length; ) {
+      for (let next; !this.#closed && (next = this.#take(bot)); ) {
+        const { inputs, run } = next
         let detach!: () => void
         const detached = new Promise<void>(
           (resolve) =>
@@ -246,7 +272,7 @@ export class RunScheduler {
           // Chained at once, so an interrupt asked from now on comes after it.
           await this.#serially(bot, async () => {
             try {
-              active.run = await this.#options.histories.submit(botId, inputs)
+              active.run = run ?? (await this.#options.histories.submit(botId, inputs))
             } finally {
               // Submitting waited for the history to be idle: a detached run has ended.
               bot.detachedEnding = false
@@ -289,7 +315,7 @@ export class RunScheduler {
    * the history, and the run superseding them answers them. A group turn gives up after `maxGroupTurnAttempts` runs.
    */
   async #requeue(botId: string, bot: BotState, input: QueuedInput) {
-    if (isOwnerMessage(input)) return
+    if (isOwnerMessage(input) || input.runsOnce) return
     const attempt = (input.attempt ?? 0) + 1
     if (input.groupChatId && attempt >= maxGroupTurnAttempts) return
     const requeued = { ...input, attempt }

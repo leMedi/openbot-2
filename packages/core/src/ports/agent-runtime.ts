@@ -34,8 +34,9 @@ export interface AgentRuntime {
    * Queues `input` for the bot; returns once queued, not when the run ends. The owner's DM message supersedes the run
    * going on (Grok's model: there is no Stop); anything else waits for it, then runs in lane order (owner, bot,
    * background), oldest first within a lane. Queued work is never dropped (a group turn interrupted on its third run
-   * ends there). Bot- and background-lane work survives a restart, behind any run pi-durable resumes; the owner's
-   * messages are answered by waking a bot that owes them a reply, and a group chat's turns end with its rounds.
+   * ends there). Bot- and background-lane work survives a restart, and a run pi-durable resumes is the bot's run going
+   * on, under the same rules; the owner's messages are answered by waking a bot that owes them a reply, and a group
+   * chat's turns end with its rounds (a turn resumed and then interrupted isn't taken again).
    */
   wake(botId: string, input: BotInput): Promise<void>
   /**

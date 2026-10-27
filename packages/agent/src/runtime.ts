@@ -51,6 +51,7 @@ import {
   getBot,
   type Group,
   keepInput,
+  keptInput,
   type KeptInput,
   groupRoundRules,
   listGroups,
@@ -364,6 +365,9 @@ function requestIdOf(inputs: readonly QueuedInput[]): string | undefined {
   const ids = inputs.map((input) => input.id && (input.attempt ? `${input.id}:attempt-${input.attempt + 1}` : input.id))
   return ids.every(Boolean) ? ids.join(' ') : undefined
 }
+
+/** The ids of the inputs of the run whose request id is `requestId` (see `requestIdOf`). */
+const inputIdsOf = (requestId: string) => requestId.split(' ').map((token) => token.replace(/:attempt-\d+$/, ''))
 
 /** What of a queued input is kept across restarts: all but what only this process can use. */
 const toKept = ({ settle: _settle, supersedes: _supersedes, ...input }: QueuedInput) => input as KeptInput
@@ -774,12 +778,54 @@ export class BotRuntime implements AgentRuntime {
     // Read before pi-durable resumes runs, whose replayed calls may queue inputs: those are woken as they are queued.
     await pruneTakenInputs(options.db)
     const queued = await queuedInputs(options.db)
+    const resuming = await runtime.#resumingRuns()
     harness.resume()
-    // Back in the order they were queued; the scheduler sorts them by lane. A run they would have interrupted was
-    // resumed by pi-durable, and they wait for it.
+    // At once, so no replayed call wakes a bot first. The runs pi-durable resumes are the bots' runs going on, which the
+    // queued inputs, back in the order they were queued and sorted by lane, wait for or interrupt.
+    for (const { botId, inputs, run } of resuming) runtime.#scheduler.adopt(botId, inputs, run)
     for (const { botId, input } of queued) runtime.#scheduler.wake(botId, input)
     for (const botId of await botsOwingReplies(options.db)) void runtime.#redriveReply(botId)
     return runtime
+  }
+
+  /**
+   * The runs of bots' histories pi-durable is about to resume, with the inputs they were for (see `RunScheduler.adopt`).
+   * Those kept are read back, so an interrupt queues them again; of the others, only the lane and id are known, so they
+   * run once. Read before pi-durable resumes them.
+   */
+  async #resumingRuns(): Promise<{ botId: string; inputs: QueuedInput[]; run: Run }[]> {
+    const runs = []
+    for (const bot of await listBots(this.#options.db)) {
+      const history = bot.historyId ? await this.#harness.conversation(toConversationId(bot.historyId), context) : undefined
+      if (!history) continue
+      const submissionIds = await history.commit(async (tx) => [...((await tx.doc(LiveDoc, history.id)).run?.inputs ?? [])], context)
+      if (!submissionIds.length) continue
+      const submissions = () => Promise.all(submissionIds.map(async (id) => (await this.#harness.submission(id, context))?.status(context)))
+      const requestId = (await submissions()).find((submission) => submission?.requestId)?.requestId
+      const record = await this.inputOf(history.id)
+      const inputs = await Promise.all(
+        (requestId ? inputIdsOf(requestId) : [record?.id]).map(
+          async (id): Promise<QueuedInput> =>
+            (id && (await keptInput(this.#options.db, bot.id, id))) || {
+              lane: record?.lane ?? 'owner',
+              text: '',
+              ...(id && { id }),
+              ...(record?.groupChatId && { groupChatId: record.groupChatId }),
+              runsOnce: true,
+            },
+        ),
+      )
+      const statuses = async () => (await submissions()).map((submission) => submission?.status)
+      runs.push({
+        botId: bot.id,
+        inputs,
+        run: {
+          ended: async () => (await statuses()).every((status) => status === 'done' || status === 'unanswered'),
+          answered: async () => (await statuses()).every((status) => status === 'done'),
+        },
+      })
+    }
+    return runs
   }
 
   /**

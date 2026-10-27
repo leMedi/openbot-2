@@ -463,6 +463,36 @@ describe('waking a busy bot', () => {
     expect(after.providers.pendingTurns).toBe(0)
   })
 
+  it("interrupts a run resumed after a restart with the owner's message, and runs its work again after it", async () => {
+    const { server: before, ana } = await startWithTeam()
+    const digest = held(callsTools(['sendMessage', { text: 'Half a digest' }]))
+    before.providers.scriptFor('Ana', digest)
+    await before.runtime.wake(ana.id, { lane: 'background', text: 'Write the daily digest', id: 'digest-1' })
+    await digest.requested
+
+    const resumed = held(callsTools(['sendMessage', { text: 'Half a digest' }]))
+    const after = await restart(before, {
+      script: (providers) =>
+        providers.scriptFor(
+          'Ana',
+          resumed,
+          callsTools(['sendMessage', { text: 'Building.' }]),
+          endsSilently(),
+          callsTools(['sendMessage', { text: 'Digest.' }]),
+          endsSilently(),
+        ),
+    })
+    await resumed.requested
+    await after.client.chats.send({ chatId: ana.chatId, text: 'Fix the build' })
+    await untilIdle(after, ana)
+
+    expect((await transcript(after, ana)).map(([, , text]) => text)).toEqual(['Fix the build', 'Building.', 'Digest.'])
+    const again = requestsOf(after, 'Ana').filter((request) => lastMessage(request).includes(interruptedNote))
+    expect(again).toHaveLength(1)
+    expect(lastMessage(again[0]!)).toContain('Write the daily digest')
+    expect(after.providers.pendingTurns).toBe(0)
+  })
+
   it('runs work again however often it is interrupted', async () => {
     const { server, rex, ana } = await startWithTeam()
     const first = held(callsTools(['sendMessage', { text: 'Half a digest' }]))
