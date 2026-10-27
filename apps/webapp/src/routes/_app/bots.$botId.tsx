@@ -46,7 +46,6 @@ function Dm() {
           composerLabel={`Message ${bot.name}`}
           emptyText={`Say hi to ${bot.name}.`}
           typing={bot.working ? bot : undefined}
-          stopBot={bot}
           allowFiles
           showAuthors={false}
           onScreen={(takeOver) => {

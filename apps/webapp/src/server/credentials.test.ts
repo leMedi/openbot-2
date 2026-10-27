@@ -94,7 +94,6 @@ describe('system credentials', () => {
       'bots.list': await server.client.bots.list(),
       'bots.create': bot,
       'bots.update': await server.client.bots.update({ botId: bot.id, title: 'Builder' }),
-      'bots.stop': null,
       'bots.getOrchestratorModes': await server.client.bots.getOrchestratorModes({ botId: bot.id }),
       'bots.updateOrchestratorModes': await server.client.bots.updateOrchestratorModes({ botId: bot.id, overrides: { shell: 'enforce' } }),
       'bots.audit': await server.client.bots.audit({ botId: bot.id }),

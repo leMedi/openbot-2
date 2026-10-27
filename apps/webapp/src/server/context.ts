@@ -1,4 +1,4 @@
-import { type BotComputer, BotRuntime, type BotTool, type ModelProvider, Providers } from '@openbot/agent'
+import { type BotComputer, BotRuntime, type BotTool, type ModelProvider, Providers, type Watchdog } from '@openbot/agent'
 import type { ChatInfo, LiveEvent } from '@openbot/api-contract'
 import {
   AllowAllOrchestrator,
@@ -72,6 +72,7 @@ export async function createServerContext({
   screens,
   screenTickets,
   tools,
+  watchdog,
 }: {
   db: Db
   /** Encrypts system credentials. */
@@ -95,6 +96,8 @@ export async function createServerContext({
   screenTickets: ScreenTickets
   /** Tools beyond the built-in ones, e.g. a test's. */
   tools?: BotTool[]
+  /** When a run the owner's message waits for is interrupted again, then detached; Grok's timings by default. */
+  watchdog?: Watchdog
 }): Promise<ServerContext> {
   const bus = new EventBus<LiveEvent>()
   const screenHolds = new ScreenHolds()
@@ -142,6 +145,7 @@ export async function createServerContext({
     browser,
     desktop,
     tools,
+    watchdog,
     async sendMessage(bot, chatId, { text, attachments: files }, idempotencyKey) {
       await postBotMessage(bot, chatId, text, files, idempotencyKey)
     },

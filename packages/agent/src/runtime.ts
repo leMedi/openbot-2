@@ -7,7 +7,6 @@ import {
   type EntryRecord,
   GenerationTask,
   Harness,
-  InboxDoc,
   LiveDoc,
   MemoryStorage,
   type ModelRef,
@@ -69,6 +68,7 @@ import {
 import type { Attachment, Db, Message, Surface } from '@openbot/db'
 import type { BotComputer } from './computer.ts'
 import { computerUse, type UseComputerDetails } from './computer-use.ts'
+import { type QueuedInput, type Run, RunScheduler, type Watchdog } from './run-scheduler.ts'
 
 const context = BACKGROUND_CONTEXT
 
@@ -82,10 +82,14 @@ export const replyReminder =
   '<system_reminder>You ended your turn without replying. The owner only sees what you send with sendMessage; ' +
   'your plain text is private. Reply to them now with sendMessage.</system_reminder>'
 
-/** Why a message is held back while the owner's newer message waits to join the run. */
-export const steerPending =
+/** Why a message is held back while the owner's newer message waits to supersede the run. */
+export const outdatedAnswer =
   'Not sent: the owner sent a new message while you were working, so this may answer an outdated request. ' +
   'Read their new message, then reply to it.'
+
+/** Starts the owner's messages that interrupted a run answering their earlier ones (Grok's supersede). */
+export const supersededNote =
+  "[The owner sent this while you were working on their earlier messages, which interrupted you. Answer it together with any of theirs you hadn't answered yet.]"
 
 const voice = `You are one of the owner's bots, a member of their always-on team. You talk to the owner like a colleague texting them.
 
@@ -99,8 +103,8 @@ When your screen needs the owner (a login, a captcha, a two-factor code, a payme
 
 When you need the owner to decide before you go on, ask with askQuestion: a short prompt and up to six options they can pick with one click. Asking ends your turn, so send anything else first; their answer wakes you as their next message.`
 
-/** Starts a redelivered input: the bot was interrupted by a priority message while working on it. */
-export const interruptedNote = '[You were interrupted by a priority message while working on this. Pick it up again.]'
+/** Starts an input that runs again: a newer message interrupted the bot while it worked on it. */
+export const interruptedNote = '[You were interrupted by a newer message while working on this. Pick it up again.]'
 
 export class NoModelError extends Error {}
 
@@ -160,6 +164,8 @@ export type BotRuntimeOptions = {
   screenFree(botId: string): Promise<void>
   /** A bot's status changed: it started or finished working, or a run failed. */
   onStatus(botId: string, status: BotStatus): void
+  /** When a run the owner's message waits for is interrupted again, then detached; Grok's 120 s and 30 s by default. */
+  watchdog?: Watchdog
 }
 
 /** `provider/modelId`, split at the first slash since model ids may contain slashes. */
@@ -275,7 +281,7 @@ function describeAttachments(attachments: readonly Attachment[], by: string): st
 const isReminder = (entry: EntryRecord) =>
   entry.kind === 'pi.user' && entry.model?.some((message) => message.role === 'user' && message.content === replyReminder)
 
-/** The tools that reach the owner; any of them answers the owner, and a steer holds them all back. */
+/** The tools that reach the owner; any of them answers the owner, and the owner's newer message holds them all back. */
 const ownerTools = new Set(['sendMessage', 'askQuestion'])
 
 /** A sendMessage or askQuestion call that succeeded, or a use_computer call that posted a take-over card; a failed one reached nobody. */
@@ -289,42 +295,13 @@ const reachedOwner = (entry: EntryRecord) =>
         (message.toolName === 'use_computer' && Boolean((message.details as UseComputerDetails | undefined)?.takeOver))),
   )
 
-/**
- * An input waiting for the bot's current run; `redelivered` once a priority input interrupted it. `settle` is called
- * once its run has ended, or it was dropped (see `takeTurn`).
- */
-type Queued = BotInput & { redelivered?: boolean; settle?: () => void }
-
 /** What an input's entry in the history records: its lane, and the group chat whose turn it is. */
 type InputRecord = { lane: Lane; groupChatId?: string; id?: string }
 
-/** Whether `input` can join a run the owner's DM input started, or `turn` take the owner's DM input: never in a group turn. */
-const steerable = (input: BotInput, turn: Turn) => input.lane === 'owner' && !input.groupChatId && !turn.input.groupChatId
-
-/** The run a bot's driver started, for `input`; an owner's steer makes it theirs, and nothing interrupts it then. */
-type Turn = {
-  input: Queued
-  lane: Lane
-  /** A priority input asked to interrupt it; asking again does nothing. */
-  interrupted: boolean
-  /** The owner's steers into it, so the driver can wait for runs they started. */
-  steers: number
-  /** The input's submission, once made. */
-  submission?: Submission
-}
-
-/** Where an input goes in a queue: the owner's first, then priority and redelivered bot work, the bot lane, background. */
-function rank(input: Queued): number {
-  if (input.lane === 'owner') return 0
-  if (input.priority || input.redelivered) return 1
-  return input.lane === 'bot' ? 2 : 3
-}
-
-/** Queues `input` after everything of its rank or higher. */
-function enqueue(queue: Queued[], input: Queued) {
-  const at = queue.findIndex((queued) => rank(queued) > rank(input))
-  if (at === -1) queue.push(input)
-  else queue.splice(at, 0, input)
+/** The request id of a run's inputs, so a replayed submission finds its run; each attempt of an input is its own. */
+function requestIdOf(inputs: readonly QueuedInput[]): string | undefined {
+  const ids = inputs.map((input) => input.id && (input.attempt ? `${input.id}:attempt-${input.attempt + 1}` : input.id))
+  return ids.every(Boolean) ? ids.join(' ') : undefined
 }
 
 /**
@@ -338,17 +315,8 @@ export class BotRuntime implements AgentRuntime {
   readonly #images: ImageProcessor
   /** Serialises creating a bot's history. */
   readonly #histories = new Map<string, Promise<Conversation>>()
-  /** Each bot's work waiting for its current run, in the order it will run (see `rank`). */
-  readonly #queues = new Map<string, Queued[]>()
-  /** The run each bot's driver started and is waiting on. */
-  readonly #turns = new Map<string, Turn>()
-  /** Bots whose driver is running their queue. */
-  readonly #drivers = new Set<string>()
-  /** Serialises submitting each bot's inputs, so they reach its history in the order they were woken. */
-  readonly #submitting = new Map<string, Promise<unknown>>()
-  /** Bots working, as last reported. */
-  readonly #working = new Set<string>()
-  #closed = false
+  /** Each bot's queue and its one run at a time. */
+  readonly #scheduler: RunScheduler
   /** Why each bot's latest run failed. */
   readonly #errors = new Map<string, string>()
   /** Messages each bot has sent in its current group turn, by the turn's input id. */
@@ -358,6 +326,20 @@ export class BotRuntime implements AgentRuntime {
     this.#harness = harness
     this.#options = options
     this.#images = images
+    this.#scheduler = new RunScheduler({
+      histories: {
+        submit: (botId, inputs) => this.#submit(botId, inputs),
+        idle: async (botId) => (await this.#existingHistory(botId))?.waitForIdle(context),
+        abort: async (botId) => (await this.#existingHistory(botId))?.abort(context),
+      },
+      onWorking: (botId) => this.#options.onStatus(botId, this.status(botId)),
+      onError: (botId, error) => {
+        console.error(`[agent] Bot ${botId}'s run couldn't start:`, error)
+        this.#errors.set(botId, error.message)
+        this.#options.onStatus(botId, this.status(botId))
+      },
+      watchdog: options.watchdog,
+    })
   }
 
   static async open(options: BotRuntimeOptions): Promise<BotRuntime> {
@@ -586,7 +568,23 @@ export class BotRuntime implements AgentRuntime {
     // A computer-use session is reviewed, and logged with its reason, as a whole; its browser and desktop tools are not
     // one by one.
     const useComputer: BotTool = { surface: 'computer_session', tool: computerUseSessions.useComputer }
-    const tools = [sendMessage, messageBot, askQuestion, ...computerTools(images), useComputer, ...(options.tools ?? [])]
+    /**
+     * Every call of a bot's tool gives up once the watchdog detaches its run: the call ignored the run's abort, which
+     * waits for it, and the bot's history can only go on once it has ended.
+     */
+    const detachable = ({ surface, tool }: BotTool): BotTool => ({
+      surface,
+      tool: {
+        ...tool,
+        execute: async (args, api, ctx) => {
+          const detached = runtime!.#scheduler.detached((await botOf(api.conversationId)).id).then(() => {
+            throw new Error('Abandoned: the call ignored an interrupt')
+          })
+          return Promise.race([tool.execute(args, api, ctx), detached])
+        },
+      },
+    })
+    const tools = [sendMessage, messageBot, askQuestion, ...computerTools(images), useComputer, ...(options.tools ?? [])].map(detachable)
     const toolSurfaces = new Map<string, Surface | null>([
       ...tools.map(({ surface, tool }) => [tool.name, surface] as const),
       // Sessions don't select this extension, so its hooks shouldn't see their browser and desktop tools; if they ever
@@ -599,12 +597,11 @@ export class BotRuntime implements AgentRuntime {
       tools: tools.map(({ tool }) => tool),
       hooks: [
         hook(GenerationTask, { onYield: (_answer, api) => runtime?.remindIfOwed(api.conversationId) }),
-        // A steer joins the run after this tool round; until then the bot can't answer the request it replaces.
+        // The owner's newer message is about to supersede the run; until then the bot can't answer the request it replaces.
         hook(ToolTask, {
           beforeTool: async (call, api) => {
             if (!ownerTools.has(call.name)) return
-            const inbox = await api.snapshot(InboxDoc, api.conversationId, context)
-            return inbox?.items.some((item) => item.mode === 'steer') ? { block: steerPending } : undefined
+            return runtime!.#scheduler.superseded((await botOf(api.conversationId)).id) ? { block: outdatedAnswer } : undefined
           },
         }),
         // The orchestrator hook: every call of a tool with a side effect is reviewed before it runs. It stays last, so
@@ -648,11 +645,7 @@ export class BotRuntime implements AgentRuntime {
     return runtime
   }
 
-  /**
-   * Queues `input` (see `AgentRuntime.wake`). Each bot has one driver, which runs its queue one input at a time: it
-   * submits the next input once its history is idle and waits for the run to end. The owner steers a run that is going
-   * instead of queueing, and the run is theirs from then on.
-   */
+  /** Queues `input` (see `AgentRuntime.wake` and `RunScheduler`). */
   async wake(botId: string, input: BotInput): Promise<void> {
     await this.#wake(botId, input)
   }
@@ -664,27 +657,13 @@ export class BotRuntime implements AgentRuntime {
     await ended
   }
 
-  /** Queues `input`, or steers the run going with it; false when it was there already, or steered. */
-  async #wake(botId: string, input: Queued): Promise<boolean> {
+  /** Queues `input`; false when it was there already. */
+  async #wake(botId: string, input: QueuedInput): Promise<boolean> {
     const bot = await getBot(this.#options.db, botId)
     if (!bot) throw new Error(`Unknown bot ${botId}`)
     await this.#model(bot)
     this.#errors.delete(botId)
-    const turn = this.#turns.get(botId)
-    const queue = this.#queues.get(botId) ?? []
-    if (input.id && (turn?.input.id === input.id || queue.some((queued) => queued.id === input.id))) return false
-    this.#setWorking(botId)
-    if (turn && steerable(input, turn)) {
-      turn.lane = 'owner'
-      turn.steers++
-      await this.#submit(bot, input, 'steer')
-      return false
-    }
-    enqueue(queue, input)
-    this.#queues.set(botId, queue)
-    if (input.priority && turn && turn.lane !== 'owner') this.#interrupt(botId, turn)
-    this.#drive(botId)
-    return true
+    return this.#scheduler.wake(botId, input)
   }
 
   /** What the input of the bot's current run, the newest in its history, recorded: its lane and group chat. */
@@ -733,19 +712,8 @@ export class BotRuntime implements AgentRuntime {
     return () => current.sent--
   }
 
-  async stop(botId: string): Promise<void> {
-    this.#drop(botId)
-    const turn = this.#turns.get(botId)
-    const steers = turn?.steers
-    // After any submission under way, so an input being submitted now is aborted too.
-    await this.#serially(botId, async () => (await this.#existingHistory(botId))?.abort(context))
-    // The abort resolves once the history is idle; report it now rather than when the driver notices, unless the bot
-    // was woken again meanwhile.
-    if (!this.#queues.get(botId)?.length && this.#turns.get(botId)?.steers === steers) this.#setIdle(botId)
-  }
-
   async forget({ id, name, historyId }: { id: string; name: string; historyId: string | null }): Promise<void> {
-    this.#drop(id)
+    this.#scheduler.forget(id)
     if (historyId) await (await this.#harness.conversation(toConversationId(historyId), context))?.abort(context)
     try {
       await this.#options.computer.removeFolder({ id, name })
@@ -755,26 +723,16 @@ export class BotRuntime implements AgentRuntime {
     }
     // pi-durable can't delete a conversation, so the history stays in its storage with no bot to reach it.
     this.#histories.delete(id)
-    this.#submitting.delete(id)
-    this.#working.delete(id)
     this.#errors.delete(id)
     this.#groupMessages.delete(id)
   }
 
-  /** Drops the work queued behind the bot's run; those waiting on it are told it ended. */
-  #drop(botId: string) {
-    const queue = this.#queues.get(botId) ?? []
-    this.#queues.delete(botId)
-    for (const input of queue) input.settle?.()
-  }
-
   status(botId: string): BotStatus {
-    return { working: this.#working.has(botId), error: this.#errors.get(botId) ?? null }
+    return { working: this.#scheduler.working(botId), error: this.#errors.get(botId) ?? null }
   }
 
   async close(): Promise<void> {
-    this.#closed = true
-    for (const botId of [...this.#queues.keys()]) this.#drop(botId)
+    this.#scheduler.close()
     await this.#harness.close(context)
     await this.#options.computer.close()
     await this.#options.desktop.close?.()
@@ -803,6 +761,19 @@ export class BotRuntime implements AgentRuntime {
       }
       cursor = page.next
     } while (cursor)
+  }
+
+  /**
+   * What the model reads of a run's inputs, one after the other, after a note when they interrupted the bot (see
+   * `RunScheduler`) and the `reminder` of unanswered questions.
+   */
+  async #contents(bot: BotWithChat, inputs: QueuedInput[], reminder?: string): Promise<string | (TextContent | ImageContent)[]> {
+    const note = inputs.some((input) => input.supersedes) ? supersededNote : inputs.some((input) => input.attempt) ? interruptedNote : undefined
+    const contents = await Promise.all(inputs.map((input) => this.#content(bot, input)))
+    if (reminder) contents.unshift(reminder)
+    if (note) contents.unshift(note)
+    if (contents.every((content) => typeof content === 'string')) return contents.join('\n\n')
+    return contents.flatMap((content) => (typeof content === 'string' ? [{ type: 'text' as const, text: content }] : content))
   }
 
   /** What the model reads of an input: its text, where its files are, then its images. */
@@ -848,13 +819,6 @@ export class BotRuntime implements AgentRuntime {
     return parseModelRef(model)
   }
 
-  /** Runs `work` after the bot's earlier submissions and aborts, so they reach its history in the order they were made. */
-  #serially<T>(botId: string, work: () => Promise<T>): Promise<T> {
-    const done = (this.#submitting.get(botId) ?? Promise.resolve()).then(work, work)
-    this.#submitting.set(botId, done.catch(() => {}))
-    return done
-  }
-
   /** The bot's history, if it has one yet. */
   async #existingHistory(botId: string): Promise<Conversation | undefined> {
     const pending = this.#histories.get(botId)
@@ -864,114 +828,47 @@ export class BotRuntime implements AgentRuntime {
   }
 
   /**
-   * Configures the bot's history as the bot is now and submits `input`, after its earlier submissions. A run it starts
-   * in the bot's DM begins with the questions the owner left unanswered, each listed once.
+   * Configures the bot's history as the bot is now and submits `inputs` as one run (see `RunScheduler`). A run in the
+   * bot's DM begins with the questions the owner left unanswered, each listed once. The run of a deleted bot has
+   * nothing to do.
    */
-  #submit(bot: BotWithChat, input: BotInput, whenBusy: 'steer' | 'followUp'): Promise<Submission> {
-    return this.#serially(bot.id, async () => {
-      const unanswered = whenBusy === 'followUp' && !input.groupChatId ? await unansweredQuestions(this.#options.db, bot.chatId) : []
-      if (unanswered.length) {
-        const reminder = describeUnanswered(unanswered.map((question) => question.prompt))
-        input = { ...input, text: input.text ? `${reminder}\n\n${input.text}` : reminder }
-      }
-      const history = await this.#history(bot)
-      const others = (await listBots(this.#options.db)).filter((other) => other.id !== bot.id)
-      const groups = await listGroups(this.#options.db, bot.id)
-      const instructions = [botPrompt(bot), computerPrompt(this.#options.computer, bot, others), teamPrompt(others), groupsPrompt(bot, groups)]
-        .filter(Boolean)
-        .join('\n\n')
-      await history.configure({ model: await this.#model(bot), instructions }, context)
-      const submission = await history.submit(
-        {
-          type: 'input',
-          content: await this.#content(bot, input),
-          requestId: input.id,
-          whenBusy,
-          entry: {
-            kind: inputKind,
-            data: { lane: input.lane, ...(input.groupChatId && { groupChatId: input.groupChatId }), ...(input.id && { id: input.id }) } satisfies InputRecord,
-          },
+  async #submit(botId: string, inputs: QueuedInput[]): Promise<Run> {
+    const bot = await getBot(this.#options.db, botId)
+    if (!bot) return { ended: async () => true, answered: async () => true }
+    const history = await this.#history(bot)
+    const others = (await listBots(this.#options.db)).filter((other) => other.id !== bot.id)
+    const groups = await listGroups(this.#options.db, bot.id)
+    const instructions = [botPrompt(bot), computerPrompt(this.#options.computer, bot, others), teamPrompt(others), groupsPrompt(bot, groups)]
+      .filter(Boolean)
+      .join('\n\n')
+    await history.configure({ model: await this.#model(bot), instructions }, context)
+    // A detached run is still ending: an input queued behind it now would wait in pi's inbox once it has.
+    await history.waitForIdle(context)
+    const [first] = inputs as [QueuedInput]
+    const unanswered = first.groupChatId ? [] : await unansweredQuestions(this.#options.db, bot.chatId)
+    const reminder = unanswered.length ? describeUnanswered(unanswered.map((question) => question.prompt)) : undefined
+    const submission = await history.submit(
+      {
+        type: 'input',
+        content: await this.#contents(bot, inputs, reminder),
+        requestId: requestIdOf(inputs),
+        entry: {
+          kind: inputKind,
+          data: { lane: first.lane, ...(first.groupChatId && { groupChatId: first.groupChatId }), ...(first.id && { id: first.id }) } satisfies InputRecord,
         },
-        context,
-      )
-      await markReminded(this.#options.db, unanswered.map((question) => question.id))
-      void this.#reportFailure(bot.id, submission)
-      return submission
-    })
+      },
+      context,
+    )
+    await markReminded(this.#options.db, unanswered.map((question) => question.id))
+    void this.#reportFailure(bot.id, submission)
+    const status = async () => (await submission.status(context)).status
+    return {
+      ended: async () => ['done', 'unanswered'].includes(await status()),
+      answered: async () => (await status()) === 'done',
+    }
   }
 
-  /** Runs the bot's queue until it is empty, unless a driver already is. */
-  #drive(botId: string) {
-    if (this.#drivers.has(botId)) return
-    this.#drivers.add(botId)
-    void (async () => {
-      for (let input; !this.#closed && (input = this.#queues.get(botId)?.shift()); ) {
-        const turn: Turn = { input, lane: input.lane, interrupted: false, steers: 0 }
-        this.#turns.set(botId, turn)
-        try {
-          const bot = await getBot(this.#options.db, botId)
-          if (!bot) break // Deleted.
-          turn.submission = await this.#submit(bot, input, 'followUp')
-          const history = await this.#history(bot)
-          // Until the run ends, and any run an owner's steer started after it.
-          let steers
-          do {
-            steers = turn.steers
-            await history.waitForIdle(context)
-            await this.#submitting.get(botId)
-          } while (steers !== turn.steers)
-        } catch (error) {
-          if (this.#closed) break
-          console.error(`[agent] Bot ${botId}'s run couldn't start:`, error)
-          this.#errors.set(botId, (error as Error).message)
-          this.#options.onStatus(botId, this.status(botId))
-        } finally {
-          this.#turns.delete(botId)
-          input.settle?.()
-        }
-      }
-      this.#drivers.delete(botId)
-      if (!this.#queues.get(botId)?.length) this.#queues.delete(botId)
-      this.#setIdle(botId)
-    })()
-  }
-
-  /**
-   * A priority input interrupts `turn`: its run is aborted and its input queued again behind the priority one, once.
-   * Decided after the turn's submission, in order with the owner's steers: a run the owner steered meanwhile is theirs,
-   * and one that already ended has nothing to interrupt.
-   */
-  #interrupt(botId: string, turn: Turn) {
-    if (turn.interrupted) return
-    turn.interrupted = true
-    void this.#serially(botId, async () => {
-      if (turn.lane === 'owner' || this.#turns.get(botId) !== turn) return
-      const settled = turn.submission && (await turn.submission.status(context)).status
-      if (settled === 'done' || settled === 'unanswered') return
-      const { input } = turn
-      if (!input.redelivered) {
-        const queue = this.#queues.get(botId) ?? []
-        enqueue(queue, { ...input, text: `${interruptedNote}\n\n${input.text}`, id: input.id && `${input.id}:redelivered`, redelivered: true })
-        // Whoever waits on the work waits for it to be done again.
-        input.settle = undefined
-        this.#queues.set(botId, queue)
-      }
-      await (await this.#existingHistory(botId))?.abort(context)
-    }).catch((error) => console.error(`[agent] Couldn't interrupt bot ${botId}:`, error))
-  }
-
-  #setWorking(botId: string) {
-    if (this.#working.has(botId)) return
-    this.#working.add(botId)
-    this.#options.onStatus(botId, this.status(botId))
-  }
-
-  #setIdle(botId: string) {
-    if (!this.#working.delete(botId)) return
-    this.#options.onStatus(botId, this.status(botId))
-  }
-
-  /** A run that ends without answering, other than by Stop, failed: the model or its provider errored. */
+  /** A run that ends without answering, other than by an interrupt, failed: the model or its provider errored. */
   async #reportFailure(botId: string, submission: Submission) {
     let settled
     try {

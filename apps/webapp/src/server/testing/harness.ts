@@ -3,7 +3,7 @@ import { createServer as createHttpServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { botUser, type BotTool, type ModelProvider, openBotComputer } from '@openbot/agent'
+import { botUser, type BotTool, type ModelProvider, openBotComputer, type Watchdog } from '@openbot/agent'
 import { createFakeModel, createFakeProviders, fakeBotComputer } from '@openbot/agent/testing'
 import { connectBrowser, connectDesktop, connectScreens, defaultDaemonSocket } from '@openbot/computer'
 import type { Orchestrator, Screens, ScreenStatus } from '@openbot/core'
@@ -50,6 +50,8 @@ export type TestServerOptions = {
   realComputer?: boolean
   /** Model providers beside the scripted fakes, e.g. pi's built-in ones for evals on real models. */
   modelProviders?: readonly ModelProvider[]
+  /** Shorter watchdog timings than Grok's 120 s and 30 s. */
+  watchdog?: Watchdog
 }
 
 /**

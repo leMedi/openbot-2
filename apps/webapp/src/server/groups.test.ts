@@ -1,3 +1,4 @@
+import { interruptedNote } from '@openbot/agent'
 import { callsTools, endsSilently, held } from '@openbot/agent/testing'
 import { type BotInfo, type ChatInfo, maxGroupMembers, minGroupMembers, type NewBot } from '@openbot/api-contract'
 import { groupRoundRules } from '@openbot/core'
@@ -297,21 +298,24 @@ describe('a member’s one history', () => {
     expect(server.providers.pendingTurns).toBe(0)
   })
 
-  it("queues the owner's DM message behind a group turn instead of joining it", async () => {
+  it("is interrupted in its group turn by the owner's DM message; the turn is retried after it, and the rounds go on", async () => {
     const { server, bots: [rex, ana] } = await startWith('Rex', 'Ana')
     const groupTurn = held(callsTools(['sendMessage', { text: 'On it.' }]))
-    server.providers.scriptFor('Rex', groupTurn, endsSilently(), ...posts('Lunch at noon.'), ...passes())
-    server.providers.scriptFor('Ana', ...passes())
+    server.providers.scriptFor('Rex', groupTurn, ...posts('Lunch at noon.'), ...posts("I'll take the release."), ...passes())
+    server.providers.scriptFor('Ana', ...posts('Thanks, Rex.'))
 
     const { chat } = await server.client.groups.create({ memberIds: [rex!.id, ana!.id], text: 'Who takes the release?' })
     await groupTurn.requested
     await server.client.chats.send({ chatId: rex!.chatId, text: 'When is lunch?' })
-    groupTurn.release()
     await server.rounds.idle(chat.id)
-    await expect.poll(async () => (await server.client.bots.list()).find((bot) => bot.id === rex!.id)?.working).toBe(false)
+    groupTurn.release()
 
-    expect(await transcript(server, chat.id)).toEqual(['You: Who takes the release?', 'Rex: On it.'])
     expect(await transcript(server, rex!.chatId)).toEqual(['You: When is lunch?', 'Rex: Lunch at noon.'])
+    expect(await transcript(server, chat.id)).toEqual(['You: Who takes the release?', "Rex: I'll take the release.", 'Ana: Thanks, Rex.'])
+    const retried = requestsOf(server, 'Rex')[3]!
+    expect(lastMessage(retried)).toContain(interruptedNote)
+    expect(lastMessage(retried)).toContain('Who takes the release?')
+    expect(server.providers.pendingTurns).toBe(0)
   })
 
   it('answers in its DM about a group chat from its history', async () => {
