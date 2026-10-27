@@ -7,7 +7,7 @@ import { type BotInfo, type ChatInfo, maxGroupMembers, minGroupMembers, type New
 import { groupRoundRules } from '@openbot/core'
 import { messages } from '@openbot/db'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createTestServer, type TestServer } from './testing/harness.ts'
+import { createTestServer, restartTestServer, type TestServer } from './testing/harness.ts'
 
 const servers: TestServer[] = []
 afterEach(async () => {
@@ -383,6 +383,47 @@ describe('deleting a group chat', () => {
     expect(requestsOf(server, 'Rex')).toHaveLength(2)
     expect(requestsOf(server, 'Ana')).toEqual([])
     expect(server.providers.pendingTurns).toBe(0)
+  })
+
+  it('ends the rounds at a restart: the turn in progress finishes, nobody else takes one', async () => {
+    const { server: before, bots: [rex, ana] } = await startWith('Rex', 'Ana')
+    const turn = held(callsTools(['sendMessage', { text: 'Still here?' }]))
+    before.providers.scriptFor('Rex', turn)
+    const { chat } = await before.client.groups.create({ memberIds: [rex!.id, ana!.id], text: 'Hi' })
+    await turn.requested
+    expect((await chatInfo(before, chat.id)).speaking).toBe(rex!.id)
+
+    const after = await restartTestServer(before, {
+      script: (providers) => providers.scriptFor('Rex', ...posts('Still here.')),
+    })
+    servers.splice(servers.indexOf(before), 1, after)
+    await expect.poll(async () => (await transcript(after, chat.id)).length).toBe(2)
+    await expect.poll(async () => (await after.client.bots.list()).some((bot) => bot.working)).toBe(false)
+
+    expect(await transcript(after, chat.id)).toEqual(['You: Hi', 'Rex: Still here.'])
+    expect((await chatInfo(after, chat.id)).speaking).toBeNull()
+    expect(requestsOf(after, 'Ana')).toEqual([])
+    expect(after.providers.pendingTurns).toBe(0)
+  })
+
+  it("drops a member's turn waiting behind its DM work at a restart", async () => {
+    const { server: before, bots: [rex, ana] } = await startWith('Rex', 'Ana')
+    const dmWork = held(callsTools(['sendMessage', { text: 'Report done.' }]))
+    before.providers.scriptFor('Rex', dmWork)
+    await before.client.chats.send({ chatId: rex!.chatId, text: 'Write the report' })
+    await dmWork.requested
+    const { chat } = await before.client.groups.create({ memberIds: [rex!.id, ana!.id], text: 'Anyone there?' })
+
+    const after = await restartTestServer(before, {
+      script: (providers) => providers.scriptFor('Rex', ...posts('Report done.')),
+    })
+    servers.splice(servers.indexOf(before), 1, after)
+    await expect.poll(async () => (await transcript(after, rex!.chatId)).length).toBe(2)
+    await expect.poll(async () => (await after.client.bots.list()).some((bot) => bot.working)).toBe(false)
+
+    expect(await transcript(after, chat.id)).toEqual(['You: Anyone there?'])
+    expect((await chatInfo(after, chat.id)).speaking).toBeNull()
+    expect(after.providers.pendingTurns).toBe(0)
   })
 
   it('deletes only group chats', async () => {

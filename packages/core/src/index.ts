@@ -114,3 +114,4 @@ export {
   stoppedScreen,
 } from './ports/computer.ts'
 export type { Orchestrator, OrchestratorMode, ProposedAction, ReviewContext, Surface, Verdict } from './ports/orchestrator.ts'
+export { keepInput, type KeptInput, markInputsSubmitted, queuedInputs, requeueInput } from './bot-inputs.ts'

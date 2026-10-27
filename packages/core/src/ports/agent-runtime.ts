@@ -10,7 +10,10 @@ export type BotInput = {
   text: string
   /** Files that came with it, already on the computer; the bot is told where, and sees images. */
   attachments?: readonly Attachment[]
-  /** Makes waking again with the same id a no-op, e.g. the id of the message that woke the bot. */
+  /**
+   * Makes waking again with the same id a no-op, e.g. the id of the message that woke the bot: an input runs at most once,
+   * across restarts too.
+   */
   id?: string
   /**
    * Bot lane only: goes ahead of the bot's other bot- and background-lane work and interrupts a bot- or background-lane
@@ -31,7 +34,8 @@ export interface AgentRuntime {
    * Queues `input` for the bot; returns once queued, not when the run ends. The owner's DM message supersedes the run
    * going on (Grok's model: there is no Stop); anything else waits for it, then runs in lane order (owner, bot,
    * background), oldest first within a lane. Queued work is never dropped (a group turn interrupted on its third run
-   * ends there).
+   * ends there), and survives a restart, behind any run pi-durable resumes; a group chat's turns don't, as its rounds
+   * end with the server.
    */
   wake(botId: string, input: BotInput): Promise<void>
   /**

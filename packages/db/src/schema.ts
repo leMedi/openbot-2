@@ -203,6 +203,31 @@ export const auditLog = sqliteTable(
   (table) => [index('audit_log_bot_idx').on(table.botId, table.id)],
 )
 
+/**
+ * What woke each bot (`AgentRuntime.wake`), kept so a restart loses none of its queue. A row stays once its run is
+ * submitted, so an input of the same id never runs twice. A group chat's turns aren't kept: its rounds end with the
+ * server. Its shape is owned by `core`.
+ */
+export const botInputs = sqliteTable(
+  'bot_inputs',
+  {
+    id: id(),
+    botId: text('bot_id')
+      .notNull()
+      .references(() => bots.id, { onDelete: 'cascade' }),
+    /** The input's own id, e.g. that of the message that woke the bot. */
+    inputId: text('input_id').notNull(),
+    /** The input: its lane, priority, text, files and attempt. */
+    input: text('input', { mode: 'json' }).$type<unknown>().notNull(),
+    /** Its place in the bot's queue, before the scheduler sorts it by lane; renewed when an interrupt queues it again. */
+    position: integer('position').notNull(),
+    /** When its run was submitted to pi-durable, which keeps it from there; null while queued. */
+    submittedAt: integer('submitted_at', { mode: 'timestamp_ms' }),
+    createdAt: createdAt(),
+  },
+  (table) => [uniqueIndex('bot_inputs_input_unique').on(table.botId, table.inputId), uniqueIndex('bot_inputs_position_unique').on(table.position)],
+)
+
 export type Setting = typeof settings.$inferSelect
 export type SystemCredential = typeof systemCredentials.$inferSelect
 export type Bot = typeof bots.$inferSelect

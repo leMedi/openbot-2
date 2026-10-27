@@ -4,7 +4,7 @@ import { interruptedNote, supersededNote } from '@openbot/agent'
 import { callsTools, endsSilently, held, says } from '@openbot/agent/testing'
 import type { BotInfo, NewBot } from '@openbot/api-contract'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createTestServer, type TestServer, type TestServerOptions } from './testing/harness.ts'
+import { createTestServer, restartTestServer, type TestServer, type TestServerOptions } from './testing/harness.ts'
 
 const servers: TestServer[] = []
 afterEach(async () => {
@@ -396,6 +396,66 @@ describe('waking a busy bot', () => {
     expect(lastMessage(requests[3]!)).toContain('Lunch?')
     expect(lastMessage(requests[4]!)).toContain('Write the daily digest')
     expect(server.providers.pendingTurns).toBe(0)
+  })
+
+  it('wakes the bot after a restart for a message that was queued, exactly once', async () => {
+    const { server: before, rex, ana } = await startWithTeam()
+    const working = held(callsTools(['sendMessage', { text: 'Working on your report.' }]))
+    before.providers.scriptFor('Ana', working)
+    before.providers.scriptFor('Rex', callsTools(['message_bot', { to: 'Ana', text: 'Lunch?' }]), endsSilently())
+    await before.client.chats.send({ chatId: ana.chatId, text: 'Write the report' })
+    await working.requested
+    await before.runtime.wake(rex.id, { lane: 'bot', text: 'Ask Ana about lunch', id: 'lunch-1' })
+    await untilIdle(before, rex)
+
+    const after = await restartTestServer(before, {
+      // Her run for the owner goes on, then Rex's message wakes her.
+      script: (providers) => providers.scriptFor('Ana', callsTools(['sendMessage', { text: 'Report done.' }]), endsSilently(), endsSilently()),
+    })
+    servers.splice(servers.indexOf(before), 1, after)
+    await untilIdle(after, ana)
+    const [incoming] = (await after.client.chats.messages({ chatId: ana.chatId })).filter((message) => message.botMessage)
+    // A replayed message_bot call wakes her with the same input again.
+    await after.runtime.wake(ana.id, { lane: 'bot', text: 'Lunch?', id: incoming!.id })
+    await untilIdle(after, ana)
+
+    const woken = requestsOf(after, 'Ana').filter((request) => lastMessage(request).includes('Message from Rex'))
+    expect(woken).toHaveLength(1)
+    expect(lastMessage(woken[0]!)).toContain('Lunch?')
+    // The resumed run answered the owner while Rex's message waited for it.
+    expect((await transcript(after, ana)).map(([, , text]) => text)).toEqual(['Write the report', 'Lunch?', 'Report done.'])
+    expect(after.providers.pendingTurns).toBe(0)
+  })
+
+  it('runs work an interrupt queued again after a restart, once', async () => {
+    const { server: before, rex, ana } = await startWithTeam()
+    const digest = held(callsTools(['sendMessage', { text: 'Half a digest' }]))
+    const warned = held(endsSilently())
+    before.providers.scriptFor('Ana', digest, warned)
+    before.providers.scriptFor('Rex', callsTools(['message_bot', { to: 'Ana', text: 'The build is down!', priority: true }]), endsSilently())
+    await before.runtime.wake(ana.id, { lane: 'background', text: 'Write the daily digest', id: 'digest-1' })
+    await digest.requested
+    await before.runtime.wake(rex.id, { lane: 'bot', text: 'Warn Ana', id: 'warn-1' })
+    await warned.requested
+
+    const after = await restartTestServer(before, {
+      // The priority message's run goes on, then the digest runs again.
+      script: (providers) => providers.scriptFor('Ana', endsSilently(), callsTools(['sendMessage', { text: 'Digest.' }]), endsSilently()),
+    })
+    servers.splice(servers.indexOf(before), 1, after)
+    await untilIdle(after, ana)
+    // A routine waking her again with the same input finds it was queued already.
+    await after.runtime.wake(ana.id, { lane: 'background', text: 'Write the daily digest', id: 'digest-1' })
+    await untilIdle(after, ana)
+
+    const digests = requestsOf(after, 'Ana').filter((request) => lastMessage(request).includes('Write the daily digest'))
+    expect(digests).toHaveLength(1)
+    expect(lastMessage(digests[0]!)).toContain(interruptedNote)
+    expect(await transcript(after, ana)).toEqual([
+      ['Rex', '← Rex', 'The build is down!'],
+      ['Ana', null, 'Digest.'],
+    ])
+    expect(after.providers.pendingTurns).toBe(0)
   })
 
   it('runs work again however often it is interrupted', async () => {

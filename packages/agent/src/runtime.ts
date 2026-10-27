@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
@@ -47,10 +48,13 @@ import {
   findWaitingTakeOver,
   getBot,
   type Group,
+  keepInput,
+  type KeptInput,
   groupRoundRules,
   listGroups,
   type Lane,
   listBots,
+  markInputsSubmitted,
   markReminded,
   maxAttachments,
   maxBotMessageLength,
@@ -59,9 +63,11 @@ import {
   type Orchestrator,
   type QuestionCard,
   questionOptionStyles,
+  queuedInputs,
   type TakeOverCard,
   readModelSettings,
   recordUnreviewed,
+  requeueInput,
   reviewAction,
   setBotHistory,
   unansweredQuestions,
@@ -348,6 +354,12 @@ function requestIdOf(inputs: readonly QueuedInput[]): string | undefined {
   return ids.every(Boolean) ? ids.join(' ') : undefined
 }
 
+/** What of a queued input is kept across restarts: all but what only this process can use. */
+const toKept = ({ settle: _settle, supersedes: _supersedes, ...input }: QueuedInput) => input as KeptInput
+
+/** The ids of the inputs kept across restarts: all but a group chat's turns, whose rounds end with the server. */
+const keptIds = (inputs: readonly QueuedInput[]) => inputs.flatMap((input) => (input.groupChatId || !input.id ? [] : [input.id]))
+
 /**
  * Runs bots on pi-durable (ADR 0005): each bot's history is one pi conversation (ADR 0001), and `sendMessage` and
  * `askQuestion` are the only ways a bot reaches a chat.
@@ -365,6 +377,8 @@ export class BotRuntime implements AgentRuntime {
   readonly #errors = new Map<string, string>()
   /** Messages each bot has sent in its current group turn, by the turn's input id. */
   readonly #groupMessages = new Map<string, { inputId: string; sent: number }>()
+  /** Closing: a run that can't start now is queued still, for the next start. */
+  #closing = false
 
   private constructor(harness: Harness, options: BotRuntimeOptions, images: ImageProcessor) {
     this.#harness = harness
@@ -372,7 +386,19 @@ export class BotRuntime implements AgentRuntime {
     this.#images = images
     this.#scheduler = new RunScheduler({
       histories: {
-        submit: (botId, inputs) => this.#submit(botId, inputs),
+        submit: async (botId, inputs) => {
+          let run
+          try {
+            run = await this.#submit(botId, inputs)
+          } catch (error) {
+            // Dropped, as it would be without a restart; unless the runtime is closing under it.
+            if (!this.#closing) await markInputsSubmitted(this.#options.db, botId, keptIds(inputs))
+            throw error
+          }
+          // pi-durable keeps the run from here on; were this lost, resubmitting the inputs finds their run.
+          await markInputsSubmitted(this.#options.db, botId, keptIds(inputs))
+          return run
+        },
         idle: async (botId) => (await this.#existingHistory(botId))?.waitForIdle(context),
         abort: async (botId) => (await this.#existingHistory(botId))?.abort(context),
       },
@@ -381,6 +407,12 @@ export class BotRuntime implements AgentRuntime {
         console.error(`[agent] Bot ${botId}'s run couldn't start:`, error)
         this.#errors.set(botId, error.message)
         this.#options.onStatus(botId, this.status(botId))
+      },
+      onRequeue: (botId, input) => {
+        if (!keptIds([input]).length) return
+        void requeueInput(this.#options.db, botId, toKept(input)).catch((error) =>
+          console.error(`[agent] Couldn't keep bot ${botId}'s interrupted input queued:`, error),
+        )
       },
       watchdog: options.watchdog,
     })
@@ -721,7 +753,12 @@ export class BotRuntime implements AgentRuntime {
       context,
     )
     runtime = new BotRuntime(harness, options, images)
+    // Read before pi-durable resumes runs, whose replayed calls may queue inputs: those are woken as they are queued.
+    const queued = await queuedInputs(options.db)
     harness.resume()
+    // Back in the order they were queued; the scheduler sorts them by lane. A run they would have interrupted was
+    // resumed by pi-durable, and they wait for it.
+    for (const { botId, input } of queued) runtime.#scheduler.wake(botId, input)
     return runtime
   }
 
@@ -737,13 +774,19 @@ export class BotRuntime implements AgentRuntime {
     await ended
   }
 
-  /** Queues `input`; false when it was there already. */
+  /**
+   * Queues `input`, kept in the database across restarts unless it is a group chat's turn; false when it was queued
+   * before, here or before a restart.
+   */
   async #wake(botId: string, input: QueuedInput): Promise<boolean> {
     const bot = await getBot(this.#options.db, botId)
     if (!bot) throw new Error(`Unknown bot ${botId}`)
     await this.#model(bot)
     this.#errors.delete(botId)
-    return this.#scheduler.wake(botId, input)
+    if (input.groupChatId) return this.#scheduler.wake(botId, input)
+    const queued = { ...input, id: input.id ?? randomUUID() }
+    if (!(await keepInput(this.#options.db, botId, toKept(queued)))) return false
+    return this.#scheduler.wake(botId, queued)
   }
 
   /** What the input of the bot's current run, the newest in its history, recorded: its lane and group chat. */
@@ -816,6 +859,7 @@ export class BotRuntime implements AgentRuntime {
   }
 
   async close(): Promise<void> {
+    this.#closing = true
     this.#scheduler.close()
     await this.#harness.close(context)
     await this.#options.computer.close()

@@ -56,7 +56,7 @@ One member's go in a round of a group chat: it reads what others said since its 
 _Avoid_: Run (for the turn), reply
 
 **Lane**:
-The priority class of a bot's pending work: owner, bot, or background (routines and revivals), in that order. A bot works on one thing at a time. The owner's message **supersedes** its current work, whatever it is: that work is interrupted, and picked up again after the owner's messages (a group chat turn is retried); everything else waits. Turns in group chats are in the owner lane. Waiting work is never dropped, except that a group chat turn interrupted three times ends there.
+The priority class of a bot's pending work: owner, bot, or background (routines and revivals), in that order. A bot works on one thing at a time. The owner's message **supersedes** its current work, whatever it is: that work is interrupted, and picked up again after the owner's messages (a group chat turn is retried); everything else waits. Turns in group chats are in the owner lane. Waiting work is never dropped, except that a group chat turn interrupted three times ends there; it survives a restart, except group chat turns, whose rounds end with the server.
 
 **Teammate**:
 Another of the owner's bots, as a bot sees it: one it can message.

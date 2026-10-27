@@ -42,6 +42,8 @@ export type RunSchedulerOptions = {
   onWorking(botId: string, working: boolean): void
   /** A run couldn't start. */
   onError(botId: string, error: Error): void
+  /** An interrupt queued `input` to run again, with its new attempt. */
+  onRequeue?(botId: string, input: QueuedInput): void
   watchdog?: Watchdog
 }
 
@@ -90,6 +92,8 @@ type BotState = {
   active?: ActiveRun
   driving: boolean
   working: boolean
+  /** A run the watchdog detached is still ending, and the next waits to be submitted after it. */
+  detachedEnding: boolean
   /** Submissions and aborts, in order, so an abort reaches the run it was meant for. */
   chain: Promise<unknown>
 }
@@ -146,8 +150,9 @@ export class RunScheduler {
    * detached one still ending while the next waits to be submitted.
    */
   superseded(botId: string): boolean {
-    const active = this.#bots.get(botId)?.active
-    return !!active && (active.superseded || !active.run)
+    const bot = this.#bots.get(botId)
+    const active = bot?.active
+    return !!active && (active.superseded || (bot.detachedEnding && !active.run))
   }
 
   /**
@@ -199,7 +204,7 @@ export class RunScheduler {
   #bot(botId: string): BotState {
     let bot = this.#bots.get(botId)
     if (!bot) {
-      bot = { queue: [], driving: false, working: false, chain: Promise.resolve() }
+      bot = { queue: [], driving: false, working: false, detachedEnding: false, chain: Promise.resolve() }
       this.#bots.set(botId, bot)
     }
     return bot
@@ -228,13 +233,24 @@ export class RunScheduler {
     void (async () => {
       for (let inputs; !this.#closed && (inputs = this.#next(bot)).length; ) {
         let detach!: () => void
-        const detached = new Promise<void>((resolve) => (detach = resolve))
+        const detached = new Promise<void>(
+          (resolve) =>
+            (detach = () => {
+              bot.detachedEnding = true
+              resolve()
+            }),
+        )
         const active: ActiveRun = { inputs, interrupted: false, superseded: false, detached, detach, timers: [] }
         bot.active = active
         try {
           // Chained at once, so an interrupt asked from now on comes after it.
           await this.#serially(bot, async () => {
-            active.run = await this.#options.histories.submit(botId, inputs)
+            try {
+              active.run = await this.#options.histories.submit(botId, inputs)
+            } finally {
+              // Submitting waited for the history to be idle: a detached run has ended.
+              bot.detachedEnding = false
+            }
           })
           await Promise.race([this.#options.histories.idle(botId), detached])
           // Any interrupt of this run, asked while it went on.
@@ -264,7 +280,7 @@ export class RunScheduler {
       const { run } = active
       if (bot.active !== active || !run || (await run.ended())) return
       await Promise.race([this.#options.histories.abort(botId), active.detached])
-      if (!(await run.answered())) for (const input of active.inputs) this.#requeue(bot, input)
+      if (!(await run.answered())) for (const input of active.inputs) this.#requeue(botId, bot, input)
     }).catch((error) => couldntInterrupt(botId, error))
   }
 
@@ -272,12 +288,14 @@ export class RunScheduler {
    * Queues an interrupted run's input to run again, moving its waiter there. The owner's messages don't: they are in
    * the history, and the run superseding them answers them. A group turn gives up after `maxGroupTurnAttempts` runs.
    */
-  #requeue(bot: BotState, input: QueuedInput) {
+  #requeue(botId: string, bot: BotState, input: QueuedInput) {
     if (isOwnerMessage(input)) return
     const attempt = (input.attempt ?? 0) + 1
     if (input.groupChatId && attempt >= maxGroupTurnAttempts) return
-    enqueue(bot.queue, { ...input, attempt })
+    const requeued = { ...input, attempt }
+    enqueue(bot.queue, requeued)
     input.settle = undefined
+    this.#options.onRequeue?.(botId, requeued)
   }
 
   /** Starts the watchdog on `active`, which the owner's message now waits for. */
