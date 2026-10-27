@@ -1,4 +1,4 @@
-import { awaitWithContext, BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
+import { BACKGROUND_CONTEXT, type Context } from '@earendil-works/chord/context'
 import { type ImageContent, type TextContent, Type } from '@earendil-works/pi-ai'
 import {
   configure,
@@ -85,10 +85,8 @@ export type ComputerUseOptions = {
   images: ImageProcessor
   /** The bot a conversation belongs to: its history, or a computer-use session it started. */
   botOf(conversationId: ConversationId): Promise<BotWithChat>
-  /** The model computer-use sessions run on: the computer-use model, else the default. */
-  model(): Promise<ModelRef>
-  /** Resolves once the owner isn't holding the bot's screen, so a session never fights them for its input. */
-  screenFree(bot: BotWithChat): Promise<void>
+  /** The model the bot's computer-use sessions run on: the computer-use model, else the bot's own model, else the default. */
+  model(bot: BotWithChat): Promise<ModelRef>
   /** The instruction of the bot's take-over card still waiting for the owner, or null. */
   waitingTakeOver(bot: BotWithChat): Promise<string | null>
   /** Posts a take-over card to the bot's DM; `idempotencyKey` makes a replayed call post once. */
@@ -155,6 +153,21 @@ export function computerUse(options: ComputerUseOptions) {
   async function image(bytes: Uint8Array): Promise<ImageContent | undefined> {
     const prepared = await images.prepare(new Uint8Array(bytes), 'image/png', DEFAULT_IMAGE_LIMITS)
     return prepared && { type: 'image', data: prepared.data, mimeType: prepared.mimeType }
+  }
+
+  /** Whether the session's model accepts images: one without vision still works from snapshots. */
+  async function seesImages(api: ToolExecutionApi, ctx: Context): Promise<boolean> {
+    const { model } = await api.agent(ctx)
+    return !!model && !!api.models.getModel(model.provider, model.modelId)?.input.includes('image')
+  }
+
+  /** A screenshot tool's result: the image, or text saying why there is none. */
+  async function screenshot(api: ToolExecutionApi, ctx: Context, take: () => Promise<Uint8Array>) {
+    if (!(await seesImages(api, ctx))) {
+      return { output: [text("Your model can't see images, so screenshots aren't shown; work from the snapshots.")] }
+    }
+    const shot = await image(await take())
+    return { output: shot ? [shot] : [text("The screenshot can't be shown.")] }
   }
 
   // One at a time: they all act on the same screen.
@@ -240,10 +253,7 @@ export function computerUse(options: ComputerUseOptions) {
       description: 'See the active tab as it looks on the screen.',
       parameters: Type.Object({}),
       ...sequential,
-      execute: async (_args, api) => {
-        const shot = await image(await browser.screenshot(await botOf(api.conversationId)))
-        return { output: shot ? [shot] : [text("The screenshot can't be shown.")] }
-      },
+      execute: async (_args, api, ctx) => screenshot(api, ctx, async () => browser.screenshot(await botOf(api.conversationId))),
     }),
   ]
 
@@ -334,10 +344,7 @@ export function computerUse(options: ComputerUseOptions) {
       description: 'See a window, or the whole screen without windowId. Points for desktop_click are pixels of a window\'s screenshot.',
       parameters: Type.Object({ windowId: Type.Optional(windowId) }),
       ...sequential,
-      execute: async (args, api) => {
-        const shot = await image(await desktop.screenshot(await botOf(api.conversationId), args.windowId))
-        return { output: shot ? [shot] : [text("The screenshot can't be shown.")] }
-      },
+      execute: async (args, api, ctx) => screenshot(api, ctx, async () => desktop.screenshot(await botOf(api.conversationId), args.windowId)),
     }),
   ]
 
@@ -356,17 +363,7 @@ export function computerUse(options: ComputerUseOptions) {
     }),
   })
 
-  // Every screen tool first waits while the owner holds the screen: a session's input would fight theirs.
-  const pausable = [...browserTools, ...desktopTools].map(
-    (tool): ToolRegistration<any, any> => ({
-      ...tool,
-      execute: async (args: unknown, api: any, ctx: any) => {
-        await awaitWithContext(options.screenFree(await botOf(api.conversationId)), ctx)
-        return tool.execute(args as never, api, ctx)
-      },
-    }),
-  )
-  const tools = [...pausable, needsHelp]
+  const tools = [...browserTools, ...desktopTools, needsHelp]
   const extension: Extension = defineExtension({
     name: 'computer-use',
     sections: [section('computer-use', () => computerUseVoice, { tag: false })],
@@ -389,7 +386,7 @@ export function computerUse(options: ComputerUseOptions) {
     replay: 'safe',
     // A bot has one screen: two sessions at once would fight over it and invalidate each other's references.
     executionMode: 'sequential',
-    execute: async (args, api, ctx) => {
+    execute: async (args, api) => {
       const bot = await botOf(api.conversationId)
       // Checked once: a rerun after a restart may find the card this very call posted.
       const waiting = (await api.memo<boolean>('started', context)) ? null : await options.waitingTakeOver(bot)
@@ -402,7 +399,7 @@ export function computerUse(options: ComputerUseOptions) {
       // Kept across a rerun after a restart, so the session's duration counts from its first start.
       const startedAt = (await api.memo<number>('startedAt', context)) ?? Date.now()
       await api.memo('startedAt', startedAt, context)
-      const model = await options.model()
+      const model = await options.model(bot)
       const session = await api.commit(async (tx) => {
         const existing = (await tx.scanConversations({ ownerTaskId: api.taskId }, 1)).items[0]
         if (existing) return existing.id
@@ -423,7 +420,6 @@ export function computerUse(options: ComputerUseOptions) {
         // Opened once: a rerun after a restart finds the session mid-way and leaves its page alone.
         let start = (await api.memo<string>('start', context)) ?? ''
         if (args.startUrl && !start) {
-          await awaitWithContext(options.screenFree(bot), ctx)
           try {
             await browser.navigate(bot, args.startUrl)
             start = `\n\nThe browser has opened ${args.startUrl}.`

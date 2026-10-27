@@ -160,8 +160,6 @@ export type BotRuntimeOptions = {
   askQuestion(bot: BotWithChat, card: QuestionCard, idempotencyKey: string): Promise<void>
   /** Posts a take-over card to a bot's DM when its computer-use session is stuck on what only the owner can do. */
   requestTakeOver(bot: BotWithChat, card: TakeOverCard, idempotencyKey: string): Promise<void>
-  /** Resolves once the owner isn't holding the bot's screen; computer-use sessions wait for it before each action. */
-  screenFree(botId: string): Promise<void>
   /** A bot's status changed: it started or finished working, or a run failed. */
   onStatus(botId: string, status: BotStatus): void
   /** When a run the owner's message waits for is interrupted again, then detached; Grok's 120 s and 30 s by default. */
@@ -369,13 +367,12 @@ export class BotRuntime implements AgentRuntime {
       computer: options.computer,
       images,
       botOf,
-      model: async () => {
+      model: async (bot) => {
         const { computerUseModel, defaultModel } = await readModelSettings(options.db)
-        const model = computerUseModel ?? defaultModel
+        const model = computerUseModel ?? bot.model ?? defaultModel
         if (!model) throw new NoModelError('Choose a computer-use or default model first')
         return parseModelRef(model)
       },
-      screenFree: (bot) => options.screenFree(bot.id),
       waitingTakeOver: async (bot) => (await findWaitingTakeOver(options.db, bot.chatId))?.card.instruction ?? null,
       requestTakeOver: options.requestTakeOver,
       audit: (bot, entry) => recordUnreviewed(options.db, bot.id, { ...entry, surface: 'computer_session' }),
@@ -712,6 +709,10 @@ export class BotRuntime implements AgentRuntime {
     return () => current.sent--
   }
 
+  async endGroupTurns(groupChatId: string): Promise<void> {
+    await this.#scheduler.endGroup(groupChatId)
+  }
+
   async forget({ id, name, historyId }: { id: string; name: string; historyId: string | null }): Promise<void> {
     this.#scheduler.forget(id)
     if (historyId) await (await this.#harness.conversation(toConversationId(historyId), context))?.abort(context)
@@ -834,7 +835,9 @@ export class BotRuntime implements AgentRuntime {
    */
   async #submit(botId: string, inputs: QueuedInput[]): Promise<Run> {
     const bot = await getBot(this.#options.db, botId)
-    if (!bot) return { ended: async () => true, answered: async () => true }
+    const [first] = inputs as [QueuedInput]
+    // A turn in a group chat deleted while it waited, e.g. queued by rounds that were ending, has nothing to do either.
+    if (!bot || (first.groupChatId && !(await getGroup(this.#options.db, first.groupChatId)))) return { ended: async () => true, answered: async () => true }
     const history = await this.#history(bot)
     const others = (await listBots(this.#options.db)).filter((other) => other.id !== bot.id)
     const groups = await listGroups(this.#options.db, bot.id)
@@ -844,7 +847,6 @@ export class BotRuntime implements AgentRuntime {
     await history.configure({ model: await this.#model(bot), instructions }, context)
     // A detached run is still ending: an input queued behind it now would wait in pi's inbox once it has.
     await history.waitForIdle(context)
-    const [first] = inputs as [QueuedInput]
     const unanswered = first.groupChatId ? [] : await unansweredQuestions(this.#options.db, bot.chatId)
     const reminder = unanswered.length ? describeUnanswered(unanswered.map((question) => question.prompt)) : undefined
     const submission = await history.submit(

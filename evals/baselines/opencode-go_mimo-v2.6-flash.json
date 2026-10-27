@@ -1,0 +1,17 @@
+{
+  "model": "opencode-go/mimo-v2.6-flash",
+  "judge": "opencode-go/mimo-v2.6-flash",
+  "runs": 3,
+  "recordedAt": "2026-10-27T17:36:07.460Z",
+  "passRates": {
+    "groups/mention-answers-only-named": 1,
+    "groups/passing-when-nothing-to-add": 0.3333333333333333,
+    "groups/stay-in-lane": 0,
+    "tool-priority/fetch-with-shell": 1,
+    "tool-priority/plugin-tool-first": 1,
+    "tool-priority/status-page-api": 0.6666666666666666,
+    "voice/reports-after-work": 1,
+    "voice/short-messages": 0,
+    "voice/thanks-gets-a-reply": 0.6666666666666666
+  }
+}

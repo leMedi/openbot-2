@@ -162,6 +162,28 @@ export class RunScheduler {
     return this.#bots.get(botId)?.working ?? false
   }
 
+  /**
+   * Ends every bot's turns in a deleted group chat: those queued are dropped, their waiters told they ended, and a
+   * turn's run going on is aborted, after its submission, not to run again.
+   */
+  async endGroup(groupChatId: string): Promise<void> {
+    const inGroup = (input: QueuedInput) => input.groupChatId === groupChatId
+    await Promise.all(
+      [...this.#bots].map(([botId, bot]) => {
+        for (const input of bot.queue.filter(inGroup)) input.settle?.()
+        bot.queue = bot.queue.filter((input) => !inGroup(input))
+        const { active } = bot
+        if (!active?.inputs.some(inGroup)) return
+        // Interrupted for good: no later interrupt queues it again.
+        active.interrupted = true
+        return this.#serially(bot, async () => {
+          if (bot.active !== active || !active.run || (await active.run.ended())) return
+          await Promise.race([this.#options.histories.abort(botId), active.detached])
+        }).catch((error) => couldntInterrupt(botId, error))
+      }),
+    )
+  }
+
   /** Drops everything queued for the bot; those waiting on it are told it ended. Its run is the caller's to abort. */
   forget(botId: string) {
     const bot = this.#bots.get(botId)

@@ -35,10 +35,12 @@ export interface AgentRuntime {
    */
   wake(botId: string, input: BotInput): Promise<void>
   /**
-   * Queues `input` as `wake` does and resolves once its run has ended for good, or it was dropped (the bot deleted, the
-   * runtime closed). A group chat's rounds wait on each member's turn with it.
+   * Queues `input` as `wake` does and resolves once its run has ended for good, or it was dropped (the bot or the group
+   * chat deleted, the runtime closed). A group chat's rounds wait on each member's turn with it.
    */
   takeTurn(botId: string, input: BotInput): Promise<void>
+  /** Ends every member's turn in a deleted group chat: those queued are dropped, and a turn's run going on is aborted. */
+  endGroupTurns(groupChatId: string): Promise<void>
   /** Aborts a deleted bot's run and drops everything the runtime holds for it, its folder on the computer included. */
   forget(bot: { id: string; name: string; historyId: string | null }): Promise<void>
 }

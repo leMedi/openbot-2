@@ -1,11 +1,11 @@
 import type { BotInfo } from '@openbot/api-contract'
 import { cn } from '@openbot/ui/lib/utils'
 import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { BotAvatar } from '../../components/bot-avatar.tsx'
 import { ChatView } from '../../components/chat-view.tsx'
 import { ProfilePane } from '../../components/profile-pane.tsx'
-import { ScreenPane } from '../../components/screen-pane.tsx'
+import { FullscreenScreen, ScreenPane } from '../../components/screen-pane.tsx'
 import { useLive } from '../../lib/live.tsx'
 
 export const Route = createFileRoute('/_app/bots/$botId')({
@@ -21,18 +21,16 @@ function Dm() {
   const live = useLive()
   const navigate = useNavigate()
   const [pane, setPane] = useState<Pane | null>('screen')
-  /** The bot whose screen the owner controls: from the pane's Take over, or a take-over card's. Another bot's starts watched. */
-  const [controlled, setControlled] = useState<string>()
-  const control = controlled === botId
-  const setControl = (on: boolean) => setControlled(on ? botId : undefined)
+  /** Whether the bot's screen is fullscreen, where the owner controls it; another bot's starts closed. */
+  const [fullscreen, setFullscreen] = useState(false)
+  useEffect(() => setFullscreen(false), [botId])
   const bot = live.bots?.find((entry) => entry.id === botId)
-  // A take-over card handed back, in this tab or another, ends the owner's control of the screen.
-  const waitingTakeOver = bot && [...(live.messages.get(bot.chatId) ?? [])].reverse().find((message) => message.card?.type === 'take_over' && !message.card.outcome)?.id
-  const wasWaiting = useRef(waitingTakeOver)
-  useEffect(() => {
-    if (wasWaiting.current && !waitingTakeOver) setControlled(undefined)
-    wasWaiting.current = waitingTakeOver
-  }, [waitingTakeOver])
+  const waitingTakeOver = bot && [...(live.messages.get(bot.chatId) ?? [])].reverse().find((message) => message.card?.type === 'take_over' && !message.card.outcome)
+  function closeFullscreen() {
+    setFullscreen(false)
+    // As in Grok, the owner goes back to the composer.
+    document.querySelector<HTMLElement>('[data-composer]')?.focus()
+  }
   if (!bot) return live.bots ? <p className="m-auto text-muted-foreground">This bot doesn't exist.</p> : null
   return (
     <div className="flex min-h-0 flex-1">
@@ -48,13 +46,11 @@ function Dm() {
           typing={bot.working ? bot : undefined}
           allowFiles
           showAuthors={false}
-          onScreen={(takeOver) => {
-            setPane('screen')
-            setControl(takeOver)
-          }}
+          onScreen={() => setFullscreen(true)}
         />
       </div>
-      {pane === 'screen' && <ScreenPane bot={bot} control={control} onControl={setControl} />}
+      {pane === 'screen' && <ScreenPane bot={bot} takeOver={waitingTakeOver} onOpen={() => setFullscreen(true)} />}
+      {fullscreen && <FullscreenScreen bot={bot} takeOver={waitingTakeOver} onClose={closeFullscreen} />}
       {pane === 'profile' && (
         <ProfilePane
           bot={bot}

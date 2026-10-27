@@ -223,6 +223,8 @@ export const liveEvent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('bot.updated'), bot }),
   /** The bot and its DM are gone for good. */
   z.object({ type: z.literal('bot.deleted'), botId: z.string(), chatId: z.string() }),
+  /** The group chat, its messages and its files are gone for good. */
+  z.object({ type: z.literal('chat.deleted'), chatId: z.string() }),
   z.object({ type: z.literal('bot.status'), botId: z.string(), working: z.boolean(), error: z.string().nullable() }),
   z.object({ type: z.literal('message.created'), message }),
   /** A chat's sidebar state changed: a message, a read, a pin; `chat` is all of it as it is now. */
@@ -300,7 +302,10 @@ export const model = z.object({
 })
 export type ModelInfo = z.infer<typeof model>
 
-/** Model refs; null means "same as default" (for the default model itself: not chosen yet). */
+/**
+ * Model refs. A null computer-use model is "same as each bot's model" (its own, else the default); a null default is
+ * not chosen yet.
+ */
 export const modelSettings = z.object({
   defaultModel: z.string().nullable(),
   computerUseModel: z.string().nullable(),
@@ -510,7 +515,7 @@ export const contract = {
         path: '/messages/{messageId}/hand-back',
         summary:
           "Hand a bot's screen back after its take-over card, once: `done` when the owner did the step, `skipped` when they " +
-          "didn't. Ends the owner's hold on the screen and wakes the bot with the outcome",
+          "didn't. Wakes the bot with the outcome",
       })
       .input(z.object({ messageId: z.string(), outcome: handBackOutcome }))
       .output(message),
@@ -534,6 +539,16 @@ export const contract = {
       })
       .input(z.object({ chatId: z.string(), title: groupTitle.optional(), memberIds: groupMembers.optional() }))
       .output(chat),
+    delete: oc
+      .route({
+        method: 'DELETE',
+        path: '/groups/{chatId}',
+        summary:
+          'Delete a group chat for good: ends its rounds, then deletes its messages and files. Its members stay, and what they ' +
+          'said stays in their histories',
+      })
+      .input(z.object({ chatId: z.string() }))
+      .output(z.void()),
   },
   providers: {
     list: oc
@@ -587,20 +602,6 @@ export const contract = {
       })
       .input(z.object({ botId: z.string() }))
       .output(screenTicket),
-    hold: oc
-      .route({
-        method: 'PUT',
-        path: '/bots/{botId}/screen/hold',
-        summary:
-          "Take over the bot's screen, or renew the hold: the bot's computer-use sessions pause until it is handed back. A " +
-          'hold not renewed by `expiresAt` ends by itself',
-      })
-      .input(z.object({ botId: z.string() }))
-      .output(z.object({ expiresAt: z.number() })),
-    release: oc
-      .route({ method: 'DELETE', path: '/bots/{botId}/screen/hold', summary: "Hand the bot's screen back; its sessions go on" })
-      .input(z.object({ botId: z.string() }))
-      .output(z.void()),
   },
   orchestrator: {
     getModes: oc

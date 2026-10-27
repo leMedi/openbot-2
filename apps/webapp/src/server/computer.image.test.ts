@@ -299,7 +299,7 @@ describe.skipIf(!inRuntimeImage)('bots on the real computer', () => {
     expect(statSync(answered!.match(/saved at (\S+\.png)/)![1]!).size).toBeGreaterThan(1000)
   })
 
-  it('ask the owner to take over when stuck, wait while they hold the screen, and go on once handed back', { timeout: 120_000 }, async () => {
+  it('ask the owner to take over when stuck, and go on once handed back', { timeout: 120_000 }, async () => {
     const pages = await servePages()
     try {
       const signIn = pages.page('sign-in', { title: 'Sign in', elements: [{ role: 'heading', name: 'Sign in' }, { role: 'textbox', name: 'Password' }] })
@@ -317,8 +317,7 @@ describe.skipIf(!inRuntimeImage)('bots on the real computer', () => {
       const card = (await server.client.chats.messages({ chatId: rex.chatId })).at(-1)!
       expect(card.card).toEqual({ type: 'take_over', instruction: 'Sign in to the shop', outcome: null })
 
-      // The owner takes over, then is done: the screen is handed back and Rex's next session runs on it.
-      await server.client.screens.hold({ botId: rex.id })
+      // The owner takes over, then is done: Rex's next session runs on the screen as they left it.
       server.providers.script(
         callsTools(['use_computer', { goal: 'Open my orders', reason: 'Testing take-over' }]),
         callsTools(['browser_snapshot', {}]),
@@ -330,7 +329,7 @@ describe.skipIf(!inRuntimeImage)('bots on the real computer', () => {
       await expect.poll(async () => (await server.client.bots.list()).find((entry) => entry.id === rex.id)?.working, { timeout: 60_000 }).toBe(false)
 
       const resumed = server.providers.requests.map((request) => JSON.stringify(request.messages.at(-1)))
-      expect(resumed[3]).toContain('they did what you asked')
+      expect(resumed[3]).toContain('The owner handed your screen back')
       expect(resumed[5]).toContain('- heading \\"Sign in\\"')
     } finally {
       await pages.close()

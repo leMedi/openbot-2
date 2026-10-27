@@ -99,8 +99,6 @@ describe('system credentials', () => {
       'bots.audit': await server.client.bots.audit({ botId: bot.id }),
       'screens.status': await server.client.screens.status({ botId: bot.id }),
       'screens.ticket': await server.client.screens.ticket({ botId: bot.id }),
-      'screens.hold': await server.client.screens.hold({ botId: bot.id }),
-      'screens.release': null,
       'orchestrator.getModes': await server.client.orchestrator.getModes(),
       'orchestrator.updateModes': await server.client.orchestrator.updateModes({ vault: 'enforce' }),
       'bots.delete': null,
@@ -115,6 +113,7 @@ describe('system credentials', () => {
       'chats.handBack': await server.client.chats.handBack({ messageId: takeOver.id, outcome: 'done' }),
       'groups.create': group,
       'groups.update': await server.client.groups.update({ chatId: group.chat.id, title: 'Team' }),
+      'groups.delete': null,
       events: null,
       openapi: await (await server.fetch('/api/openapi.json')).json(),
     }
