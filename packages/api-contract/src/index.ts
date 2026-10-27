@@ -377,7 +377,7 @@ export type ScreenTicket = z.infer<typeof screenTicket>
 export const contract = {
   health: oc
     .route({ method: 'GET', path: '/health', summary: 'Liveness, used by the installer and the updater' })
-    .output(z.object({ status: z.literal('ok'), epoch: z.string() })),
+    .output(z.object({ status: z.literal('ok'), epoch: z.string(), version: z.string() })),
   events: oc
     .route({
       method: 'GET',

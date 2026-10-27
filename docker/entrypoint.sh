@@ -15,6 +15,8 @@ install -d -o openbot-server -g openbot-server -m 0700 "${OPENBOT_DATA_DIR}"
 # The bots' world.
 install -d -o openbot -g openbot -m 0755 "${OPENBOT_HOME}" "${OPENBOT_HOME}/shared" "${OPENBOT_HOME}/bots"
 install -d -o openbot-server -g openbot-server -m 0755 "${OPENBOT_APP_DIR}"
+# The release the image embeds, if any, unless a newer one is installed already.
+openbot-install-release
 # The screen daemon's socket folder, and X's (root-owned and sticky, as X expects, so each screen's Xvfb can add its own).
 install -d -o openbot -g openbot -m 0755 /run/openbot
 install -d -o root -g root -m 1777 /tmp/.X11-unix

@@ -127,10 +127,13 @@ async function ensureScreen(context: ServerContext, bot: BotWithChat) {
   }
 }
 
+/** The running release's version, which its `bin/start` sets; `dev` when running the repo. */
+const runningVersion = process.env.OPENBOT_VERSION || 'dev'
+
 export const router = os.router({
   health: os.health.handler(async ({ context }) => {
     await context.db.$client.execute('select 1')
-    return { status: 'ok' as const, epoch: context.bus.epoch }
+    return { status: 'ok' as const, epoch: context.bus.epoch, version: runningVersion }
   }),
 
   events: os.events.handler(async function* ({ context, input, signal }) {

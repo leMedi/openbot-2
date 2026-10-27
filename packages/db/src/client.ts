@@ -1,12 +1,20 @@
 import { mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { createClient } from '@libsql/client'
 import { drizzle } from 'drizzle-orm/libsql'
 import { migrate } from 'drizzle-orm/libsql/migrator'
 import * as schema from './schema.ts'
 
-export const migrationsFolder = fileURLToPath(new URL('../drizzle', import.meta.url))
+/**
+ * The package's migrations. Found through the package itself rather than relative to this file, which the web app's
+ * server build bundles elsewhere.
+ */
+export const migrationsFolder = join(
+  dirname(createRequire(import.meta.url).resolve('@openbot/db/package.json')),
+  'drizzle',
+)
 
 /** Opens the libSQL file at `file`, creating it and applying pending migrations. */
 export async function openDb(file: string) {

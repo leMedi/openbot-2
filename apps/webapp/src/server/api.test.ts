@@ -30,7 +30,7 @@ describe('health and the live event stream', () => {
     const health = await server.client.health()
     const hello = await firstEvent(server)
 
-    expect(health).toEqual({ status: 'ok', epoch: expect.any(String) })
+    expect(health).toEqual({ status: 'ok', epoch: expect.any(String), version: 'dev' })
     expect(hello).toEqual({ epoch: health.epoch, seq: expect.any(Number), event: { type: 'hello', resumed: false } })
   })
 
@@ -53,7 +53,7 @@ describe('HTTP', () => {
     const response = await server.fetch('/api/health')
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ status: 'ok', epoch: expect.any(String) })
+    expect(await response.json()).toEqual({ status: 'ok', epoch: expect.any(String), version: 'dev' })
   })
 
   it('publishes an OpenAPI description', async () => {

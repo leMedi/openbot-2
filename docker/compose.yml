@@ -1,0 +1,29 @@
+# A real install: one container (ADR 0002) and three volumes (design §2.3). The installer writes this file with an .env
+# beside it that pins the runtime image; to run it by hand:
+#   OPENBOT_IMAGE=ghcr.io/lemedi/openbot-runtime:r<N> docker compose up --detach --wait
+# The image embeds a release, which the first start installs into openbot-app; later releases are installed there in
+# place, and `docker compose pull && docker compose up --detach` updates the runtime image.
+name: openbot
+
+services:
+  openbot:
+    image: ${OPENBOT_IMAGE:-ghcr.io/lemedi/openbot-runtime:latest}
+    restart: unless-stopped
+    hostname: openbot
+    ports:
+      - "${OPENBOT_PORT:-3000}:3000"
+    environment:
+      OPENBOT_PUBLIC_URL: ${OPENBOT_PUBLIC_URL:-http://localhost:3000}
+      # Empty means generate one into the data volume on first start.
+      OPENBOT_SECRET_KEY: ${OPENBOT_SECRET_KEY:-}
+    volumes:
+      - openbot-data:/var/lib/openbot
+      - openbot-home:/home/openbot
+      - openbot-app:/opt/openbot
+    # Chromium needs more shared memory than Docker's 64 MB default.
+    shm_size: 1gb
+
+volumes:
+  openbot-data:
+  openbot-home:
+  openbot-app:
