@@ -111,10 +111,16 @@ describe('a bot messaging another bot', () => {
     reviewing.release()
     await untilIdle(server, ana, rex)
 
-    expect(await transcript(server, rex)).toEqual([
-      ['You', null, 'Get PR 12 reviewed'],
-      ['Rex', '→ Ana', 'Can you review PR 12?'],
-      ['Rex', null, 'Asked Ana.'],
+    const [sent, first, second, ...later] = await transcript(server, rex)
+    expect(sent).toEqual(['You', null, 'Get PR 12 reviewed'])
+    // Rex's two calls of one round run in parallel, as Grok's do, so they post in either order.
+    expect([first, second]).toEqual(
+      expect.arrayContaining([
+        ['Rex', '→ Ana', 'Can you review PR 12?'],
+        ['Rex', null, 'Asked Ana.'],
+      ]),
+    )
+    expect(later).toEqual([
       ['Ana', '← Ana', 'Approved, ship it.'],
       ['Rex', null, 'Ana approved PR 12.'],
     ])
