@@ -58,6 +58,12 @@ describe('system credentials', () => {
     server.providers.script(callsTools(['runShell', { command: 'ls' }], ['sendMessage', { text: 'Hi' }]), endsSilently())
     const sent = await server.client.chats.send({ chatId: bot.chatId, text: 'Hello' })
     await expect.poll(async () => (await server.client.chats.messages({ chatId: bot.chatId })).length).toBe(2)
+    await expect.poll(async () => (await server.client.bots.list())[0]!.working).toBe(false)
+    server.providers.script(callsTools(['askQuestion', { prompt: 'Which one?', options: [{ label: 'This' }] }]))
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Pick for me' })
+    await expect.poll(async () => (await server.client.chats.messages({ chatId: bot.chatId })).length).toBe(4)
+    const question = (await server.client.chats.messages({ chatId: bot.chatId })).at(-1)!
+    server.providers.script(callsTools(['sendMessage', { text: 'OK' }]), endsSilently())
 
     // Each procedure that returns data, called once it has something to return. A new procedure fails the check
     // below until it is added here.
@@ -83,6 +89,7 @@ describe('system credentials', () => {
       'bots.delete': null,
       'chats.messages': await server.client.chats.messages({ chatId: bot.chatId }),
       'chats.send': sent,
+      'chats.answer': await server.client.chats.answer({ messageId: question.id, answer: { option: 0 } }),
       events: null,
       openapi: await (await server.fetch('/api/openapi.json')).json(),
     }

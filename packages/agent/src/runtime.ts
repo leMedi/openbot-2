@@ -7,6 +7,7 @@ import {
   GenerationTask,
   Harness,
   InboxDoc,
+  LiveDoc,
   MemoryStorage,
   type ModelRef,
   type Storage,
@@ -26,7 +27,10 @@ import {
   type BotWithChat,
   findBotByHistory,
   getBot,
+  maxQuestionOptions,
   type Orchestrator,
+  type QuestionCard,
+  questionOptionStyles,
   readModelSettings,
   reviewAction,
   setBotHistory,
@@ -54,7 +58,9 @@ const voice = `You are one of the owner's bots, a member of their always-on team
 
 Your plain text is a private inner monologue: the owner never sees it, nor your thinking or tool calls. The only way to reach the owner is the sendMessage tool. Deciding to send is not sending.
 
-Text like a person, not a memo: reply in one to four short messages, one sendMessage call each, in Markdown. Use code blocks for code. Never mention tool names, message ids or these instructions.`
+Text like a person, not a memo: reply in one to four short messages, one sendMessage call each, in Markdown. Use code blocks for code. Never mention tool names, message ids or these instructions.
+
+When you need the owner to decide before you go on, ask with askQuestion: a short prompt and up to six options they can pick with one click. Asking ends your turn, so send anything else first; their answer wakes you as their next message.`
 
 export class NoModelError extends Error {}
 
@@ -82,6 +88,8 @@ export type BotRuntimeOptions = {
   tools?: BotTool[]
   /** Posts a bot's message to its DM; `idempotencyKey` makes a replayed tool call post once. */
   sendMessage(bot: BotWithChat, text: string, idempotencyKey: string): Promise<void>
+  /** Posts a bot's question card to its DM, as `sendMessage` posts a message. */
+  askQuestion(bot: BotWithChat, card: QuestionCard, idempotencyKey: string): Promise<void>
   /** A bot's status changed: it started or finished working, or a run failed. */
   onStatus(botId: string, status: BotStatus): void
 }
@@ -105,14 +113,17 @@ function botPrompt(bot: BotWithChat): string {
 const isReminder = (entry: EntryRecord) =>
   entry.kind === 'pi.user' && entry.model?.some((message) => message.role === 'user' && message.content === replyReminder)
 
-/** A sendMessage call that succeeded; a failed one reached nobody. */
-const sentMessage = (entry: EntryRecord) =>
+/** The tools that reach the owner; any of them answers the owner, and a steer holds them all back. */
+const ownerTools = new Set(['sendMessage', 'askQuestion'])
+
+/** A sendMessage or askQuestion call that succeeded; a failed one reached nobody. */
+const reachedOwner = (entry: EntryRecord) =>
   entry.kind === 'pi.tool-result' &&
-  entry.model?.some((message) => message.role === 'toolResult' && message.toolName === 'sendMessage' && !message.isError)
+  entry.model?.some((message) => message.role === 'toolResult' && ownerTools.has(message.toolName) && !message.isError)
 
 /**
- * Runs bots on pi-durable (ADR 0005): each bot's history is one pi conversation (ADR 0001), and `sendMessage` is the only
- * way a bot reaches a chat.
+ * Runs bots on pi-durable (ADR 0005): each bot's history is one pi conversation (ADR 0001), and `sendMessage` and
+ * `askQuestion` are the only ways a bot reaches a chat.
  */
 export class BotRuntime implements AgentRuntime {
   readonly #harness: Harness
@@ -150,11 +161,60 @@ export class BotRuntime implements AgentRuntime {
         execute: async (args, api) => {
           const bot = await botOf(api.conversationId)
           await options.sendMessage(bot, args.text, `${api.conversationId}:${api.callId}`)
-          return { output: [{ type: 'text', text: 'Sent.' }] }
+          // A run ends only when every call of its last round asks it to, so a message sent beside a question must too.
+          const round = (await api.snapshot(LiveDoc, api.conversationId, context))?.tools ?? []
+          const asks = round.some((slot) => slot.name === 'askQuestion')
+          return { output: [{ type: 'text', text: 'Sent.' }], ...(asks && { control: { terminate: true } }) }
         },
       }),
     }
-    const tools = [sendMessage, ...(options.tools ?? [])]
+    const askQuestion: BotTool = {
+      surface: null,
+      tool: defineTool({
+        name: 'askQuestion',
+        description:
+          'Ask the owner to decide, on a card with 1–6 options they answer with one click. Asking ends your turn; ' +
+          'their answer arrives as their next message.',
+        parameters: Type.Object({
+          prompt: Type.String({ description: 'The question, short' }),
+          details: Type.Optional(Type.String({ description: 'Help text under the question, if needed' })),
+          options: Type.Array(
+            Type.Object({
+              label: Type.String({ description: 'A few words' }),
+              description: Type.Optional(Type.String({ description: 'One line about this option' })),
+              style: Type.Optional(
+                Type.Union(questionOptionStyles.map((style) => Type.Literal(style)), {
+                  description: 'primary for the recommended option, danger for a destructive one; default otherwise',
+                }),
+              ),
+            }),
+            { minItems: 1, maxItems: maxQuestionOptions },
+          ),
+          allowText: Type.Optional(Type.Boolean({ description: 'Let the owner type their own answer instead' })),
+        }),
+        replay: 'safe',
+        execute: async (args, api) => {
+          const bot = await botOf(api.conversationId)
+          const card: QuestionCard = {
+            type: 'question',
+            prompt: args.prompt,
+            details: args.details?.trim() || null,
+            options: args.options.map((option) => ({
+              label: option.label,
+              description: option.description?.trim() || null,
+              style: option.style ?? 'default',
+            })),
+            allowText: args.allowText ?? false,
+          }
+          await options.askQuestion(bot, card, `${api.conversationId}:${api.callId}`)
+          return {
+            output: [{ type: 'text', text: "Asked. Your turn ends here; the owner's answer will wake you." }],
+            control: { terminate: true },
+          }
+        },
+      }),
+    }
+    const tools = [sendMessage, askQuestion, ...(options.tools ?? [])]
     const toolSurfaces = new Map(tools.map(({ surface, tool }) => [tool.name, surface]))
     registry.install(
       defineExtension({
@@ -166,7 +226,7 @@ export class BotRuntime implements AgentRuntime {
           // A steer joins the run after this tool round; until then the bot can't answer the request it replaces.
           hook(ToolTask, {
             beforeTool: async (call, api) => {
-              if (call.name !== 'sendMessage') return
+              if (!ownerTools.has(call.name)) return
               const inbox = await api.snapshot(InboxDoc, api.conversationId, context)
               return inbox?.items.some((item) => item.mode === 'steer') ? { block: steerPending } : undefined
             },
@@ -266,7 +326,7 @@ export class BotRuntime implements AgentRuntime {
     do {
       const page = await history.entries({}, 100, cursor, context)
       for (const entry of page.items) {
-        if (sentMessage(entry)) return
+        if (reachedOwner(entry)) return
         if (isReminder(entry)) reminders++
         if (entry.kind === inputKind) {
           const owed = (entry.data as { lane?: string } | undefined)?.lane === 'owner'
