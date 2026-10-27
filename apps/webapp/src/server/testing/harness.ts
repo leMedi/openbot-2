@@ -1,10 +1,10 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { BotTool } from '@openbot/agent'
-import { createFakeModel, createFakeProviders } from '@openbot/agent/testing'
+import { type BotTool, openBotComputer } from '@openbot/agent'
+import { createFakeModel, createFakeProviders, fakeBotComputer } from '@openbot/agent/testing'
 import type { Orchestrator } from '@openbot/core'
-import { createFakeComputer } from '@openbot/core/testing'
+import { createFakeComputer, type FakeComputerScript } from '@openbot/core/testing'
 import { openDb } from '@openbot/db'
 import { createRouterClient } from '@orpc/server'
 import { createServerContext } from '../context.ts'
@@ -18,6 +18,10 @@ export type TestServerOptions = {
   orchestrator?: Orchestrator
   /** Tools bots get beyond the built-in ones. */
   tools?: BotTool[]
+  /** Results of bots' shell commands; empty successes otherwise. */
+  shell?: FakeComputerScript['shell']
+  /** Runs bots' tools on this machine's real computer, in `$OPENBOT_HOME`, instead of the fake; for the runtime image. */
+  realComputer?: boolean
 }
 
 /**
@@ -28,14 +32,17 @@ export async function createTestServer(options: TestServerOptions = {}) {
   return open(await mkdtemp(join(tmpdir(), 'openbot-test-')), testSecretKey, options)
 }
 
-async function open(dir: string, secretKey: string, options: TestServerOptions) {
+async function open(dir: string, secretKey: string, { shell, realComputer, ...options }: TestServerOptions) {
   const db = await openDb(join(dir, 'openbot.db'))
   const providers = createFakeProviders()
+  const computer = createFakeComputer({ shell })
+  const home = realComputer ? process.env.OPENBOT_HOME! : join(dir, 'home')
   const context = await createServerContext({
     db,
     secretKey,
     providers: providers.providers,
     agentStoragePath: join(dir, 'agent.sqlite'),
+    computer: realComputer ? openBotComputer({ home }) : fakeBotComputer(computer, home),
     ...options,
   })
   const client = createRouterClient(router, { context })
@@ -49,7 +56,10 @@ async function open(dir: string, secretKey: string, options: TestServerOptions) 
     providers,
     /** pi's model collection the runtime uses, with auth resolved through the credential store. */
     models: context.providers.models,
-    computer: createFakeComputer(),
+    /** The in-memory computer: every shell command bots ran, keyed by bot name. */
+    computer,
+    /** The bots' home, a temporary folder: `shared/`, `bots/<id>/`. */
+    home,
     /** An HTTP request against the API, e.g. `fetch('/api/health')`. */
     fetch: (path: string, init?: RequestInit) => handleApiRequest(new Request(new URL(path, 'http://openbot.test'), init), context),
     /** Connects the `fake` provider with an API key, as the owner would in Settings → Providers. */

@@ -21,12 +21,14 @@ import {
   ToolTask,
 } from '@earendil-works/pi-durable'
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node'
+import { createBashTool, createEditTool, createReadTool, createWriteTool } from '@earendil-works/pi-durable/tools'
 import {
   type AgentRuntime,
   type BotInput,
   type BotWithChat,
   findBotByHistory,
   getBot,
+  listBots,
   maxQuestionOptions,
   type Orchestrator,
   type QuestionCard,
@@ -36,6 +38,7 @@ import {
   setBotHistory,
 } from '@openbot/core'
 import type { Db, Surface } from '@openbot/db'
+import type { BotComputer } from './computer.ts'
 
 const context = BACKGROUND_CONTEXT
 
@@ -84,6 +87,8 @@ export type BotRuntimeOptions = {
   storagePath?: string
   /** Reviews every call of a tool with a surface before it runs. */
   orchestrator: Orchestrator
+  /** Where bots' shell and file tools run; the runtime closes it. */
+  computer: BotComputer
   /** Tools beyond the built-in ones, e.g. a test's. */
   tools?: BotTool[]
   /** Posts a bot's message to its DM; `idempotencyKey` makes a replayed tool call post once. */
@@ -109,6 +114,26 @@ function botPrompt(bot: BotWithChat): string {
   const who = `You are ${bot.name}${bot.title ? `, ${bot.title}` : ''}.`
   return bot.instructions.trim() ? `${who}\n\n${bot.instructions.trim()}` : who
 }
+
+/** The bot's computer: who it is there, and where its folder, the shared folder and the other bots' folders are. */
+function computerPrompt(computer: BotComputer, bot: BotWithChat, others: BotWithChat[]): string {
+  const lines = [
+    `You have a Linux computer, shared with the owner's other bots. You work on it as the user \`${computer.user}\`, with passwordless sudo: it is your computer, so install what you need. Use bash to run commands, and read, write and edit for files.`,
+    '',
+    `- Your folder, where your commands start: ${computer.folder(bot.id)}`,
+    `- Shared with every bot: ${computer.sharedFolder}`,
+  ]
+  if (others.length) lines.push(`- The other bots' folders:`, ...others.map((other) => `  - ${other.name}: ${computer.folder(other.id)}`))
+  return lines.join('\n')
+}
+
+/** Shell and file tools on the computer. Reading has no side effect; running a command and changing a file are shell actions. */
+const computerTools: BotTool[] = [
+  { surface: 'shell', tool: createBashTool() },
+  { surface: null, tool: createReadTool() },
+  { surface: 'shell', tool: createWriteTool() },
+  { surface: 'shell', tool: createEditTool() },
+]
 
 const isReminder = (entry: EntryRecord) =>
   entry.kind === 'pi.user' && entry.model?.some((message) => message.role === 'user' && message.content === replyReminder)
@@ -214,7 +239,7 @@ export class BotRuntime implements AgentRuntime {
         },
       }),
     }
-    const tools = [sendMessage, askQuestion, ...(options.tools ?? [])]
+    const tools = [sendMessage, askQuestion, ...computerTools, ...(options.tools ?? [])]
     const toolSurfaces = new Map(tools.map(({ surface, tool }) => [tool.name, surface]))
     registry.install(
       defineExtension({
@@ -254,7 +279,13 @@ export class BotRuntime implements AgentRuntime {
     const storage: Storage = options.storagePath ? await openNodeSqliteStorage(options.storagePath) : new MemoryStorage()
     const harness = await Harness.open(
       storage,
-      { models: options.models, registry, onReport: (error) => console.error('[agent]', error) },
+      {
+        models: options.models,
+        registry,
+        // Each tool call runs in its bot's environment on the computer.
+        env: async ({ conversationId }) => options.computer.env(await botOf(conversationId)),
+        onReport: (error) => console.error('[agent]', error),
+      },
       context,
     )
     runtime = new BotRuntime(harness, options)
@@ -268,7 +299,9 @@ export class BotRuntime implements AgentRuntime {
     const model = bot.model ?? (await readModelSettings(this.#options.db)).defaultModel
     if (!model) throw new NoModelError('Choose a default model first')
     const history = await this.#history(bot)
-    await history.configure({ model: parseModelRef(model), instructions: botPrompt(bot) }, context)
+    const others = (await listBots(this.#options.db)).filter((other) => other.id !== bot.id)
+    const instructions = `${botPrompt(bot)}\n\n${computerPrompt(this.#options.computer, bot, others)}`
+    await history.configure({ model: parseModelRef(model), instructions }, context)
 
     this.#errors.delete(botId)
     const submission = await history.submit(
@@ -298,8 +331,14 @@ export class BotRuntime implements AgentRuntime {
     if (wake === this.#working.get(botId)) this.#setIdle(botId)
   }
 
-  async forget({ id, historyId }: { id: string; historyId: string | null }): Promise<void> {
+  async forget({ id, name, historyId }: { id: string; name: string; historyId: string | null }): Promise<void> {
     if (historyId) await (await this.#harness.conversation(toConversationId(historyId), context))?.abort(context)
+    try {
+      await this.#options.computer.removeFolder({ id, name })
+    } catch (error) {
+      // The bot is gone either way; a folder left behind is only clutter.
+      console.error(`[agent] Couldn't delete ${name}'s folder:`, error)
+    }
     // pi-durable can't delete a conversation, so the history stays in its storage with no bot to reach it.
     this.#histories.delete(id)
     this.#working.delete(id)
@@ -312,6 +351,7 @@ export class BotRuntime implements AgentRuntime {
 
   async close(): Promise<void> {
     await this.#harness.close(context)
+    await this.#options.computer.close()
   }
 
   /**
