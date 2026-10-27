@@ -4,11 +4,14 @@
 #   package    builds release 0.<minor>.<run> (minor from VERSION) and smoke-tests it: archive, release.json, SHA256SUMS
 #   image      when the runtime image's definition changed (a new r<N>), builds it for amd64 and arm64 with the release
 #              embedded, smoke-tests each, and pushes it as r<N> and latest
-#   publish    the GitHub Release v<version> (archive, release.json, SHA256SUMS, compose.yml), once everything above
-#              passed
+#   install    builds the runtime image (amd64) with the release embedded and runs the installer unattended against
+#              the release's files (scripts/smoke-install.sh): a fresh install, a re-run, and an interactive install
+#   publish    the GitHub Release v<version> (archive, release.json, SHA256SUMS, compose.yml, install.sh), once everything
+#              above passed
 # Pull requests (and manual runs off main) run the tests and the packaging, and publish nothing. Runs on main queue up:
 # a push that arrives while another waits replaces it, and its release includes both. Shared config: release.env, which the repository
-# variables OPENBOT_SITE_URL and OPENBOT_RUNTIME_IMAGE override; ARM64_RUNNER picks the arm64 build's runner.
+# variables OPENBOT_SITE_URL, OPENBOT_RUNTIME_IMAGE and OPENBOT_RELEASES_URL override; ARM64_RUNNER picks the arm64 build's
+# runner.
 name: Release
 
 on:
@@ -93,6 +96,7 @@ jobs:
       version: ${{ steps.release.outputs.version }}
       tag: ${{ steps.release.outputs.tag }}
       runtime: ${{ steps.release.outputs.runtime }}
+      runtime-image: ${{ steps.release.outputs.runtime-image }}
       runtime-repository: ${{ steps.release.outputs.runtime-repository }}
       image-exists: ${{ steps.image.outputs.exists }}
     steps:
@@ -112,6 +116,7 @@ jobs:
         env:
           OPENBOT_SITE_URL: ${{ vars.OPENBOT_SITE_URL }}
           OPENBOT_RUNTIME_IMAGE: ${{ vars.OPENBOT_RUNTIME_IMAGE }}
+          OPENBOT_RELEASES_URL: ${{ vars.OPENBOT_RELEASES_URL }}
       - name: Smoke-test the release
         run: scripts/smoke-release.sh "${ARCHIVE}" "${VERSION}"
         env:
@@ -126,6 +131,7 @@ jobs:
             release/release.json
             release/SHA256SUMS
             release/compose.yml
+            release/install.sh
             release/notes.md
           if-no-files-found: error
           retention-days: 14
@@ -150,6 +156,33 @@ jobs:
             echo "Can't tell whether ${IMAGE} exists: ${answer}" >&2
             exit 1
           fi
+
+  install:
+    name: Installer
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: release
+          path: release
+      - uses: docker/setup-buildx-action@v3
+      # Tagged as the image the release pins, so the install runs it instead of pulling it: this run's image may not be
+      # published yet (or ever, on a pull request). The cache is the image job's, read only.
+      - name: Build the runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          target: runtime
+          platforms: linux/amd64
+          build-contexts: release=release
+          tags: ${{ needs.package.outputs.runtime-image }}
+          load: true
+          cache-from: type=gha,scope=runtime-amd64
+      - name: Install, re-run, install interactively
+        run: scripts/smoke-install.sh release
 
   image:
     name: Runtime image (${{ matrix.arch }})
@@ -257,11 +290,11 @@ jobs:
 
   publish:
     name: Publish the GitHub Release
-    needs: [package, image, image-tags]
+    needs: [package, install, image, image-tags]
     # The image jobs are skipped when the image exists already; any failure above blocks the release.
     if: >-
       always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.package.result == 'success' &&
-      (needs.image.result == 'skipped' || (needs.image.result == 'success' && needs.image-tags.result == 'success'))
+      needs.install.result == 'success' && (needs.image.result == 'skipped' || (needs.image.result == 'success' && needs.image-tags.result == 'success'))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -280,7 +313,7 @@ jobs:
           VERSION: ${{ needs.package.outputs.version }}
           SHA: ${{ github.sha }}
         run: |
-          files=(release/*.tar.gz release/release.json release/SHA256SUMS release/compose.yml)
+          files=(release/*.tar.gz release/release.json release/SHA256SUMS release/compose.yml release/install.sh)
           if gh release view "${TAG}" > /dev/null 2>&1; then
             gh release upload "${TAG}" "${files[@]}" --clobber
           else

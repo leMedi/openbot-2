@@ -12,7 +12,11 @@ const facts = {
     { commit: 'ccccccc', subject: 'Fix a typo' },
   ],
 }
-const config = { siteUrl: 'https://openbot.lemedi.dev', runtimeImage: 'ghcr.io/lemedi/openbot-runtime' }
+const config = {
+  siteUrl: 'https://openbot.lemedi.dev',
+  runtimeImage: 'ghcr.io/lemedi/openbot-runtime',
+  releasesUrl: 'https://github.com/leMedi/openbot-2/releases',
+}
 
 describe('the release manifest', () => {
   it('names the version, the minimum runtime image, the migrations flag and the changelog', () => {
@@ -55,16 +59,26 @@ describe('the shared release config', () => {
       '# comment',
       'OPENBOT_SITE_URL=https://openbot.lemedi.dev',
       'OPENBOT_RUNTIME_IMAGE=ghcr.io/lemedi/openbot-runtime',
+      'OPENBOT_RELEASES_URL=https://github.com/leMedi/openbot-2/releases',
     ].join('\n')
 
     expect(readReleaseConfig(text, {})).toEqual(config)
     expect(readReleaseConfig(text, { OPENBOT_SITE_URL: 'https://bots.example.com/', OPENBOT_RUNTIME_IMAGE: '' })).toEqual({
       siteUrl: 'https://bots.example.com',
       runtimeImage: 'ghcr.io/lemedi/openbot-runtime',
+      releasesUrl: 'https://github.com/leMedi/openbot-2/releases',
     })
   })
 
   it('refuses a site URL that is not http(s)', () => {
-    expect(() => readReleaseConfig('OPENBOT_SITE_URL=openbot\nOPENBOT_RUNTIME_IMAGE=x/y', {})).toThrow(/OPENBOT_SITE_URL/)
+    expect(() =>
+      readReleaseConfig('OPENBOT_SITE_URL=openbot\nOPENBOT_RUNTIME_IMAGE=x/y\nOPENBOT_RELEASES_URL=https://x', {}),
+    ).toThrow(/OPENBOT_SITE_URL/)
+  })
+
+  it('refuses a releases URL that is not http(s), or none', () => {
+    const text = 'OPENBOT_SITE_URL=https://openbot.lemedi.dev\nOPENBOT_RUNTIME_IMAGE=x/y'
+    expect(() => readReleaseConfig(text, {})).toThrow(/OPENBOT_RELEASES_URL/)
+    expect(() => readReleaseConfig(`${text}\nOPENBOT_RELEASES_URL=github.com/x`, {})).toThrow(/OPENBOT_RELEASES_URL/)
   })
 })
