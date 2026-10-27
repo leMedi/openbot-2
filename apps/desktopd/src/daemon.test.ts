@@ -85,7 +85,7 @@ describeComputerContract(
       folder: () => '',
     }
   },
-  { shell: false, timeout: 10_000 },
+  { shell: false, browser: false, timeout: 10_000 },
 )
 
 describe('the screen daemon', () => {

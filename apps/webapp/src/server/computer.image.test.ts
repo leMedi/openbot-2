@@ -2,10 +2,10 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { request } from 'node:http'
 import { join } from 'node:path'
 import { botUser, openBotComputer, userExists } from '@openbot/agent'
-import { callsTools, endsSilently } from '@openbot/agent/testing'
+import { callsTools, endsSilently, says } from '@openbot/agent/testing'
 import type { BotInfo, NewBot } from '@openbot/api-contract'
-import { connectScreens, defaultDaemonSocket } from '@openbot/computer'
-import { describeComputerContract } from '@openbot/core/testing'
+import { connectBrowser, connectScreens, defaultDaemonSocket } from '@openbot/computer'
+import { describeComputerContract, servePages } from '@openbot/core/testing'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createTestServer, type TestServer } from './testing/harness.ts'
 
@@ -28,14 +28,19 @@ function screenPids(botId: string): Promise<Record<string, number>> {
   })
 }
 
-// Seam 2 on the real computer: the screen daemon running as openbot under supervisord, and the bots' shell.
+// Seam 2 on the real computer: the screen daemon running as openbot under supervisord, the bots' shell, and each
+// screen's Chromium over CDP, loading pages this test serves on localhost.
 describe.skipIf(!inRuntimeImage)('the real computer', () => {
   describeComputerContract(
     'the real computer',
     async () => {
       const home = process.env.OPENBOT_HOME!
       const computer = openBotComputer({ home })
-      const client = () => ({ screens: connectScreens({ socketPath }), shell: { exec: computer.exec.bind(computer) } })
+      const pages = await servePages()
+      const client = () => {
+        const screens = connectScreens({ socketPath })
+        return { screens, shell: { exec: computer.exec.bind(computer) }, browser: connectBrowser({ screens }) }
+      }
       return {
         computer: client(),
         reconnect: async () => client(),
@@ -46,7 +51,9 @@ describe.skipIf(!inRuntimeImage)('the real computer', () => {
         },
         user: botUser,
         folder: (bot) => computer.folder(bot.id),
+        page: pages.page,
         close: async () => {
+          await pages.close()
           await computer.exec({ id: 'contract', name: 'Contract' }, `rm -rf ${join(home, 'bots')}/contract-*`)
           await computer.close()
         },
@@ -216,6 +223,39 @@ describe.skipIf(!inRuntimeImage)('bots on the real computer', () => {
 
     expect((await connectScreens({ socketPath }).status(rex)).state).toBe('stopped')
     expect(existsSync(join(server.home, 'bots', rex.id, 'chromium'))).toBe(false)
+  })
+
+  it('complete a browser task in their own Chromium through use_computer', { timeout: 120_000 }, async () => {
+    const pages = await servePages()
+    try {
+      const socks = pages.page('socks', { title: 'Socks', elements: [{ role: 'heading', name: 'Socks' }, { role: 'text', name: 'Wool socks: $5' }] })
+      const shop = pages.page('shop', { title: 'Shop', elements: [{ role: 'heading', name: 'Shop' }, { role: 'link', name: 'Socks', href: socks }] })
+      const server = await start()
+      const rex = await server.client.bots.create(newBot('Rex'))
+      await expect.poll(async () => (await server.client.screens.status({ botId: rex.id })).state, { timeout: 60_000 }).toBe('running')
+      server.providers.script(
+        callsTools(['use_computer', { goal: 'Find the price of socks', reason: 'Testing the browser', startUrl: shop }]),
+        callsTools(['browser_snapshot', {}]),
+        // The link is the second element with a reference on the page's first snapshot.
+        // Chromium's tree, as the fake's: the heading is e1, the link e2.
+        callsTools(['browser_click', { ref: 'e2' }]),
+        says('Wool socks cost $5.'),
+        callsTools(['sendMessage', { text: 'Socks are $5' }]),
+        endsSilently(),
+      )
+
+      await server.client.chats.send({ chatId: rex.chatId, text: 'How much are socks?' })
+      await expect.poll(async () => (await server.client.bots.list()).find((entry) => entry.id === rex.id)?.working, { timeout: 60_000 }).toBe(false)
+
+      const [, , snapshot, clicked, answered] = server.providers.requests.map((request) => JSON.stringify(request.messages.at(-1)))
+      expect(snapshot).toContain('- heading \\"Shop\\" [ref=e1]\\n- link \\"Socks\\" [ref=e2]')
+      expect(clicked).toContain('Wool socks: $5')
+      expect(answered).toContain('Wool socks cost $5.')
+      const saved = answered!.match(/saved at (\S+\.png)/)![1]!
+      expect(statSync(saved).size).toBeGreaterThan(1000)
+    } finally {
+      await pages.close()
+    }
   })
 
   it('lose their folder when deleted', async () => {

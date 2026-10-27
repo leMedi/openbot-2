@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
-import { extname, isAbsolute, join, resolve } from 'node:path'
+import { dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { type ExecutionEnv, getOrThrow } from '@earendil-works/pi-durable/env'
 import { Connection, localDaemon, RemoteExecutionEnv } from '@earendil-works/pi-env'
@@ -89,6 +89,15 @@ export class BotComputer {
     if (info.kind === 'directory') throw new Error(`${path} is not a file`)
     if (info.size > maxAttachmentBytes) throw new Error(`${path} is larger than ${maxAttachmentBytes / 1024 / 1024} MB`)
     return { path: absolute, bytes: getOrThrow(await env.readBinaryFile(absolute, context)) }
+  }
+
+  /** Writes a file for `bot` as the bots' user, at a path relative to its folder, making the folders on the way. */
+  async writeFile(bot: ComputerBot, path: string, bytes: Uint8Array): Promise<string> {
+    const env = await this.env(bot)
+    const absolute = resolve(this.folder(bot.id), path)
+    getOrThrow(await env.createDir(dirname(absolute), { recursive: true }, context))
+    getOrThrow(await env.writeFile(absolute, bytes, context))
+    return absolute
   }
 
   /** The environment `bot`'s tools run in, once its folder exists; made again if the bot deleted it. */

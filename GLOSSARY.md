@@ -77,6 +77,10 @@ _Avoid_: Box, container, VM, sandbox
 A bot's own desktop on the computer, with its own browser, which the owner can watch and take over.
 _Avoid_: Display, desktop, window, VNC
 
+**Computer-use session**:
+A bot handing one goal to a helper that works its screen (browser, later desktop) and reports back a summary; the only way a bot clicks, types or sees its screen. Started with a stated reason, reviewed and logged, and never shown in the chat.
+_Avoid_: Browser agent, subagent (in the UI), autopilot
+
 ### Capabilities
 
 **Plugin**:

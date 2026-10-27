@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { type BotTool, openBotComputer } from '@openbot/agent'
 import { createFakeModel, createFakeProviders, fakeBotComputer } from '@openbot/agent/testing'
-import { connectScreens, defaultDaemonSocket } from '@openbot/computer'
+import { connectBrowser, connectScreens, defaultDaemonSocket } from '@openbot/computer'
 import type { Orchestrator, Screens, ScreenStatus } from '@openbot/core'
 import { createFakeComputer, type FakeComputer, type FakeComputerScript } from '@openbot/core/testing'
 import { openDb } from '@openbot/db'
@@ -44,6 +44,8 @@ export type TestServerOptions = {
   tools?: BotTool[]
   /** Results of bots' shell commands; empty successes otherwise. */
   shell?: FakeComputerScript['shell']
+  /** Pages bots' browsers show, by URL. */
+  pages?: FakeComputerScript['pages']
   /** Runs bots' tools on this machine's real computer, in `$OPENBOT_HOME`, instead of the fake; for the runtime image. */
   realComputer?: boolean
 }
@@ -56,21 +58,24 @@ export async function createTestServer(options: TestServerOptions = {}) {
   return open(await mkdtemp(join(tmpdir(), 'openbot-test-')), testSecretKey, options)
 }
 
-async function open(dir: string, secretKey: string, { shell, realComputer, ...options }: TestServerOptions, kept?: FakeComputer) {
+async function open(dir: string, secretKey: string, { shell, pages, realComputer, ...options }: TestServerOptions, kept?: FakeComputer) {
   const db = await openDb(join(dir, 'openbot.db'))
   const providers = createFakeProviders()
   // The computer outlives the server, as the screen daemon does.
-  const computer = kept ?? createFakeComputer({ shell })
+  const computer = kept ?? createFakeComputer({ shell, pages })
   const screenTickets = new ScreenTickets()
   const home = realComputer ? process.env.OPENBOT_HOME! : join(dir, 'home')
+  // The real screens without the test's display offset, so the browser finds each screen's DevTools where it is.
+  const realScreens = realComputer ? connectScreens({ socketPath: process.env.OPENBOT_DESKTOPD_SOCKET || defaultDaemonSocket }) : undefined
   const context = await createServerContext({
     db,
     secretKey,
     providers: providers.providers,
     agentStoragePath: join(dir, 'agent.sqlite'),
     computer: realComputer ? openBotComputer({ home }) : fakeBotComputer(computer, home),
+    browser: realScreens ? connectBrowser({ screens: realScreens }) : computer.browser,
     attachmentsDir: join(dir, 'attachments'),
-    screens: realComputer ? testScreens(connectScreens({ socketPath: process.env.OPENBOT_DESKTOPD_SOCKET || defaultDaemonSocket })) : computer.screens,
+    screens: realScreens ? testScreens(realScreens) : computer.screens,
     screenTickets,
     ...options,
   })
