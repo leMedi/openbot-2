@@ -165,6 +165,10 @@ An owner-written sentence telling the orchestrator to allow something automatica
 **Shadow mode**:
 The orchestrator judging and logging actions without ever blocking them.
 
+**Audit log**:
+A bot's record of every side-effecting action it took, reviewed or not, and of each page and summary of its computer-use sessions, with secrets redacted. The owner reads it in the Activity pane.
+_Avoid_: Action log, history (that is the bot's own record)
+
 ### Delivery
 
 **Release**:

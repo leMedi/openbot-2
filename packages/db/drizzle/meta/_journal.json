@@ -43,6 +43,13 @@
       "when": 1793103178553,
       "tag": "0005_questions_already_reminded",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793103459106,
+      "tag": "0006_audit_kinds",
+      "breakpoints": true
     }
   ]
 }

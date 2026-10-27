@@ -78,6 +78,7 @@ export function toAuditEntryInfo(entry: AuditEntry): AuditEntryInfo {
   return {
     id: entry.id,
     botId: entry.botId,
+    kind: entry.kind,
     surface: entry.surface,
     tool: entry.tool,
     input: entry.action,

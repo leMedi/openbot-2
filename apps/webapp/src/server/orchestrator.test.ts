@@ -80,15 +80,22 @@ describe('the orchestrator', () => {
     expect(await server.client.bots.audit({ botId: bot.id })).toMatchObject([{ verdict: { decision: 'deny' }, mode: 'shadow' }])
   })
 
-  it('skips review of a surface that is off', async () => {
+  it('skips review of a surface that is off, but still writes the action to the audit log', async () => {
     const shell = recordingTool('runShell', 'shell')
-    const { server, bot } = await startWithRex({ tools: [shell.tool], orchestrator: denyAll })
+    const reviewed: unknown[] = []
+    const { server, bot } = await startWithRex({
+      tools: [shell.tool],
+      orchestrator: { review: async (action) => (reviewed.push(action), { decision: 'deny', reason: 'No' }) },
+    })
     await server.client.orchestrator.updateModes({ shell: 'off' })
 
     await callShell(server, bot, { command: 'ls' })
 
     expect(shell.calls).toEqual([{ command: 'ls' }])
-    expect(await server.client.bots.audit({ botId: bot.id })).toEqual([])
+    expect(reviewed).toEqual([])
+    expect(await server.client.bots.audit({ botId: bot.id })).toMatchObject([
+      { kind: 'action', surface: 'shell', tool: 'runShell', input: { command: 'ls' }, verdict: null, mode: 'off' },
+    ])
   })
 
   it('never reviews read-only tools or messages', async () => {

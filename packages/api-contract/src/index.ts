@@ -318,7 +318,7 @@ export const surfaces = [
   'memory_global_write',
 ] as const
 const surface = z.enum(surfaces)
-/** off: not reviewed; shadow: reviewed and logged, never blocked; enforce: a deny blocks the action. */
+/** off: not reviewed, only logged; shadow: reviewed and logged, never blocked; enforce: a deny blocks the action. */
 const orchestratorMode = z.enum(['off', 'shadow', 'enforce'])
 
 /** The mode of every surface. */
@@ -339,16 +339,25 @@ export const verdict = z.discriminatedUnion('decision', [
   z.object({ decision: z.literal('ask'), reason: z.string(), proposedRule: z.string().optional() }),
 ])
 
-/** One orchestrator review of a bot's tool call. */
+export const auditKinds = ['action', 'navigation', 'session_summary'] as const
+export const auditKind = z.enum(auditKinds)
+
+/**
+ * One entry of a bot's audit log: a side-effecting tool call and its review (`action`), a page a computer-use session's
+ * browser opened (`navigation`), or a computer-use session's summary once it ended (`session_summary`).
+ */
 export const auditEntry = z.object({
   id: z.string(),
   botId: z.string(),
+  kind: auditKind,
   surface,
+  /** The tool the bot called; for a navigation, the session's tool that opened the page. */
   tool: z.string(),
-  /** The tool call's input, with secrets redacted. */
+  /** The tool call's input, a navigation's `{ url, title }`, or a session's summary; with secrets redacted. */
   input: z.unknown(),
-  verdict,
-  /** The surface's mode for the bot when reviewed. */
+  /** Null when nothing was reviewed: the surface was off, or the entry isn't an action. */
+  verdict: verdict.nullable(),
+  /** The surface's mode for the bot at the time. */
   mode: orchestratorMode,
   /** Milliseconds since the epoch. */
   createdAt: z.number(),
@@ -428,7 +437,7 @@ export const contract = {
       .input(z.object({ botId: z.string(), overrides: z.partialRecord(surface, orchestratorMode.nullable()) }))
       .output(botOrchestratorModes),
     audit: oc
-      .route({ method: 'GET', path: '/bots/{botId}/audit', summary: "The bot's audit log: every orchestrator review, oldest first" })
+      .route({ method: 'GET', path: '/bots/{botId}/audit', summary: "The bot's audit log: every side-effecting action, reviewed or not, and its computer-use sessions' navigations and summaries, oldest first" })
       .input(z.object({ botId: z.string() }))
       .output(z.array(auditEntry)),
   },

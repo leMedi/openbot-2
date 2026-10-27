@@ -189,8 +189,11 @@ describe('computer-use sessions', () => {
       { bot: 'Rex', kind: 'desktop.press', window: 1, keys: 'Return' },
       { bot: 'Rex', kind: 'desktop.snapshot', window: 1 },
     ])
-    // Reviewed and logged as one session.
-    expect((await server.client.bots.audit({ botId: bot.id })).map(({ tool }) => tool)).toEqual(['use_computer'])
+    // Reviewed as one session, and summed up when it ended; desktop actions open no pages.
+    expect((await server.client.bots.audit({ botId: bot.id })).map(({ kind, tool }) => [kind, tool])).toEqual([
+      ['action', 'use_computer'],
+      ['session_summary', 'use_computer'],
+    ])
   })
 
   it('report a stale desktop reference as a refused action, not an error', async () => {
@@ -222,8 +225,95 @@ describe('computer-use sessions', () => {
 
     await shopForSocks(server, bot)
 
-    expect((await server.client.bots.audit({ botId: bot.id })).map(({ surface, tool, input }) => ({ surface, tool, input }))).toEqual([
+    const actions = (await server.client.bots.audit({ botId: bot.id })).filter((entry) => entry.kind === 'action')
+    expect(actions.map(({ surface, tool, input }) => ({ surface, tool, input }))).toEqual([
       { surface: 'computer_session', tool: 'use_computer', input: useComputer },
+    ])
+  })
+
+  it('write each page their browser opens to the audit log, with the tool that opened it', async () => {
+    const { server, bot } = await startWithRex()
+
+    await shopForSocks(server, bot)
+
+    const navigations = (await server.client.bots.audit({ botId: bot.id })).filter((entry) => entry.kind === 'navigation')
+    expect(navigations.map(({ surface, tool, input, verdict }) => ({ surface, tool, input, verdict }))).toEqual([
+      { surface: 'computer_session', tool: 'use_computer', input: { url: shop, title: 'Shop' }, verdict: null },
+      { surface: 'computer_session', tool: 'browser_click', input: { url: socks, title: 'Socks' }, verdict: null },
+    ])
+  })
+
+  it('write a summary to the audit log when they end: actions by tool, screenshots and duration', async () => {
+    const { server, bot } = await startWithRex()
+
+    await shopForSocks(server, bot)
+
+    const entries = await server.client.bots.audit({ botId: bot.id })
+    expect(entries.at(-1)).toMatchObject({
+      kind: 'session_summary',
+      surface: 'computer_session',
+      tool: 'use_computer',
+      // The session's own calls, and the final screenshot.
+      input: { outcome: 'done', actions: { browser_snapshot: 1, browser_click: 1 }, screenshots: 1, durationMs: expect.any(Number) },
+      verdict: null,
+    })
+    expect(entries.filter((entry) => entry.kind === 'session_summary')).toHaveLength(1)
+  })
+
+  it('write a summary when they stop to ask the owner for help', async () => {
+    const { server, bot } = await startWithRex()
+    server.providers.script(
+      callsTools(['use_computer', { goal: 'Sign in to the shop', reason: 'Testing' }]),
+      callsTools(['browser_screenshot', {}]),
+      callsTools(['needs_help', { instruction: 'Sign in to shop.test' }]),
+    )
+
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Sign in please' })
+    await untilIdle(server, bot)
+
+    const summary = (await server.client.bots.audit({ botId: bot.id })).find((entry) => entry.kind === 'session_summary')
+    expect(summary?.input).toMatchObject({ outcome: 'needs_help', actions: { browser_screenshot: 1, needs_help: 1 }, screenshots: 1 })
+  })
+
+  it('log the navigations they make with browser_navigate, with secrets in their URLs redacted', async () => {
+    const { server, bot } = await startWithRex()
+    server.providers.script(
+      callsTools(['use_computer', { goal: 'Look at the shop', reason: 'Testing' }]),
+      callsTools(['browser_navigate', { url: `${shop}?token=abc123secret` }]),
+      callsTools(['browser_navigate', { url: 'https://ana:hunter2@shop.test/callback?code=oauth-code-123&sig=signed-456&page=2' }]),
+      callsTools(['browser_snapshot', {}]),
+      says('Seen it.'),
+      endsSilently(),
+    )
+
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Look at the shop' })
+    await untilIdle(server, bot)
+
+    const navigations = (await server.client.bots.audit({ botId: bot.id })).filter((entry) => entry.kind === 'navigation')
+    expect(navigations.map(({ tool, input }) => ({ tool, input }))).toEqual([
+      { tool: 'browser_navigate', input: { url: `${shop}?token=[redacted]`, title: expect.any(String) } },
+      {
+        tool: 'browser_navigate',
+        input: { url: 'https://ana:[redacted]@shop.test/callback?code=[redacted]&sig=[redacted]&page=2', title: expect.any(String) },
+      },
+    ])
+  })
+
+  it('are written to the audit log, unreviewed, when their surface is off', async () => {
+    const denyAll: Orchestrator = { review: async () => ({ decision: 'deny', reason: 'No browsing today' }) }
+    const { server, bot } = await startWithRex({ orchestrator: denyAll })
+    await server.client.orchestrator.updateModes({ computer_session: 'off' })
+
+    await shopForSocks(server, bot)
+
+    const entries = await server.client.bots.audit({ botId: bot.id })
+    expect(entries[0]).toMatchObject({ kind: 'action', surface: 'computer_session', tool: 'use_computer', input: useComputer, verdict: null, mode: 'off' })
+    // Its pages and summary are logged as when it is reviewed.
+    expect(entries.map(({ kind, verdict }) => [kind, verdict])).toEqual([
+      ['action', null],
+      ['navigation', null],
+      ['navigation', null],
+      ['session_summary', null],
     ])
   })
 
