@@ -16,4 +16,6 @@ export interface AgentRuntime {
   wake(botId: string, input: BotInput): Promise<void>
   /** Aborts the bot's current run. */
   stop(botId: string): Promise<void>
+  /** Aborts a deleted bot's run and drops everything the runtime holds for it. */
+  forget(bot: { id: string; historyId: string | null }): Promise<void>
 }

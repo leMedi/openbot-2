@@ -1,7 +1,7 @@
 export { EventBus, type Stamp, type Stamped } from './events.ts'
 export { SecretBox } from './secret-box.ts'
 export { groupRoundRules } from './group-rules.ts'
-export { createBot, findBotByHistory, getBot, NameTakenError, listBots, setBotHistory, type BotWithChat } from './bots.ts'
+export { createBot, deleteBot, findBotByHistory, getBot, NameTakenError, listBots, setBotHistory, updateBot, type BotProfile, type BotWithChat } from './bots.ts'
 export { getChat, listMessages, postMessage } from './chats.ts'
 export {
   AllowAllOrchestrator,

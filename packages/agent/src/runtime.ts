@@ -238,6 +238,14 @@ export class BotRuntime implements AgentRuntime {
     if (wake === this.#working.get(botId)) this.#setIdle(botId)
   }
 
+  async forget({ id, historyId }: { id: string; historyId: string | null }): Promise<void> {
+    if (historyId) await (await this.#harness.conversation(toConversationId(historyId), context))?.abort(context)
+    // pi-durable can't delete a conversation, so the history stays in its storage with no bot to reach it.
+    this.#histories.delete(id)
+    this.#working.delete(id)
+    this.#errors.delete(id)
+  }
+
   status(botId: string): BotStatus {
     return { working: this.#working.has(botId), error: this.#errors.get(botId) ?? null }
   }

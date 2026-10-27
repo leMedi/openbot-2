@@ -132,6 +132,17 @@ function createDeviceSignIn() {
   return { oauth, approve: () => approval.resolve() }
 }
 
+/** The tools a request offers: system messages add and remove them in order. */
+function toolNames(messages: readonly Message[]): string[] {
+  const names = new Set<string>()
+  for (const message of messages) {
+    if (message.role !== 'system') continue
+    for (const tool of message.toolsRemoved ?? []) names.delete(tool.name)
+    for (const tool of message.toolsAdded ?? []) names.add(tool.name)
+  }
+  return [...names]
+}
+
 /**
  * Two scripted providers for Seam 1 tests, standing in for pi's built-in ones:
  * - `fake` (models `fake-model`, vision, and `fake-mini`, text only): API key or a loopback subscription sign-in.
@@ -153,7 +164,7 @@ export function createFakeProviders() {
     oauth: device.oauth,
   })
 
-  const requests: { model: string; messages: Message[] }[] = []
+  const requests: { model: string; messages: Message[]; tools: string[] }[] = []
 
   return {
     providers: [fake.provider, fakeDevice.provider] as Provider[],
@@ -161,12 +172,16 @@ export function createFakeProviders() {
     script(...turns: (AssistantMessage | HeldTurn)[]) {
       fake.faux.appendResponses(
         turns.map((turn) => (context, options, _state, model) => {
-          requests.push({ model: `${model.provider}/${model.id}`, messages: [...context.messages] })
+          requests.push({
+            model: `${model.provider}/${model.id}`,
+            messages: [...context.messages],
+            tools: toolNames(context.messages),
+          })
           return turn instanceof HeldTurn ? turn.answer(options?.signal) : turn
         }),
       )
     },
-    /** Requests that scripted turns answered, in order: the model and the messages it was sent. */
+    /** Requests that scripted turns answered, in order: the model, the messages it was sent and its tools' names. */
     requests,
     /** Scripted turns not requested yet. */
     get pendingTurns() {

@@ -48,13 +48,18 @@ export const newBot = z.object({
 })
 export type NewBot = z.infer<typeof newBot>
 
+/** Profile fields to change; the rest stay. A null `model` follows the default model again. */
+export const botChanges = newBot.partial()
+export type BotChanges = z.infer<typeof botChanges>
+
 /** Something the owner or a bot posted in a chat. A bot's thinking and tool use are never messages. */
 export const message = z.object({
   id: z.string(),
   chatId: z.string(),
   author: z.enum(['owner', 'bot']),
-  /** The bot that posted it, when `author` is `bot`. */
+  /** The bot that posted it, when `author` is `bot`; null once that bot is deleted. */
   botId: z.string().nullable(),
+  /** The author's name when it posted, with " (deleted)" once its bot is deleted. */
   authorName: z.string(),
   /** Markdown. */
   text: z.string(),
@@ -62,6 +67,9 @@ export const message = z.object({
   createdAt: z.number(),
 })
 export type MessageInfo = z.infer<typeof message>
+
+/** How a message's author shows once its bot is deleted (ADR 0009). */
+export const deletedAuthorName = (name: string) => `${name} (deleted)`
 
 export const onboarding = z.object({
   provider: z.boolean(),
@@ -80,6 +88,10 @@ export const liveEvent = z.discriminatedUnion('type', [
    */
   z.object({ type: z.literal('hello'), resumed: z.boolean() }),
   z.object({ type: z.literal('bot.created'), bot }),
+  /** The bot's profile changed; `bot` is all of it as it is now. */
+  z.object({ type: z.literal('bot.updated'), bot }),
+  /** The bot and its DM are gone for good. */
+  z.object({ type: z.literal('bot.deleted'), botId: z.string(), chatId: z.string() }),
   z.object({ type: z.literal('bot.status'), botId: z.string(), working: z.boolean(), error: z.string().nullable() }),
   z.object({ type: z.literal('message.created'), message }),
 ])
@@ -231,6 +243,18 @@ export const contract = {
       .route({ method: 'POST', path: '/bots', summary: 'Create a bot and its DM; no other bot may have its name' })
       .input(newBot)
       .output(bot),
+    update: oc
+      .route({ method: 'PATCH', path: '/bots/{botId}', summary: "Change a bot's profile; no other bot may have its name" })
+      .input(botChanges.extend({ botId: z.string() }))
+      .output(bot),
+    delete: oc
+      .route({
+        method: 'DELETE',
+        path: '/bots/{botId}',
+        summary: 'Delete a bot for good: its DM, history and everything else it owns; its messages elsewhere stay',
+      })
+      .input(z.object({ botId: z.string() }))
+      .output(z.void()),
     stop: oc
       .route({ method: 'POST', path: '/bots/{botId}/stop', summary: "Abort the bot's current run; returns once it is idle" })
       .input(z.object({ botId: z.string() }))

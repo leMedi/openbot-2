@@ -1,9 +1,10 @@
 import type { BotInfo, MessageInfo } from '@openbot/api-contract'
 import { cn } from '@openbot/ui/lib/utils'
-import { Link, createFileRoute } from '@tanstack/react-router'
+import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { BotAvatar } from '../../components/bot-avatar.tsx'
 import { Markdown } from '../../components/markdown.tsx'
+import { ProfilePane } from '../../components/profile-pane.tsx'
 import { api, errorMessage } from '../../lib/api.ts'
 import { useLive } from '../../lib/live.tsx'
 
@@ -34,17 +35,35 @@ type Row = {
   outgoing?: Outgoing
 }
 
-/** The DM between the owner and one bot, in Grok Bot's layout. */
+/** The DM between the owner and one bot, in Grok Bot's layout, with its Profile pane beside it when open. */
 function Dm() {
   const { botId } = Route.useParams()
   const live = useLive()
+  const navigate = useNavigate()
+  const [profileOpen, setProfileOpen] = useState(false)
   const bot = live.bots?.find((entry) => entry.id === botId)
   if (!bot) return live.bots ? <p className="m-auto text-muted-foreground">This bot doesn't exist.</p> : null
-  // Keyed, so loading state, scroll position and sends in flight belong to one chat.
-  return <Chat key={bot.chatId} bot={bot} />
+  return (
+    <div className="flex min-h-0 flex-1">
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Keyed, so loading state, scroll position and sends in flight belong to one chat. */}
+        <Chat key={bot.chatId} bot={bot} profileOpen={profileOpen} onToggleProfile={() => setProfileOpen((open) => !open)} />
+      </div>
+      {profileOpen && (
+        <ProfilePane
+          bot={bot}
+          onSaved={(saved) => live.updateBot(saved)}
+          onDeleted={() => {
+            live.removeBot(bot.id, bot.chatId)
+            navigate({ to: '/', replace: true })
+          }}
+        />
+      )}
+    </div>
+  )
 }
 
-function Chat({ bot }: { bot: BotInfo }) {
+function Chat({ bot, profileOpen, onToggleProfile }: { bot: BotInfo; profileOpen: boolean; onToggleProfile: () => void }) {
   const live = useLive()
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string>()
@@ -137,6 +156,14 @@ function Chat({ bot }: { bot: BotInfo }) {
             <BotAvatar shape={bot.avatarShape} color={bot.avatarColor} />
             <span className="font-semibold">{bot.name}</span>
             {bot.working && <span className="animate-fade-in text-sm text-muted-foreground">Working</span>}
+            <button
+              type="button"
+              aria-pressed={profileOpen}
+              onClick={onToggleProfile}
+              className={cn('pressable ml-auto rounded-md px-2 py-1 text-base hover:bg-secondary-hover', profileOpen && 'bg-selected')}
+            >
+              Profile
+            </button>
           </header>
           <MessageList
             bot={bot}

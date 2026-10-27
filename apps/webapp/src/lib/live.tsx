@@ -1,4 +1,4 @@
-import type { BotInfo, MessageInfo, StampedEvent } from '@openbot/api-contract'
+import { type BotInfo, deletedAuthorName, type MessageInfo, type StampedEvent } from '@openbot/api-contract'
 import { type ReactNode, createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react'
 import { api } from './api.ts'
 
@@ -73,6 +73,31 @@ export class LiveStore {
     this.#update(() => (this.bots = [...(this.bots ?? []).filter((entry) => entry.id !== bot.id), bot]))
   }
 
+  /** Shows a bot as it is now, e.g. after the owner edited its profile. */
+  updateBot(bot: BotInfo) {
+    this.#update(() => (this.bots = this.bots?.map((entry) => (entry.id === bot.id ? bot : entry))))
+  }
+
+  /** Forgets a deleted bot and its DM; its messages in other chats now show it as deleted. */
+  removeBot(botId: string, chatId: string) {
+    this.#update(() => {
+      this.bots = this.bots?.filter((bot) => bot.id !== botId)
+      const messages = new Map(this.messages)
+      messages.delete(chatId)
+      for (const [id, list] of messages) {
+        if (!list.some((message) => message.botId === botId)) continue
+        messages.set(
+          id,
+          list.map((message) => (message.botId === botId ? { ...message, botId: null, authorName: deletedAuthorName(message.authorName) } : message)),
+        )
+      }
+      this.messages = messages
+      const drafts = new Map(this.drafts)
+      drafts.delete(chatId)
+      this.drafts = drafts
+    })
+  }
+
   async #apply({ epoch, seq, event }: StampedEvent) {
     const stamp = this.#stamp
     if (event.type !== 'hello' && stamp?.epoch === epoch && seq <= stamp.seq) return // already applied
@@ -85,6 +110,10 @@ export class LiveStore {
         return
       case 'bot.created':
         return this.addBot(event.bot)
+      case 'bot.updated':
+        return this.updateBot(event.bot)
+      case 'bot.deleted':
+        return this.removeBot(event.botId, event.chatId)
       case 'bot.status':
         return this.#update(() => {
           this.bots = this.bots?.map((bot) => (bot.id === event.botId ? { ...bot, working: event.working, error: event.error } : bot))

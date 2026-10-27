@@ -2,6 +2,7 @@ import { SignInNotFoundError } from '@openbot/agent'
 import { contract } from '@openbot/api-contract'
 import {
   createBot,
+  deleteBot,
   getBot,
   getChat,
   NameTakenError,
@@ -13,6 +14,7 @@ import {
   readModelSettings,
   readOrchestratorModes,
   writeBotOrchestratorModes,
+  updateBot,
   writeModelSettings,
   writeOrchestratorModes,
 } from '@openbot/core'
@@ -70,6 +72,31 @@ export const router = os.router({
         if (error instanceof NameTakenError) throw new ORPCError('CONFLICT', { message: error.message })
         throw error
       }
+    }),
+
+    update: os.bots.update.handler(async ({ context, input: { botId, ...changes } }) => {
+      if (changes.model != null && !(await context.providers.findModel(changes.model))) {
+        throw new ORPCError('BAD_REQUEST', { message: `${changes.model} is not a model of a connected provider` })
+      }
+      try {
+        const updated = await updateBot(context.db, botId, changes)
+        if (!updated) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
+        const bot = toBotInfo(updated, context.runtime.status(botId))
+        context.bus.publish({ type: 'bot.updated', bot })
+        return bot
+      } catch (error) {
+        if (error instanceof NameTakenError) throw new ORPCError('CONFLICT', { message: error.message })
+        throw error
+      }
+    }),
+
+    delete: os.bots.delete.handler(async ({ context, input }) => {
+      // Deleted first, so nothing can wake the bot while its run is aborted.
+      const bot = await deleteBot(context.db, input.botId)
+      if (!bot) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
+      // Its pi history stays orphaned in pi-durable's storage, which can't delete a conversation yet; no bot reaches it.
+      await context.runtime.forget(bot)
+      context.bus.publish({ type: 'bot.deleted', botId: bot.id, chatId: bot.chatId })
     }),
 
     stop: os.bots.stop.handler(async ({ context, input }) => {

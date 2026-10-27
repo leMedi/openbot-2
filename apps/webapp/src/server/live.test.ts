@@ -118,4 +118,24 @@ describe('live sync', () => {
 
     expect(await tab.read((event) => event.event.type === 'bot.created')).toMatchObject([{ event: { type: 'bot.created', bot } }])
   })
+
+  it('shows every tab an edited bot as it is now', async () => {
+    const { server, bot } = await startWithRex()
+    const tab = await subscribe(server)
+
+    const updated = await server.client.bots.update({ botId: bot.id, name: 'Rexy', title: 'Tester' })
+
+    expect(await tab.read((event) => event.event.type === 'bot.updated')).toMatchObject([{ event: { type: 'bot.updated', bot: updated } }])
+  })
+
+  it('tells every tab a bot was deleted', async () => {
+    const { server, bot } = await startWithRex()
+    const tab = await subscribe(server)
+
+    await server.client.bots.delete({ botId: bot.id })
+
+    expect(await tab.read((event) => event.event.type === 'bot.deleted')).toMatchObject([
+      { event: { type: 'bot.deleted', botId: bot.id, chatId: bot.chatId } },
+    ])
+  })
 })

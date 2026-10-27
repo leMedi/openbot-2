@@ -1,16 +1,19 @@
-import type { AuditEntryInfo, BotInfo, MessageInfo } from '@openbot/api-contract'
+import { type AuditEntryInfo, type BotInfo, deletedAuthorName, type MessageInfo } from '@openbot/api-contract'
 import type { BotStatus } from '@openbot/agent'
 import type { BotWithChat } from '@openbot/core'
 import type { AuditEntry, Message } from '@openbot/db'
 
-/** What the API shows of a message: never its tool call's idempotency key. */
+/**
+ * What the API shows of a message: never its tool call's idempotency key. A bot's message whose bot was deleted keeps
+ * its name, shown as "Name (deleted)" (ADR 0009).
+ */
 export function toMessageInfo(message: Message): MessageInfo {
   return {
     id: message.id,
     chatId: message.chatId,
     author: message.author,
     botId: message.authorBotId,
-    authorName: message.authorName,
+    authorName: message.author === 'bot' && !message.authorBotId ? deletedAuthorName(message.authorName) : message.authorName,
     text: message.text,
     createdAt: message.createdAt.getTime(),
   }
