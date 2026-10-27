@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { BotAvatar } from '../../components/bot-avatar.tsx'
 import { Markdown } from '../../components/markdown.tsx'
 import { ProfilePane } from '../../components/profile-pane.tsx'
+import { QuestionCard } from '../../components/question-card.tsx'
 import { api, errorMessage } from '../../lib/api.ts'
 import { useLive } from '../../lib/live.tsx'
 
@@ -33,6 +34,8 @@ type Row = {
   /** Arrived while the chat was open, so it animates in. */
   enter: boolean
   outgoing?: Outgoing
+  /** The server's message, when it has one; a card renders from it. */
+  message?: MessageInfo
 }
 
 /** The DM between the owner and one bot, in Grok Bot's layout, with its Profile pane beside it when open. */
@@ -106,6 +109,7 @@ function Chat({ bot, profileOpen, onToggleProfile }: { bot: BotInfo; profileOpen
       text: message.text,
       // The owner's own messages already animated in as outgoing ones.
       enter: !!history.current && !history.current.has(message.id) && message.author !== 'owner',
+      message,
     })),
     ...outgoing
       // The live stream can deliver the server's copy before the send returns.
@@ -171,6 +175,7 @@ function Chat({ bot, profileOpen, onToggleProfile }: { bot: BotInfo; profileOpen
             loading={!loaded && !error}
             onResend={(entry) => void send(entry.text, entry.key)}
             onDiscard={(entry) => setOutgoing((list) => list.filter((other) => other.key !== entry.key))}
+            onAnswered={(message) => live.addMessage(message)}
           />
         </div>
         {unseen && (
@@ -207,13 +212,17 @@ function MessageList({
   loading,
   onResend,
   onDiscard,
+  onAnswered,
 }: {
   bot: BotInfo
   rows: Row[]
   loading: boolean
   onResend: (entry: Outgoing) => void
   onDiscard: (entry: Outgoing) => void
+  onAnswered: (message: MessageInfo) => void
 }) {
+  // Letter keys answer the newest open question only.
+  const newestOpenQuestion = [...rows].reverse().find((row) => row.message?.card?.type === 'question' && !row.message.card.answer)?.key
   return (
     <div className="px-[max(30px,calc((100%-690px)/2))] pt-2 pb-7">
       {loading && <p className="text-center text-muted-foreground">Loading…</p>}
@@ -223,6 +232,23 @@ function MessageList({
         const continuesPrevious = rows[index - 1]?.author === row.author
         const continuesNext = rows[index + 1]?.author === row.author
         const failed = row.outgoing?.error
+        const card = row.message?.card
+        if (card?.type === 'question') {
+          return (
+            <div
+              key={row.key}
+              role="article"
+              className={cn(
+                'max-w-[min(88%,520px)] origin-bottom-left',
+                continuesNext ? 'mb-1' : 'mb-[22px]',
+                row.enter && 'motion-safe:animate-message-in motion-reduce:animate-fade-in',
+              )}
+            >
+              <span className="sr-only">{row.authorName}: </span>
+              <QuestionCard message={row.message!} card={card} letterKeys={row.key === newestOpenQuestion} onAnswered={onAnswered} />
+            </div>
+          )
+        }
         return (
           <div key={row.key} role="article" className={cn('flex', row.mine && 'justify-end', continuesNext ? 'mb-1' : 'mb-[22px]')}>
             <span className="sr-only">{row.authorName}: </span>

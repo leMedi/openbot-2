@@ -55,7 +55,7 @@ export class LiveStore {
     this.#update(() => this.#setMessages(chatId, mergeMessages(this.messages.get(chatId) ?? [], loaded)))
   }
 
-  /** Adds a message the server returned, e.g. the owner's own, which also arrives live. */
+  /** Adds or replaces a message the server returned, e.g. the owner's own, which also arrives live. */
   addMessage(message: MessageInfo) {
     this.#update(() => this.#setMessages(message.chatId, mergeMessages(this.messages.get(message.chatId) ?? [], [message])))
   }
@@ -120,6 +120,9 @@ export class LiveStore {
         })
       case 'message.created':
         // Chats not opened yet load everything when they are.
+        if (this.messages.has(event.message.chatId)) this.addMessage(event.message)
+        return
+      case 'message.updated':
         if (this.messages.has(event.message.chatId)) this.addMessage(event.message)
         return
     }

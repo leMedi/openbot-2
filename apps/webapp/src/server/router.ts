@@ -1,15 +1,23 @@
 import { SignInNotFoundError } from '@openbot/agent'
 import { contract } from '@openbot/api-contract'
 import {
+  answerQuestion,
+  type BotWithChat,
   createBot,
+  describeAnswer,
+  InvalidAnswerError,
   deleteBot,
   getBot,
   getChat,
+  getMessage,
   NameTakenError,
   listAuditEntries,
   listBots,
   listMessages,
   postMessage,
+  QuestionAnsweredError,
+  QuestionNotFoundError,
+  reopenQuestion,
   readBotOrchestratorModes,
   readModelSettings,
   readOrchestratorModes,
@@ -23,6 +31,15 @@ import type { ServerContext } from './context.ts'
 import { toAuditEntryInfo, toBotInfo, toMessageInfo } from './views.ts'
 
 const os = implement(contract).$context<ServerContext>()
+
+/** Throws unless the bot's model can run, so the owner's input is never left without a bot to answer it. */
+async function assertCanRun(context: ServerContext, bot: BotWithChat) {
+  const model = bot.model ?? (await readModelSettings(context.db)).defaultModel
+  if (!model) throw new ORPCError('PRECONDITION_FAILED', { message: 'Choose a default model first' })
+  if (!(await context.providers.findModel(model))) {
+    throw new ORPCError('PRECONDITION_FAILED', { message: `${model} is not available; connect its provider or choose another model` })
+  }
+}
 
 export const router = os.router({
   health: os.health.handler(async ({ context }) => {
@@ -132,16 +149,40 @@ export const router = os.router({
       const chat = await getChat(context.db, input.chatId)
       const bot = chat?.botId ? await getBot(context.db, chat.botId) : undefined
       if (!bot) throw new ORPCError('NOT_FOUND', { message: 'No such chat' })
-      // Checked before posting, so a message is never left without a bot to answer it.
-      const model = bot.model ?? (await readModelSettings(context.db)).defaultModel
-      if (!model) throw new ORPCError('PRECONDITION_FAILED', { message: 'Choose a default model first' })
-      if (!(await context.providers.findModel(model))) {
-        throw new ORPCError('PRECONDITION_FAILED', { message: `${model} is not available; connect its provider or choose another model` })
-      }
+      await assertCanRun(context, bot)
       const { message } = await postMessage(context.db, { chatId: chat!.id, author: 'owner', authorName: 'You', text: input.text })
       const info = toMessageInfo(message)
       context.bus.publish({ type: 'message.created', message: info })
       await context.runtime.wake(bot.id, { lane: 'owner', text: input.text, id: message.id })
+      return info
+    }),
+
+    answer: os.chats.answer.handler(async ({ context, input }) => {
+      const asked = await getMessage(context.db, input.messageId)
+      const bot = asked?.authorBotId ? await getBot(context.db, asked.authorBotId) : undefined
+      if (!asked?.card || !bot) throw new ORPCError('NOT_FOUND', { message: 'No such question' })
+      await assertCanRun(context, bot)
+      let answered
+      try {
+        answered = await answerQuestion(context.db, input.messageId, input.answer)
+      } catch (error) {
+        if (error instanceof QuestionNotFoundError) throw new ORPCError('NOT_FOUND', { message: error.message })
+        if (error instanceof QuestionAnsweredError) throw new ORPCError('CONFLICT', { message: error.message })
+        if (error instanceof InvalidAnswerError) throw new ORPCError('BAD_REQUEST', { message: error.message })
+        throw error
+      }
+      const { message, card, answer } = answered
+      const info = toMessageInfo(message)
+      context.bus.publish({ type: 'message.updated', message: info })
+      try {
+        // The owner's answer: it steers a run that is still going, like any message of theirs.
+        await context.runtime.wake(bot.id, { lane: 'owner', text: describeAnswer(card, answer), id: `answer:${message.id}` })
+      } catch (error) {
+        // An answer the bot never got isn't kept, so the owner can answer again.
+        const reopened = await reopenQuestion(context.db, message.id)
+        if (reopened) context.bus.publish({ type: 'message.updated', message: toMessageInfo(reopened) })
+        throw error
+      }
       return info
     }),
   },

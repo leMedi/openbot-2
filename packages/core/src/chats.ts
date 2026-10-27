@@ -6,6 +6,11 @@ export async function getChat(db: Db, id: string): Promise<Chat | undefined> {
   return chat
 }
 
+export async function getMessage(db: Db, id: string): Promise<Message | undefined> {
+  const [message] = await db.select().from(messages).where(eq(messages.id, id))
+  return message
+}
+
 /** A chat's messages, oldest first. */
 export async function listMessages(db: Db, chatId: string): Promise<Message[]> {
   return db.select().from(messages).where(eq(messages.chatId, chatId)).orderBy(asc(messages.id))

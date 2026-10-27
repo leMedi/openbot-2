@@ -52,6 +52,40 @@ export type NewBot = z.infer<typeof newBot>
 export const botChanges = newBot.partial()
 export type BotChanges = z.infer<typeof botChanges>
 
+export const questionOptionStyles = ['default', 'primary', 'danger'] as const
+
+/** One choice on a question card. */
+export const questionOption = z.object({
+  label: z.string(),
+  description: z.string().nullable(),
+  style: z.enum(questionOptionStyles),
+})
+export type QuestionOptionInfo = z.infer<typeof questionOption>
+
+/** The owner's answer to a question card: one of its options, by index, or their own words when the card allows it. */
+export const questionAnswer = z.union([
+  z.object({ option: z.number().int().nonnegative() }),
+  z.object({ text: z.string().trim().min(1).max(10_000) }),
+])
+export type QuestionAnswer = z.infer<typeof questionAnswer>
+
+/** A bot asking the owner to decide: 1–6 options and, when `allowText`, a free-text answer. */
+export const questionCard = z.object({
+  type: z.literal('question'),
+  prompt: z.string(),
+  /** Help text under the prompt. */
+  details: z.string().nullable(),
+  options: z.array(questionOption).min(1).max(6),
+  allowText: z.boolean(),
+  /** Null while open; once answered, the card can't be answered again. */
+  answer: questionAnswer.nullable(),
+})
+export type QuestionCardInfo = z.infer<typeof questionCard>
+
+/** An interactive item in a chat that asks the owner for something. */
+export const card = z.discriminatedUnion('type', [questionCard])
+export type CardInfo = z.infer<typeof card>
+
 /** Something the owner or a bot posted in a chat. A bot's thinking and tool use are never messages. */
 export const message = z.object({
   id: z.string(),
@@ -61,8 +95,10 @@ export const message = z.object({
   botId: z.string().nullable(),
   /** The author's name when it posted, with " (deleted)" once its bot is deleted. */
   authorName: z.string(),
-  /** Markdown. */
+  /** Markdown. A card's message holds its prompt. */
   text: z.string(),
+  /** Set when the message is a card. */
+  card: card.nullable(),
   /** Milliseconds since the epoch. */
   createdAt: z.number(),
 })
@@ -94,6 +130,8 @@ export const liveEvent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('bot.deleted'), botId: z.string(), chatId: z.string() }),
   z.object({ type: z.literal('bot.status'), botId: z.string(), working: z.boolean(), error: z.string().nullable() }),
   z.object({ type: z.literal('message.created'), message }),
+  /** A message changed, e.g. the owner answered its card; `message` is all of it as it is now. */
+  z.object({ type: z.literal('message.updated'), message }),
 ])
 export type LiveEvent = z.infer<typeof liveEvent>
 
@@ -284,6 +322,14 @@ export const contract = {
     send: oc
       .route({ method: 'POST', path: '/chats/{chatId}/messages', summary: 'Post the owner\'s message and wake the bot' })
       .input(z.object({ chatId: z.string(), text: z.string().trim().min(1).max(100_000) }))
+      .output(message),
+    answer: oc
+      .route({
+        method: 'POST',
+        path: '/messages/{messageId}/answer',
+        summary: "Answer a bot's question card, once, and wake the bot with the answer",
+      })
+      .input(z.object({ messageId: z.string(), answer: questionAnswer }))
       .output(message),
   },
   providers: {

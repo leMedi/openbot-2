@@ -51,6 +51,19 @@ export async function createServerContext({
       })
       if (created) bus.publish({ type: 'message.created', message: toMessageInfo(message) })
     },
+    async askQuestion(bot, card, idempotencyKey) {
+      const { message, created } = await postMessage(db, {
+        chatId: bot.chatId,
+        author: 'bot',
+        authorBotId: bot.id,
+        authorName: bot.name,
+        // The prompt doubles as the message's text, e.g. for previews.
+        text: card.prompt,
+        card,
+        idempotencyKey,
+      })
+      if (created) bus.publish({ type: 'message.created', message: toMessageInfo(message) })
+    },
     onStatus: (botId, status) => bus.publish({ type: 'bot.status', botId, ...status }),
   })
   return { db, bus, providers, runtime }

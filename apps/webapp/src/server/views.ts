@@ -1,6 +1,6 @@
-import { type AuditEntryInfo, type BotInfo, deletedAuthorName, type MessageInfo } from '@openbot/api-contract'
+import { type AuditEntryInfo, type BotInfo, type CardInfo, deletedAuthorName, type MessageInfo } from '@openbot/api-contract'
 import type { BotStatus } from '@openbot/agent'
-import type { BotWithChat } from '@openbot/core'
+import { type BotWithChat, isQuestionCard, questionAnswerOf } from '@openbot/core'
 import type { AuditEntry, Message } from '@openbot/db'
 
 /**
@@ -15,8 +15,15 @@ export function toMessageInfo(message: Message): MessageInfo {
     botId: message.authorBotId,
     authorName: message.author === 'bot' && !message.authorBotId ? deletedAuthorName(message.authorName) : message.authorName,
     text: message.text,
+    card: toCardInfo(message),
     createdAt: message.createdAt.getTime(),
   }
+}
+
+/** A message's card with its answer, or null when it is no card. */
+function toCardInfo(message: Message): CardInfo | null {
+  if (!isQuestionCard(message.card)) return null
+  return { ...message.card, answer: questionAnswerOf(message) }
 }
 
 export function toBotInfo(bot: BotWithChat, { working, error }: BotStatus): BotInfo {
