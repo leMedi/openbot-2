@@ -108,6 +108,8 @@ export const chats = sqliteTable(
       .default(sql`'[]'`),
     /** Sidebar order of pinned chats; null when not pinned. */
     pinnedPosition: integer('pinned_position'),
+    /** The newest message the owner has seen; a bot's message after it makes the chat unread. Null: none seen yet. */
+    lastReadMessageId: text('last_read_message_id'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

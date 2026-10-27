@@ -3,6 +3,10 @@ import { contract } from '@openbot/api-contract'
 import {
   answerQuestion,
   type BotWithChat,
+  ChatNotFoundError,
+  listChatSummaries,
+  markChatRead,
+  setPinnedChats,
   createBot,
   describeAnswer,
   InvalidAnswerError,
@@ -27,8 +31,8 @@ import {
   writeOrchestratorModes,
 } from '@openbot/core'
 import { implement, ORPCError } from '@orpc/server'
-import type { ServerContext } from './context.ts'
-import { toAuditEntryInfo, toBotInfo, toMessageInfo } from './views.ts'
+import { publishChat, type ServerContext } from './context.ts'
+import { toAuditEntryInfo, toBotInfo, toChatInfo, toMessageInfo } from './views.ts'
 
 const os = implement(contract).$context<ServerContext>()
 
@@ -38,6 +42,16 @@ async function assertCanRun(context: ServerContext, bot: BotWithChat) {
   if (!model) throw new ORPCError('PRECONDITION_FAILED', { message: 'Choose a default model first' })
   if (!(await context.providers.findModel(model))) {
     throw new ORPCError('PRECONDITION_FAILED', { message: `${model} is not available; connect its provider or choose another model` })
+  }
+}
+
+/** `work`'s result, with a missing chat answered as NOT_FOUND. */
+async function chatMustExist<T>(work: Promise<T>): Promise<T> {
+  try {
+    return await work
+  } catch (error) {
+    if (error instanceof ChatNotFoundError) throw new ORPCError('NOT_FOUND', { message: error.message })
+    throw error
   }
 }
 
@@ -84,6 +98,7 @@ export const router = os.router({
       try {
         const bot = toBotInfo(await createBot(context.db, input), { working: false, error: null })
         context.bus.publish({ type: 'bot.created', bot })
+        await publishChat(context, bot.chatId)
         return bot
       } catch (error) {
         if (error instanceof NameTakenError) throw new ORPCError('CONFLICT', { message: error.message })
@@ -140,6 +155,20 @@ export const router = os.router({
   },
 
   chats: {
+    list: os.chats.list.handler(async ({ context }) => (await listChatSummaries(context.db)).map(toChatInfo)),
+
+    read: os.chats.read.handler(async ({ context, input }) => {
+      await chatMustExist(markChatRead(context.db, input.chatId, input.upTo))
+      return (await publishChat(context, input.chatId))!
+    }),
+
+    setPinned: os.chats.setPinned.handler(async ({ context, input }) => {
+      const changed = await chatMustExist(setPinnedChats(context.db, input.chatIds))
+      const chats = (await listChatSummaries(context.db)).map(toChatInfo)
+      for (const chat of chats) if (changed.includes(chat.id)) context.bus.publish({ type: 'chat.updated', chat })
+      return chats
+    }),
+
     messages: os.chats.messages.handler(async ({ context, input }) => {
       if (!(await getChat(context.db, input.chatId))) throw new ORPCError('NOT_FOUND', { message: 'No such chat' })
       return (await listMessages(context.db, input.chatId)).map(toMessageInfo)
@@ -153,6 +182,7 @@ export const router = os.router({
       const { message } = await postMessage(context.db, { chatId: chat!.id, author: 'owner', authorName: 'You', text: input.text })
       const info = toMessageInfo(message)
       context.bus.publish({ type: 'message.created', message: info })
+      await publishChat(context, chat!.id)
       await context.runtime.wake(bot.id, { lane: 'owner', text: input.text, id: message.id })
       return info
     }),
@@ -174,13 +204,17 @@ export const router = os.router({
       const { message, card, answer } = answered
       const info = toMessageInfo(message)
       context.bus.publish({ type: 'message.updated', message: info })
+      await publishChat(context, message.chatId)
       try {
         // The owner's answer: it steers a run that is still going, like any message of theirs.
         await context.runtime.wake(bot.id, { lane: 'owner', text: describeAnswer(card, answer), id: `answer:${message.id}` })
       } catch (error) {
         // An answer the bot never got isn't kept, so the owner can answer again.
         const reopened = await reopenQuestion(context.db, message.id)
-        if (reopened) context.bus.publish({ type: 'message.updated', message: toMessageInfo(reopened) })
+        if (reopened) {
+          context.bus.publish({ type: 'message.updated', message: toMessageInfo(reopened) })
+          await publishChat(context, reopened.chatId)
+        }
         throw error
       }
       return info

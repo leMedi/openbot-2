@@ -107,6 +107,23 @@ export type MessageInfo = z.infer<typeof message>
 /** How a message's author shows once its bot is deleted (ADR 0009). */
 export const deletedAuthorName = (name: string) => `${name} (deleted)`
 
+/** What the sidebar shows of a chat: where it sits, and whether the owner should look at it. */
+export const chat = z.object({
+  id: z.string(),
+  kind: z.enum(['dm', 'group']),
+  /** The DM's bot; null for group chats. */
+  botId: z.string().nullable(),
+  /** Place among pinned chats, 0 first; null when not pinned. Pinned chats sit above the rest. */
+  pinnedPosition: z.number().int().nonnegative().nullable(),
+  /** A bot posted since the owner last opened the chat. */
+  unread: z.boolean(),
+  /** The prompt of the newest question card still open: the chat needs the owner. Null when nothing waits. */
+  waitingFor: z.string().nullable(),
+  /** The newest message, for the sidebar's preview line; null when the chat is empty. */
+  lastMessage: message.pick({ author: true, authorName: true, text: true, createdAt: true }).nullable(),
+})
+export type ChatInfo = z.infer<typeof chat>
+
 export const onboarding = z.object({
   provider: z.boolean(),
   defaultModel: z.boolean(),
@@ -130,6 +147,8 @@ export const liveEvent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('bot.deleted'), botId: z.string(), chatId: z.string() }),
   z.object({ type: z.literal('bot.status'), botId: z.string(), working: z.boolean(), error: z.string().nullable() }),
   z.object({ type: z.literal('message.created'), message }),
+  /** A chat's sidebar state changed: a message, a read, a pin; `chat` is all of it as it is now. */
+  z.object({ type: z.literal('chat.updated'), chat }),
   /** A message changed, e.g. the owner answered its card; `message` is all of it as it is now. */
   z.object({ type: z.literal('message.updated'), message }),
 ])
@@ -315,6 +334,25 @@ export const contract = {
       .output(z.array(auditEntry)),
   },
   chats: {
+    list: oc
+      .route({ method: 'GET', path: '/chats', summary: 'Every chat as the sidebar shows it: pinned, unread, waiting' })
+      .output(z.array(chat)),
+    read: oc
+      .route({
+        method: 'POST',
+        path: '/chats/{chatId}/read',
+        summary: "Mark a chat read up to `upTo`, or its newest message; read state never moves back",
+      })
+      .input(z.object({ chatId: z.string(), upTo: z.string().optional() }))
+      .output(chat),
+    setPinned: oc
+      .route({
+        method: 'PUT',
+        path: '/chats/pinned',
+        summary: 'Pin exactly these chats, in this order, unpinning every other; returns every chat',
+      })
+      .input(z.object({ chatIds: z.array(z.string()).max(200) }))
+      .output(z.array(chat)),
     messages: oc
       .route({ method: 'GET', path: '/chats/{chatId}/messages', summary: "A chat's messages, oldest first" })
       .input(z.object({ chatId: z.string() }))

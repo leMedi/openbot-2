@@ -2,7 +2,18 @@ export { EventBus, type Stamp, type Stamped } from './events.ts'
 export { SecretBox } from './secret-box.ts'
 export { groupRoundRules } from './group-rules.ts'
 export { createBot, deleteBot, findBotByHistory, getBot, NameTakenError, listBots, setBotHistory, updateBot, type BotProfile, type BotWithChat } from './bots.ts'
-export { getChat, getMessage, listMessages, postMessage } from './chats.ts'
+export {
+  ChatNotFoundError,
+  type ChatSummary,
+  getChat,
+  getChatSummary,
+  getMessage,
+  listChatSummaries,
+  listMessages,
+  markChatRead,
+  postMessage,
+  setPinnedChats,
+} from './chats.ts'
 export {
   AllowAllOrchestrator,
   type BotOrchestratorModes,

@@ -88,6 +88,24 @@ function Chat({ bot, profileOpen, onToggleProfile }: { bot: BotInfo; profileOpen
   const messages = live.messages.get(bot.chatId) ?? []
   if (loaded && !history.current) history.current = new Set(messages.map((message) => message.id))
 
+  // The owner is reading this chat: what arrives while it's open, and in view, is read too.
+  const newest = messages.at(-1)?.id
+  const unread = live.chats.get(bot.chatId)?.unread ?? false
+  /** The newest message a read was tried for; a failed one isn't retried until another message arrives. */
+  const triedRead = useRef<string>(undefined)
+  useEffect(() => {
+    if (!loaded || !unread) return
+    const markRead = () => {
+      if (document.visibilityState !== 'visible' || triedRead.current === newest) return
+      triedRead.current = newest
+      // A failure leaves the chat unread, as the server has it; nothing for the owner to do.
+      live.markRead(bot.chatId, newest).catch(() => {})
+    }
+    markRead()
+    document.addEventListener('visibilitychange', markRead)
+    return () => document.removeEventListener('visibilitychange', markRead)
+  }, [loaded, unread, newest, bot.chatId, live])
+
   async function send(text: string, key: string = crypto.randomUUID()) {
     following.current = true
     const after = messages.at(-1)?.id
