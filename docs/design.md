@@ -18,7 +18,7 @@ This document records the decisions agreed on 2026-10-25 and 2026-10-26. The res
 | Computer | Per-bot display (always on), noVNC preview + take control, computerUse subagent | | |
 | Bot ↔ bot | `message_bot` (Grok semantics) | | |
 | Groups | Slack-style new group, Grok round rules | | |
-| Memory | | Global + per-bot, tiers, extraction, consolidation | |
+| Memory | | Bot + shared memory, tiers, extraction, episodes, consolidation | Bots edit their own profile (#51) |
 | Routines | | Cron, aliases, `@every`, one-off `at` | Webhook triggers |
 | Plugins | | Bundled catalog, accounts, per-bot grants, MCP via pi-mcp | |
 | Vault | | Items, grants, fill-login, secret request, TOTP | |
@@ -127,7 +127,7 @@ As built (#10):
 
 - Fields: name (unique ignoring case; bots are mentioned by name), title, instructions, avatar shape and color, `model` (null follows `settings.defaultModel`), display number, `pi_conversation_id`, sidebar `section_id` and `pinned_position` (P1).
 - **New bot** opens a popup with those fields. **New group chat** opens an empty conversation with a Slack-style "To:" chip field; the first message creates the group.
-- **Delete is permanent.** It removes the bot row, its pi conversation, 1:1 messages, routines, memory, grants, rules, audit entries, display and `$OPENBOT_HOME/bots/<id>/`, and removes it from groups. Messages it left elsewhere keep an `author_name` snapshot and show as "Name (deleted)". Global memory facts it wrote stay.
+- **Delete is permanent.** It removes the bot row, its pi conversation, 1:1 messages, routines, memory, grants, rules, audit entries, display and `$OPENBOT_HOME/bots/<id>/`, and removes it from groups. Messages it left elsewhere keep an `author_name` snapshot and show as "Name (deleted)". Shared memory facts it wrote stay, shown as "via Name (deleted)".
 
 ### 3.2 One conversation per bot (Grok's model)
 
@@ -284,7 +284,7 @@ As built (#42), take-over exactly as Grok does it (checked against Grok Bot 0.18
 interface Orchestrator {
   review(action: ProposedAction, ctx: ReviewContext): Promise<Verdict>
 }
-// surfaces: shell | computer_session | mcp | vault | plugin_request | routine_change | memory_global_write
+// surfaces: shell | computer_session | mcp | vault | plugin_request | routine_change | memory_shared_write
 // (bot-to-bot messages are not reviewed)
 type Verdict = { decision: 'allow' } | { decision: 'deny'; reason: string } | { decision: 'ask'; reason: string; proposedRule?: string }
 ```
@@ -306,9 +306,18 @@ As built (#41), the audit log (Grok's always-on action audit, apart from review)
 
 ### 5.3 Memory (P1)
 
-- `memories` table: `scope` (global | bot), `bot_id`, `tier` (profile | log | note), `content` (≤ 500 chars), `importance` (1–5), `source_bot_id`, `created_at`, `last_used_at`, `superseded_by`.
-- Prompt: profile facts plus a "Recently" block ranked by importance and 30-day decay (≤ 4k chars), frozen per compaction epoch for prompt caching.
-- Writes: `memory_write` / `memory_forget` (own and global; global facts are tagged `[via Bot]`), a post-turn extraction call on `memoryModel`, and a daily consolidation job. `memory_search` uses FTS5; vectors can come later.
+Grok Bot's memory (docs/grok-bot/03-agent-brain.md §4), in a table instead of files and without project memory. See ADR 0010.
+
+- **Scopes:** *bot memory* (one bot's, deleted with it) and *shared memory* (every bot's, mostly about the owner; kept when its writer is deleted). No project or group-chat scope. Precedence: instructions > bot memory > shared memory, stated in the prompt.
+- **Tiers:** `profile` (always in the prompt, never fades), `log` (dated, fades in ranking, kept), `note` (out of the prompt after 7 days, deleted by the next consolidation). **Episodes** are `log` facts in bot memory: extraction writes one sentence every 6 runs that sent a message or used a side-effecting tool.
+- **`memories` table:** integer `id` (stable across edits), `scope` (bot | shared), `bot_id` (bot scope), `tier`, `content` (≤ 500 chars), `importance` (1–5), `source` (`owner` | `bot` with `source_bot_id` and a `source_bot_name` snapshot), `created_at`, `updated_at`. Every delete is a hard delete; edits replace in place. Bots never reach the table except through the tool below; memory is not in files under `$OPENBOT_HOME`.
+- **Prompt:** the memory block comes last in the instructions, frozen per compaction epoch for prompt caching. Profile facts first (≤ 2k chars per scope; the lowest-importance profile facts drop out above that until consolidation shrinks it), then "Recently", both scopes ranked by `log2(importance) + createdAt / 30-day half-life`, ≤ 4k chars. Each line is `- [12] (learned 2026-10-25) fact`, shared facts tagged `[via Rex]`. Facts below the cut stay in the table and in the owner's UI; bots don't see them. There is no memory search tool. Owner edits and deletes break the freeze: affected bots re-render on their next run. Bots' own writes wait for the next compaction (they are in the history already).
+- **Tool:** one `update_state` tool à la Grok, with the `memory` target only for now (`routine` joins with §5.4; a `profile` target is #51): `write { scope, tier, text, importance? }`, `edit { id, text?, tier?, importance? }` (no scope change: forget + write), `forget { id }`. Writes to shared memory are the `memory_shared_write` surface; bot-memory writes are not reviewed.
+- **Ownership:** the bot always comes from the run's history, never from arguments. A bot reads and changes only its own bot memory and shared memory (it may edit or forget a shared fact another bot wrote). An id that doesn't exist, is gone, or is another bot's gets the same "no such fact" answer. The same check guards the tool, extraction, consolidation and the API, each with tests.
+- **Extraction:** after every run settles, in every lane, a side call on `memoryModel` (trivial exchanges skipped). Per bot one at a time, in order; it doesn't block the next run. It sees the bot's current facts with ids and answers new facts (tier, scope, importance), `edit [id] …` or `remove [id]`. Facts about the owner come only from the owner's own words and go to shared memory; facts about the bot's work only from the bot's own messages. Tool results and other bots' words (group turns, bot-to-bot messages) are context, never a source. A failure is retried once, then skipped and audited. None runs while `memoryModel` has no working provider. Server jobs are audited, not reviewed.
+- **Consolidation:** daily at 04:00 in the owner's time zone, only for scopes changed since the last run, on `memoryModel`: merge duplicates, promote recurring log/note facts to profile, delete expired notes, delete bot facts contradicted by newer shared ones, keep profiles under their cap. Answers in ids; a verification call rejects changes that drop or alter information. Every change is audited.
+- **Owner UI:** the bot's **Memory** pane and Settings → **Shared memory** list facts by tier with source and date; add (importance 3 by default), edit, delete. No import or export.
+- **Evals (`memory` suite):** a fact survives compaction; an owner-deleted fact is gone next run; a fact planted in a tool result is never stored; another bot's false claim about the owner in a group isn't stored; a shared fact reaches a second bot after its next compaction; instructions win over a conflicting memory.
 
 ### 5.4 Routines (P1)
 
@@ -336,7 +345,7 @@ The UI copies Grok Bot's; the full spec is [`grok-bot/05-ui.md`](grok-bot/05-ui.
 
 - Three columns: resizable sidebar (280px, 240–400), a centred chat (≤ 690px messages), and one right-hand pane at a time (320px, 280–480).
 - Header icons pick the pane: **Screen** (default), **Profile** (Grok's fields + Model), **Routines**; **Memory**, **Access** (plugin accounts and vault items, with revoke) and **Activity** (audit + orchestrator mode and rules) are under "⋯". Groups get a **Members** pane.
-- Settings: Providers, Models, Plugins, Vault, Global memory, Global rules, Updates, System (displays, disk, logs, terminal).
+- Settings: Providers, Models, Plugins, Vault, Shared memory, Global rules, Updates, System (displays, disk, logs, terminal).
 - Grok's visual language: black/white primary buttons, blue only for links/focus/unread, no shadows in dark mode, autosave instead of Save buttons, letter keys for question cards.
 
 ---
