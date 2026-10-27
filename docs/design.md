@@ -366,5 +366,5 @@ Expo app over the same oRPC API and SSE stream: bots, groups, chat, cards and ap
 3. **`computer` + `desktopd` + runtime image**: displays, noVNC, pi-env as `openbot`, CDP tools, cua-driver, computerUse subagent.
 4. **`api-contract` + `webapp`**: onboarding and provider wizard, sidebar, chat, cards, panes.
 5. **Release pipeline + installer + dev compose.** → **P0 done.**
-6. P1: memory, routines, plugins, vault, `LlmOrchestrator`, secrets broker, sections, palette/search, notifications, site.
+6. P1, in order: memory, plugins, sections, palette/search; then routines, vault, `LlmOrchestrator`, secrets broker, notifications, site.
 7. P2: mobile, rich renderers, animated avatars.
