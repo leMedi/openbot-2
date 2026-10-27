@@ -138,7 +138,7 @@ The model every bot uses unless it has its own.
 ### Memory and routines
 
 **Memory**:
-The facts a bot keeps across conversations: its bot memory plus the shared memory. When the two disagree, its own fact wins.
+The facts a bot keeps across conversations: its bot memory plus the shared memory, in front of the bot on every run, the most important and newest first. When the two disagree, its own fact wins; its instructions win over both.
 
 **Bot memory**:
 The facts only one bot knows, mostly about its own work. They go when the bot is deleted.
