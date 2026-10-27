@@ -81,6 +81,14 @@ export const bots = sqliteTable(
       .$type<Partial<Record<Surface, OrchestratorMode>>>()
       .notNull()
       .default(sql`'{}'`),
+    /**
+     * Since when the bot owes the owner a reply (Grok's ack obligation): set with the owner's DM message, answer or
+     * hand-back, cleared by the bot's next message or card in its DM; null when it owes none. A bot still owing one
+     * when the server starts is woken to reply.
+     */
+    replyOwedAt: integer('reply_owed_at', { mode: 'timestamp_ms' }),
+    /** How many times a start woke the bot for the reply it owes; it gives up after 3. */
+    replyRedrives: integer('reply_redrives').notNull().default(0),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

@@ -1,6 +1,7 @@
-import { replyReminder, supersededNote } from '@openbot/agent'
+import { owedReplyNote, replyReminder, supersededNote } from '@openbot/agent'
 import { callsTools, endsSilently, fails, held, says, slowTool } from '@openbot/agent/testing'
 import type { BotInfo, NewBot } from '@openbot/api-contract'
+import { postMessage } from '@openbot/core'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createTestServer, restartTestServer, type TestServer, type TestServerOptions } from './testing/harness.ts'
 
@@ -255,6 +256,64 @@ describe('the reply guarantee', () => {
     await untilIdle(server, bot)
 
     expect(server.providers.pendingTurns).toBe(1)
+  })
+
+  it('holds across a restart: a bot never woken for the owner\'s message answers it once the server is back', async () => {
+    const { server: before, bot } = await startWithRex()
+    before.providers.script(callsTools(['sendMessage', { text: 'On it.' }]), endsSilently())
+    await before.client.chats.send({ chatId: bot.chatId, text: 'Fix the build' })
+    await untilIdle(before, bot)
+    // The server stopped right after posting the owner's next message, before waking the bot.
+    await postMessage(before.db, { chatId: bot.chatId, author: 'owner', authorName: 'You', text: 'And bump the version' })
+
+    const after = await restartTestServer(before, {
+      script: (providers) => providers.script(callsTools(['sendMessage', { text: 'Version bumped.' }]), endsSilently()),
+    })
+    servers.splice(servers.indexOf(before), 1, after)
+    await expect.poll(() => texts(after, bot)).toEqual([
+      ['owner', 'Fix the build'],
+      ['bot', 'On it.'],
+      ['owner', 'And bump the version'],
+      ['bot', 'Version bumped.'],
+    ])
+
+    const woken = JSON.stringify(after.providers.requests[0]!.messages.at(-1))
+    expect(woken).toContain(owedReplyNote)
+    expect(woken).toContain('And bump the version')
+    expect(woken).not.toContain('Fix the build')
+    await untilIdle(after, bot)
+    expect(after.providers.pendingTurns).toBe(0)
+  })
+
+  it('gives up on a reply owed across restarts after waking the bot three times', async () => {
+    const { server: first, bot } = await startWithRex()
+    first.providers.script(endsSilently(), endsSilently(), endsSilently(), endsSilently())
+    await first.client.chats.send({ chatId: bot.chatId, text: 'Ping' })
+    await untilIdle(first, bot)
+
+    let server = first
+    for (let start = 1; start <= 3; start++) {
+      const next = await restartTestServer(server, {
+        // Woken for the reply, then reminded three times, never replying.
+        script: (providers) => providers.script(endsSilently(), endsSilently(), endsSilently(), endsSilently()),
+      })
+      servers.splice(servers.indexOf(server), 1, next)
+      server = next
+      await expect.poll(() => server.providers.pendingTurns).toBe(0)
+      await untilIdle(server, bot)
+      expect(JSON.stringify(server.providers.requests[0]!.messages.at(-1))).toContain(owedReplyNote)
+    }
+
+    const last = await restartTestServer(server, {
+      script: (providers) => providers.script(callsTools(['sendMessage', { text: 'Pong' }]), endsSilently()),
+    })
+    servers.splice(servers.indexOf(server), 1, last)
+    await last.client.chats.send({ chatId: bot.chatId, text: 'Still there?' })
+    await untilIdle(last, bot)
+
+    // Not woken for the reply this time: its first request answers the owner's new message alone.
+    expect(last.providers.requests).toHaveLength(2)
+    expect(JSON.stringify(last.providers.requests[0]!.messages.at(-1))).not.toContain(owedReplyNote)
   })
 
   it('gives up after three reminders', async () => {

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c84b3dcc-9bea-42dd-97e0-27dd7dca727b",
+  "id": "b426f76f-4675-4009-a384-cbe8ab925789",
   "prevId": "8dc8ce65-9274-4af2-9b37-7347a446817b",
   "tables": {
     "audit_log": {
@@ -266,6 +266,21 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'{}'"
+        },
+        "reply_owed_at": {
+          "name": "reply_owed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reply_redrives": {
+          "name": "reply_redrives",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
         },
         "created_at": {
           "name": "created_at",

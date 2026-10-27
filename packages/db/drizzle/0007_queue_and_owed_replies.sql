@@ -10,4 +10,6 @@ CREATE TABLE `bot_inputs` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `bot_inputs_input_unique` ON `bot_inputs` (`bot_id`,`input_id`);--> statement-breakpoint
-CREATE UNIQUE INDEX `bot_inputs_position_unique` ON `bot_inputs` (`position`);
+CREATE UNIQUE INDEX `bot_inputs_position_unique` ON `bot_inputs` (`position`);--> statement-breakpoint
+ALTER TABLE `bots` ADD `reply_owed_at` integer;--> statement-breakpoint
+ALTER TABLE `bots` ADD `reply_redrives` integer DEFAULT 0 NOT NULL;

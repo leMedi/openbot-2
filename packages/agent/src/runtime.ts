@@ -39,12 +39,14 @@ import {
   type Desktop,
   type BotInput,
   type BotWithChat,
+  botsOwingReplies,
   describeUnanswered,
   findBotByHistory,
   findBotByName,
   findGroupByName,
   getGroup,
   othersIn,
+  pruneTakenInputs,
   findWaitingTakeOver,
   getBot,
   type Group,
@@ -66,9 +68,11 @@ import {
   type TakeOverCard,
   readModelSettings,
   recordUnreviewed,
+  redriveReply,
   requeueInput,
   reviewAction,
   setBotHistory,
+  sinceLastReply,
   takeInputs,
   unansweredQuestions,
 } from '@openbot/core'
@@ -109,6 +113,13 @@ To send the owner a file from your computer, such as a report or a screenshot, a
 When your screen needs the owner (a login, a captcha, a two-factor code, a payment), use_computer asks them to take it over on a card and ends your turn; their handing the screen back wakes you, and you go on from there.
 
 When you need the owner to decide before you go on, ask with askQuestion: a short prompt and up to six options they can pick with one click. Asking ends your turn, so send anything else first; their answer wakes you as their next message.`
+
+/**
+ * Starts the input waking a bot that owes the owner a reply once the server is back (Grok's ack redrive), before the
+ * owner's messages since its last reply.
+ */
+export const owedReplyNote =
+  "[The server restarted before you replied to the owner. Their messages since your last reply follow; you may have seen some already, or none may be new. If you already did what they asked, confirm it with sendMessage; if not, acknowledge them and go on with it, without repeating anything you already did; if you can't tell what they last asked, say you may have missed their latest message and ask them to resend it. Never claim work is done that you can't see.]"
 
 /** Starts an input that runs again: a newer message interrupted the bot while it worked on it. */
 export const interruptedNote = '[You were interrupted by a newer message while working on this. Pick it up again.]'
@@ -357,8 +368,12 @@ function requestIdOf(inputs: readonly QueuedInput[]): string | undefined {
 /** What of a queued input is kept across restarts: all but what only this process can use. */
 const toKept = ({ settle: _settle, supersedes: _supersedes, ...input }: QueuedInput) => input as KeptInput
 
-/** Whether an input is kept across restarts: all are but a group chat's turns, whose rounds end with the server. */
-const isKept = (input: QueuedInput) => !input.groupChatId
+/**
+ * Whether an input is kept across restarts: those of the bot and background lanes. The owner's are not: their messages
+ * are in their DM, and a bot owing them a reply is woken to give it (`owedReplyNote`); a group chat's turns end with its
+ * rounds, as the server stops.
+ */
+const isKept = (input: QueuedInput) => input.lane !== 'owner'
 
 /** The ids of the kept inputs among `inputs`; `#wake` gave each one. */
 const keptIds = (inputs: readonly QueuedInput[]) => inputs.filter(isKept).map((input) => input.id!)
@@ -757,12 +772,35 @@ export class BotRuntime implements AgentRuntime {
     )
     runtime = new BotRuntime(harness, options, images)
     // Read before pi-durable resumes runs, whose replayed calls may queue inputs: those are woken as they are queued.
+    await pruneTakenInputs(options.db)
     const queued = await queuedInputs(options.db)
     harness.resume()
     // Back in the order they were queued; the scheduler sorts them by lane. A run they would have interrupted was
     // resumed by pi-durable, and they wait for it.
     for (const { botId, input } of queued) runtime.#scheduler.wake(botId, input)
+    for (const botId of await botsOwingReplies(options.db)) void runtime.#redriveReply(botId)
     return runtime
+  }
+
+  /**
+   * Wakes a bot that owes the owner a reply as the server starts, once any run pi-durable resumed has ended: that run
+   * may reply yet. It reads `owedReplyNote`, then the owner's messages since its last reply.
+   */
+  async #redriveReply(botId: string) {
+    try {
+      await (await this.#existingHistory(botId))?.waitForIdle(context)
+      const bot = await getBot(this.#options.db, botId)
+      if (!bot || !(await redriveReply(this.#options.db, botId))) return
+      const unanswered = await sinceLastReply(this.#options.db, bot.chatId)
+      await this.wake(botId, {
+        lane: 'owner',
+        text: [owedReplyNote, ...unanswered.map((message) => message.text)].filter(Boolean).join('\n\n'),
+        attachments: unanswered.flatMap((message) => message.attachments),
+        id: `owed-reply:${randomUUID()}`,
+      })
+    } catch (error) {
+      console.error(`[agent] Couldn't wake bot ${botId} for the reply it owes the owner:`, error)
+    }
   }
 
   /** Queues `input` (see `AgentRuntime.wake` and `RunScheduler`). */

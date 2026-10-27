@@ -59,7 +59,7 @@ _Avoid_: Run (for the turn), reply
 The priority class of a bot's pending work: owner, bot, or background (routines and revivals), in that order. A bot works on one thing at a time. The owner's message **supersedes** its current work, whatever it is: that work is interrupted, and picked up again after the owner's messages (a group chat turn is retried); everything else waits. Turns in group chats are in the owner lane. Waiting work is never dropped, except that a group chat turn interrupted three times ends there.
 
 **Queue**:
-A bot's waiting work, in lane order: each piece is an **input**, e.g. a teammate's message or a routine, which wakes the bot once and runs at most once. The queue survives a restart, its inputs waiting for any run that was going on to finish first; a group chat's turns don't, as its rounds end with the server.
+A bot's waiting work, in lane order: each piece is an **input**, e.g. a teammate's message or a routine, which wakes the bot once and runs at most once. Bot and background work survives a restart, waiting for any run that was going on to finish first. The owner's messages don't need to: a bot that owes the owner a reply when the server starts is woken to give it (the reply guarantee, across restarts). A group chat's turns end with its rounds, as the server stops.
 _Avoid_: Inbox, backlog
 
 **Teammate**:

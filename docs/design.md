@@ -152,7 +152,7 @@ As built (#39), in `RunScheduler` (`@openbot/agent`, `run-scheduler.ts`), which 
 
 ### 3.3 The bot's voice
 
-The model's plain text is private. The only way to reach you is `sendMessage` (several short bubbles, attachments, question widgets, cards). If a run that answers your message ends without a `sendMessage`, a reminder forces a reply (Grok's reply guarantee).
+The model's plain text is private. The only way to reach you is `sendMessage` (several short bubbles, attachments, question widgets, cards). If a run that answers your message ends without a `sendMessage`, a reminder forces a reply (Grok's reply guarantee). It holds across restarts as Grok's ack obligations do: your DM message, answer or hand-back marks the bot as owing you a reply (`bots.reply_owed_at`, in the same transaction), and its next message or card in the DM clears it. A bot still owing one when the server starts is woken, once any resumed run has ended, with a recovery note and your messages since its last reply; it gives up after 3 starts.
 
 As built (#40), question cards dismiss as Grok's do:
 
