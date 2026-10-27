@@ -70,6 +70,7 @@ export async function createServerContext({
   screenTickets,
   tools,
   watchdog,
+  fetch,
 }: {
   db: Db
   /** Encrypts system credentials. */
@@ -95,6 +96,8 @@ export async function createServerContext({
   tools?: BotTool[]
   /** When a run the owner's message waits for is interrupted again, then detached; Grok's timings by default. */
   watchdog?: Watchdog
+  /** Downloads the https:// images bots send each other; the global `fetch` by default. */
+  fetch?: typeof globalThis.fetch
 }): Promise<ServerContext> {
   const bus = new EventBus<LiveEvent>()
   const attachments = new AttachmentStore(attachmentsDir)
@@ -142,16 +145,17 @@ export async function createServerContext({
     desktop,
     tools,
     watchdog,
+    fetch,
     async sendMessage(bot, chatId, { text, attachments: files }, idempotencyKey) {
       await postBotMessage(bot, chatId, text, files, idempotencyKey)
     },
-    async messageGroup(sender, group, { text, attachments: files }, idempotencyKey) {
-      const message = await postBotMessage(sender, group.id, text, files, idempotencyKey)
+    async messageGroup(sender, group, { text }, idempotencyKey) {
+      const message = await postBotMessage(sender, group.id, text, [], idempotencyKey)
       // The other members answer it in rounds, as they answer the owner; rounds going on read it in their turns.
       if (message) void rounds.startUnlessPlaying(group.id, message)
     },
     async messageBot(sender, recipient, { text, attachments: files }, idempotencyKey) {
-      // One entry in each DM, each with its own copies of the files: either DM can go with its bot.
+      // One entry in each DM, each with its own copies of the images: either DM can go with its bot.
       const sides = [
         { bot: sender, other: recipient, direction: 'to' as const },
         { bot: recipient, other: sender, direction: 'from' as const },

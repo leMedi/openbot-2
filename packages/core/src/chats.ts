@@ -42,7 +42,10 @@ export async function createGroupChat(db: Db, values: GroupChatValues): Promise<
 /** There is no chat with that id. */
 export class ChatNotFoundError extends Error {}
 
-/** A chat as the sidebar shows it: whether a bot posted since the owner looked, what waits for them, the newest message. */
+/**
+ * A chat as the sidebar shows it: whether a bot posted since the owner looked, what waits for them, the newest message.
+ * Messages between bots never make a DM unread, as Grok's peer messages raise no activity: only what is for the owner does.
+ */
 export type ChatSummary = Chat & {
   /** A group chat's name: its title, or its members' names; null for a DM. */
   name: string | null
@@ -64,7 +67,7 @@ export async function listChatSummaries(db: Db, chatIds?: readonly string[]): Pr
       chat: chats,
       unread: sql<number>`exists (
         select 1 from ${messages}
-        where ${messages.chatId} = ${chats.id} and ${messages.author} = 'bot'
+        where ${messages.chatId} = ${chats.id} and ${messages.author} = 'bot' and ${messages.direction} is null
           and (${chats.lastReadMessageId} is null or ${messages.id} > ${chats.lastReadMessageId})
       )`,
       waitingFor: sql<string | null>`(

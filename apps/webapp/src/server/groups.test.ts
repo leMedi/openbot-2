@@ -492,6 +492,32 @@ describe('a bot posting to a group chat', () => {
     expect(server.providers.pendingTurns).toBe(0)
   })
 
+  it('posts text only, dropping images with a note', async () => {
+    const { server, bots: [rex, ana] } = await startWith('Rex', 'Ana')
+    server.providers.scriptFor('Rex', ...passes())
+    server.providers.scriptFor('Ana', ...passes())
+    const chat = await createGroup(server, [rex!, ana!], 'Hi')
+    await server.client.groups.update({ chatId: chat.id, title: 'Launch' })
+    server.providers.scriptFor(
+      'Rex',
+      callsTools(['message_bot', { to: 'Launch', text: 'The new logo', images: ['logo.png'] }]),
+      callsTools(['sendMessage', { text: 'Posted it.' }]),
+      endsSilently(),
+    )
+    server.providers.scriptFor('Ana', ...passes())
+
+    await server.client.chats.send({ chatId: rex!.chatId, text: 'Show Launch the logo' })
+    await expect.poll(async () => (await transcript(server, chat.id)).length).toBe(2)
+    await server.rounds.idle(chat.id)
+    await expect.poll(async () => (await server.client.bots.list()).some((bot) => bot.working)).toBe(false)
+
+    const [, posted] = await server.client.chats.messages({ chatId: chat.id })
+    expect(posted).toMatchObject({ text: 'The new logo', attachments: [] })
+    expect(JSON.stringify(requestsOf(server, 'Rex').at(-2)!.messages.at(-1))).toContain(
+      'Note: the image was NOT delivered: group posts are text only; send images to a teammate directly.',
+    )
+  })
+
   it("can't post to a group it isn't in", async () => {
     const { server, bots: [rex, ana, max] } = await startWith('Rex', 'Ana', 'Max')
     server.providers.scriptFor('Ana', ...passes())

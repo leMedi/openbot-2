@@ -1,4 +1,5 @@
 import { basename } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { type ImageContent, type Models, type TextContent, Type } from '@earendil-works/pi-ai'
 import {
@@ -142,13 +143,13 @@ export type BotRuntimeOptions = {
    */
   sendMessage(bot: BotWithChat, chatId: string, message: { text: string; attachments: AttachmentFile[] }, idempotencyKey: string): Promise<void>
   /**
-   * Posts a bot's message to a group chat it belongs to, outside its turns, as `sendMessage` posts; the members answer
-   * it in rounds, as they answer the owner.
+   * Posts a bot's message to a group chat it belongs to, outside its turns, as `sendMessage` posts but text only; the
+   * members answer it in rounds, as they answer the owner.
    */
-  messageGroup(sender: BotWithChat, group: Group, message: { text: string; attachments: AttachmentFile[] }, idempotencyKey: string): Promise<void>
+  messageGroup(sender: BotWithChat, group: Group, message: { text: string }, idempotencyKey: string): Promise<void>
   /**
    * Posts one bot's message to another, as `sendMessage` posts: outgoing in the sender's DM and incoming in the
-   * recipient's, each with copies of the files. Returns the recipient's copy, which wakes it.
+   * recipient's, each with copies of the images. Returns the recipient's copy, which wakes it.
    */
   messageBot(
     sender: BotWithChat,
@@ -164,6 +165,8 @@ export type BotRuntimeOptions = {
   onStatus(botId: string, status: BotStatus): void
   /** When a run the owner's message waits for is interrupted again, then detached; Grok's 120 s and 30 s by default. */
   watchdog?: Watchdog
+  /** Downloads the https:// images bots send each other; the global `fetch` by default. */
+  fetch?: typeof fetch
 }
 
 /** `provider/modelId`, split at the first slash since model ids may contain slashes. */
@@ -261,6 +264,49 @@ const computerTools = (images: ImageProcessor): BotTool[] => [
   { surface: 'shell', tool: createWriteTool() },
   { surface: 'shell', tool: createEditTool() },
 ]
+
+/** The largest image message_bot downloads from an https:// URL, and how long it waits for one. */
+const maxDownloadedImageBytes = 20 * 1024 * 1024
+const imageDownloadTimeoutMs = 30_000
+
+/** Downloads an https:// image a bot sends another; throws unless it is an image within the limit. */
+async function downloadImage(fetchImage: typeof fetch, url: string): Promise<Omit<AttachmentFile, 'path'>> {
+  let response: Response
+  try {
+    response = await fetchImage(url, { signal: AbortSignal.timeout(imageDownloadTimeoutMs) })
+  } catch (error) {
+    throw new Error(`Couldn't download ${url}: ${(error as Error).message}`)
+  }
+  if (!response.ok) throw new Error(`Couldn't download ${url}: HTTP ${response.status}`)
+  const mimeType = (response.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase()
+  if (!mimeType.startsWith('image/')) {
+    await response.body?.cancel()
+    throw new Error(`${url} isn't an image (${mimeType || 'no type'}): message_bot only carries images`)
+  }
+  const tooLarge = new Error(`${url} is larger than ${maxDownloadedImageBytes / 1024 / 1024} MB`)
+  if (Number(response.headers.get('content-length')) > maxDownloadedImageBytes) {
+    await response.body?.cancel()
+    throw tooLarge
+  }
+  const chunks: Uint8Array[] = []
+  let size = 0
+  const reader = response.body?.getReader()
+  for (let read = await reader?.read(); read && !read.done; read = await reader!.read()) {
+    size += read.value.byteLength
+    if (size > maxDownloadedImageBytes) {
+      await reader!.cancel()
+      throw tooLarge
+    }
+    chunks.push(read.value)
+  }
+  let name = basename(new URL(url).pathname)
+  try {
+    name = decodeURIComponent(name)
+  } catch {}
+  // Named so the recipient's tools see an image, e.g. a CDN's extensionless `photo` saved as `photo.png`.
+  if (!mimeTypeOf(name).startsWith('image/')) name = `${name || 'image'}.${mimeType.slice('image/'.length).replace(/\+.*/, '').replace('jpeg', 'jpg')}`
+  return { name, mimeType, bytes: Buffer.concat(chunks) }
+}
 
 /** `size` bytes, for people: `512 B`, `12 KB`, `3.4 MB`. */
 function formatSize(size: number): string {
@@ -386,6 +432,32 @@ export class BotRuntime implements AgentRuntime {
           return { name, mimeType: mimeTypeOf(name), path: file.path, bytes: file.bytes }
         }),
       )
+    /**
+     * The images a bot sends another, read before posting so a bad one fails the call and posts nothing: image files on
+     * its computer, and https:// images, downloaded into the recipient's uploads folder as the owner's files are.
+     */
+    const readImages = async (sender: BotWithChat, recipient: BotWithChat, sources: readonly string[]): Promise<AttachmentFile[]> => {
+      const read = await Promise.all(
+        sources.map(async (source) => {
+          if (/^https:\/\//i.test(source)) return downloadImage(options.fetch ?? fetch, source)
+          if (/^[a-z][a-z0-9+.-]*:\/\//i.test(source) && !/^file:/i.test(source)) {
+            throw new Error(`${source}: an image is a file on your computer or an https:// URL`)
+          }
+          const [file] = await readAttachments(sender, [/^file:/i.test(source) ? fileURLToPath(source) : source])
+          if (!file!.mimeType.startsWith('image/')) {
+            throw new Error(
+              `${source} isn't an image: message_bot only carries images. Put other files in ${options.computer.sharedFolder} and say where.`,
+            )
+          }
+          return file!
+        }),
+      )
+      return Promise.all(
+        read.map(async (file): Promise<AttachmentFile> =>
+          'path' in file ? (file as AttachmentFile) : { ...file, path: await options.computer.saveUpload(recipient, file.name, file.bytes) },
+        ),
+      )
+    }
     const attachmentsParameter = Type.Optional(
       Type.Array(Type.String(), {
         description: 'Paths of files on your computer to attach, absolute or relative to your folder',
@@ -444,11 +516,19 @@ export class BotRuntime implements AgentRuntime {
         name: 'message_bot',
         description:
           "Send one of your teammates, the owner's other bots, a message, or post to a group chat you are in. It returns at " +
-          'once: never wait for an answer; a reply, if any, wakes you later. The owner sees it in both your chats, or in the group.',
+          'once: never wait for an answer; a reply, if any, wakes you later. The owner sees it in both your chats, or in the group. ' +
+          'A teammate sees the images you send, as it sees the owner\'s; group posts are text only.',
         parameters: Type.Object({
           to: Type.String({ description: "The teammate's name, e.g. Rex, or a group chat's name, e.g. Launch team" }),
-          text: Type.String({ description: `The message, in Markdown, at most ${maxBotMessageLength} characters; may be empty when you attach files` }),
-          attachments: attachmentsParameter,
+          text: Type.String({ description: `The message, in Markdown, at most ${maxBotMessageLength} characters; may be empty when you send images` }),
+          images: Type.Optional(
+            Type.Array(Type.String(), {
+              description:
+                'Images for a teammate, e.g. a screenshot: paths of image files on your computer, absolute or relative to your folder, or https:// URLs. ' +
+                'Only images; a group post drops them.',
+              maxItems: maxAttachments,
+            }),
+          ),
           priority: Type.Optional(
             Type.Boolean({
               description: "Only when it can't wait: it goes ahead of their other work and interrupts it, unless they are working for the owner",
@@ -472,20 +552,23 @@ export class BotRuntime implements AgentRuntime {
           if (group && (await runtime!.inputOf(api.conversationId))?.groupChatId === group.id) {
             throw new Error(`It is your turn in "${group.name}": reply there with sendMessage.`)
           }
-          const paths = args.attachments ?? []
-          if (!args.text.trim() && !paths.length) throw new Error('Write a message or attach a file')
+          const sources = args.images ?? []
+          if (!args.text.trim() && (group || !sources.length)) throw new Error(group ? 'Write a message: group posts are text only' : 'Write a message or send an image')
           if (args.text.length > maxBotMessageLength) {
             throw new Error(
               `Messages to bots are at most ${maxBotMessageLength} characters; this one has ${args.text.length}. ` +
-                'Shorten it, or write the details to a file and attach it.',
+                `Shorten it, or write the details to a file in ${options.computer.sharedFolder} and say where.`,
             )
           }
-          const attachments = await readAttachments(sender, paths)
-          // Not a bot, so a group chat.
+          // Not a bot, so a group chat: text only, as Grok's group posts are.
           if (!recipient) {
-            await options.messageGroup(sender, group!, { text: args.text, attachments }, `${api.conversationId}:${api.callId}`)
-            return { output: [{ type: 'text', text: `Posted in "${group!.name}". Don't wait for answers: the members answer in turn.` }] }
+            await options.messageGroup(sender, group!, { text: args.text }, `${api.conversationId}:${api.callId}`)
+            const dropped = sources.length
+              ? ` Note: the image${sources.length === 1 ? ' was' : 's were'} NOT delivered: group posts are text only; send images to a teammate directly.`
+              : ''
+            return { output: [{ type: 'text', text: `Posted in "${group!.name}". Don't wait for answers: the members answer in turn.${dropped}` }] }
           }
+          const attachments = await readImages(sender, recipient, sources)
           const incoming = await options.messageBot(sender, recipient, { text: args.text, attachments }, `${api.conversationId}:${api.callId}`)
           const priority = args.priority ?? false
           try {
