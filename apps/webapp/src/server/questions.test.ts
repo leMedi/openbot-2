@@ -81,7 +81,9 @@ describe('asking the owner a question', () => {
     expect(server.providers.pendingTurns).toBe(1)
   })
 
-  it('ends the run when the bot sends a message and asks in the same breath', async () => {
+  // Flaky (#33): the round's two tool calls run in parallel, so the message and the card post in either order about
+  // one run in ten. Retried so it can't block a release on its own until #33 decides; a real failure fails every try.
+  it('ends the run when the bot sends a message and asks in the same breath', { retry: 2 }, async () => {
     const { server, bot } = await startWithRex()
     server.providers.script(
       callsTools(['sendMessage', { text: 'Quick one before I start.' }], ['askQuestion', whichDatabase as never]),

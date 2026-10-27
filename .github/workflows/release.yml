@@ -1,0 +1,289 @@
+# Every push to main is a release (design §2.4, ADR 0004):
+#   test       typecheck and the test suite
+#   computer   the computer's contract suite on the real computer, in the runtime image (dev target)
+#   package    builds release 0.<minor>.<run> (minor from VERSION) and smoke-tests it: archive, release.json, SHA256SUMS
+#   image      when the runtime image's definition changed (a new r<N>), builds it for amd64 and arm64 with the release
+#              embedded, smoke-tests each, and pushes it as r<N> and latest
+#   publish    the GitHub Release v<version> (archive, release.json, SHA256SUMS, compose.yml), once everything above
+#              passed
+# Pull requests (and manual runs off main) run the tests and the packaging, and publish nothing. Runs on main queue up:
+# a push that arrives while another waits replaces it, and its release includes both. Shared config: release.env, which the repository
+# variables OPENBOT_SITE_URL and OPENBOT_RUNTIME_IMAGE override; ARM64_RUNNER picks the arm64 build's runner.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # One release at a time, in push order; superseded pull request runs are cancelled.
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+
+jobs:
+  test:
+    name: Typecheck and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  computer:
+    name: Computer contract (runtime image)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the dev image
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          target: dev
+          tags: openbot-runtime:dev
+          load: true
+          cache-from: type=gha,scope=dev
+          cache-to: type=gha,scope=dev,mode=max
+      - name: Start the dev environment
+        run: docker compose -f docker/compose.dev.yml up --detach --wait --wait-timeout 900
+      # The dev target is the runtime image's system plus the toolchain the tests need. The suite skips itself off the
+      # real computer, so the run fails unless every test ran.
+      - name: Run computer.image.test.ts on the real computer
+        run: |
+          docker compose -f docker/compose.dev.yml exec -T --user openbot-server openbot \
+            pnpm --filter @openbot/webapp exec vitest run src/server/computer.image.test.ts \
+            --reporter=default --reporter=json --outputFile=/tmp/computer-contract.json
+          docker compose -f docker/compose.dev.yml exec -T openbot node -e '
+            const { numTotalTests, numPassedTests } = require("/tmp/computer-contract.json")
+            if (numTotalTests === 0 || numPassedTests !== numTotalTests) {
+              console.error(`only ${numPassedTests} of ${numTotalTests} tests ran and passed`)
+              process.exit(1)
+            }'
+      - name: Server logs
+        if: failure()
+        run: docker compose -f docker/compose.dev.yml logs --no-color
+      - if: always()
+        run: docker compose -f docker/compose.dev.yml down --volumes
+
+  package:
+    name: Package the release
+    needs: [test, computer]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      runtime: ${{ steps.release.outputs.runtime }}
+      runtime-repository: ${{ steps.release.outputs.runtime-repository }}
+      image-exists: ${{ steps.image.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The version's history: the runtime image revision, the previous release (its tag), the changelog.
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Build the release
+        id: release
+        run: node scripts/src/cli.ts package --out release
+        env:
+          OPENBOT_SITE_URL: ${{ vars.OPENBOT_SITE_URL }}
+          OPENBOT_RUNTIME_IMAGE: ${{ vars.OPENBOT_RUNTIME_IMAGE }}
+      - name: Smoke-test the release
+        run: scripts/smoke-release.sh "${ARCHIVE}" "${VERSION}"
+        env:
+          ARCHIVE: ${{ steps.release.outputs.archive }}
+          VERSION: ${{ steps.release.outputs.version }}
+      - run: cat release/release.json
+      - uses: actions/upload-artifact@v5
+        with:
+          name: release
+          path: |
+            release/*.tar.gz
+            release/release.json
+            release/SHA256SUMS
+            release/compose.yml
+            release/notes.md
+          if-no-files-found: error
+          retention-days: 14
+      - name: Is the runtime image already published?
+        id: image
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          IMAGE: ${{ steps.release.outputs.runtime-image }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        # Only a registry saying the image isn't there means "build it" (a package not created yet answers "denied");
+        # any other error fails the run rather than re-tagging r<N>.
+        run: |
+          echo "${TOKEN}" | docker login ghcr.io --username "${ACTOR}" --password-stdin
+          if answer="$(docker buildx imagetools inspect "${IMAGE}" 2>&1)"; then
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+            echo "${IMAGE} is published already; its definition hasn't changed"
+          elif grep -qiE 'not found|manifest unknown|name unknown|denied' <<< "${answer}"; then
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+            echo "${IMAGE} is new: building it"
+          else
+            echo "Can't tell whether ${IMAGE} exists: ${answer}" >&2
+            exit 1
+          fi
+
+  image:
+    name: Runtime image (${{ matrix.arch }})
+    needs: package
+    if: needs.package.outputs.image-exists == 'false'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ${{ vars.ARM64_RUNNER || 'ubuntu-24.04-arm' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: release
+          path: release
+      # Only used when the runner isn't arm64 itself (ARM64_RUNNER set to an amd64 runner): emulates the other arch.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          target: runtime
+          platforms: linux/${{ matrix.arch }}
+          build-contexts: release=release
+          tags: openbot-runtime:smoke
+          load: true
+          cache-from: type=gha,scope=runtime-${{ matrix.arch }}
+          cache-to: type=gha,scope=runtime-${{ matrix.arch }},mode=max
+      - name: Smoke-test the image
+        run: scripts/smoke-image.sh openbot-runtime:smoke "${VERSION}"
+        env:
+          VERSION: ${{ needs.package.outputs.version }}
+      # The same build again, from the cache the tested one just filled, pushed untagged; image-tags names it.
+      - name: Push by digest
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          target: runtime
+          platforms: linux/${{ matrix.arch }}
+          build-contexts: release=release
+          outputs: type=image,name=${{ needs.package.outputs.runtime-repository }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=runtime-${{ matrix.arch }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.package.outputs.runtime }}
+      - name: Keep the digest
+        run: |
+          mkdir digests
+          touch "digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+      - uses: actions/upload-artifact@v5
+        with:
+          name: digest-${{ matrix.arch }}
+          path: digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  image-tags:
+    name: Tag the runtime image
+    needs: [package, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: digest-*
+          path: digests
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag both architectures as r<N> and latest
+        working-directory: digests
+        env:
+          REPOSITORY: ${{ needs.package.outputs.runtime-repository }}
+          RUNTIME: ${{ needs.package.outputs.runtime }}
+        run: |
+          sources=()
+          for digest in *; do sources+=("${REPOSITORY}@sha256:${digest}"); done
+          docker buildx imagetools create --tag "${REPOSITORY}:${RUNTIME}" --tag "${REPOSITORY}:latest" "${sources[@]}"
+          docker buildx imagetools inspect "${REPOSITORY}:${RUNTIME}"
+
+  publish:
+    name: Publish the GitHub Release
+    needs: [package, image, image-tags]
+    # The image jobs are skipped when the image exists already; any failure above blocks the release.
+    if: >-
+      always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.package.result == 'success' &&
+      (needs.image.result == 'skipped' || (needs.image.result == 'success' && needs.image-tags.result == 'success'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: release
+          path: release
+      # A rerun of the same run has the same version: its release gets the files again.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.package.outputs.tag }}
+          VERSION: ${{ needs.package.outputs.version }}
+          SHA: ${{ github.sha }}
+        run: |
+          files=(release/*.tar.gz release/release.json release/SHA256SUMS release/compose.yml)
+          if gh release view "${TAG}" > /dev/null 2>&1; then
+            gh release upload "${TAG}" "${files[@]}" --clobber
+          else
+            gh release create "${TAG}" "${files[@]}" --target "${SHA}" \
+              --title "OpenBot ${VERSION}" --notes-file release/notes.md --latest
+          fi

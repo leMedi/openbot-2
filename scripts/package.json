@@ -1,0 +1,14 @@
+{
+  "name": "@openbot/scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

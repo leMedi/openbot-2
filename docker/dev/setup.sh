@@ -27,7 +27,7 @@ dev_setup() {
   fi
 
   # Every workspace package's node_modules must be a volume: otherwise Linux binaries would land in the host's checkout.
-  for package in "${repo}" "${repo}"/apps/* "${repo}"/packages/*; do
+  for package in "${repo}" "${repo}"/apps/* "${repo}"/packages/* "${repo}"/scripts; do
     [[ -f "${package}/package.json" ]] || continue
     if ! mountpoint -q "${package}/node_modules"; then
       echo "openbot dev: ${package#"${repo}"/}/node_modules is not a volume; add it to docker/compose.dev.yml" >&2

@@ -1,8 +1,12 @@
 # syntax=docker/dockerfile:1
 # OpenBot's one container (ADR 0002): the server, every bot's screen and the bots' shell on one computer.
-#   runtime  what users run: Ubuntu, Node, Chromium, Xvfb, Openbox, x11vnc + websockify, AT-SPI, cua-driver, supervisord
-#   dev      runtime plus the toolchain; docker/compose.dev.yml runs the bind-mounted repo with hot reload
-# Build from this folder (`docker build docker`); nothing from the repo is copied in.
+#   runtime  what users run: Ubuntu, Node, Chromium, Xvfb, Openbox, x11vnc + websockify, AT-SPI, cua-driver, supervisord,
+#            and the release it was built with (design §2.4)
+#   dev      the same system plus the toolchain, without a release; docker/compose.dev.yml runs the bind-mounted repo
+#            with hot reload
+# Build from this folder (`docker build docker`); nothing from the repo is copied in but the release, which the runtime
+# target takes as a build context: `docker build docker --target runtime --build-context release=<dir>`, where <dir>
+# holds a release built by `pnpm release:package --out <dir>`.
 
 ARG UBUNTU_VERSION=24.04
 
@@ -45,7 +49,7 @@ RUN case "${TARGETARCH}" in \
  && mkdir /out \
  && tar -xzf "${tarball}" -C /out --no-same-owner cua-driver
 
-FROM ubuntu:${UBUNTU_VERSION} AS runtime
+FROM ubuntu:${UBUNTU_VERSION} AS base
 
 ARG TARGETARCH
 ARG NODE_VERSION=24.22.1
@@ -119,6 +123,7 @@ COPY entrypoint.sh /usr/local/bin/openbot-entrypoint
 COPY start-server.sh /usr/local/bin/openbot-server
 COPY desktopd.conf /etc/supervisor/conf.d/desktopd.conf
 COPY start-desktopd.sh /usr/local/bin/openbot-desktopd
+COPY install-release.sh /usr/local/bin/openbot-install-release
 RUN mkdir -p /etc/openbot/entrypoint.d
 
 EXPOSE 3000
@@ -128,7 +133,15 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --start-interval=2s \
 ENTRYPOINT ["openbot-entrypoint"]
 CMD ["supervisord", "--nodaemon", "--configuration", "/etc/supervisor/supervisord.conf"]
 
-FROM runtime AS dev
+# What users run, with the release it was built with: `release` is the build context holding that release's archive,
+# release.json and SHA256SUMS (`--build-context release=<dir>`), so this target can't be built without one. The release
+# is installed into $OPENBOT_APP_DIR (the openbot-app volume) on start, so a fresh install starts without downloading
+# code (docker/install-release.sh).
+FROM base AS runtime
+COPY --from=release / /usr/local/share/openbot/release/
+RUN test -f /usr/local/share/openbot/release/release.json
+
+FROM base AS dev
 
 ARG PNPM_VERSION=12.6.0
 
