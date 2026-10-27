@@ -34,6 +34,7 @@ async function open(): Promise<ServerContext> {
     providers,
     agentStoragePath: join(paths.dataDir, 'agent.sqlite'),
     computer: openBotComputer({ home: paths.home }),
+    attachmentsDir: join(paths.dataDir, 'attachments'),
   })
 }
 

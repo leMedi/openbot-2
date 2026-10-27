@@ -56,7 +56,7 @@ describe('system credentials', () => {
       model: null,
     })
     server.providers.script(callsTools(['runShell', { command: 'ls' }], ['sendMessage', { text: 'Hi' }]), endsSilently())
-    const sent = await server.client.chats.send({ chatId: bot.chatId, text: 'Hello' })
+    const sent = await server.client.chats.send({ chatId: bot.chatId, text: 'Hello', files: [new File(['notes'], 'notes.txt')] })
     await expect.poll(async () => (await server.client.chats.messages({ chatId: bot.chatId })).length).toBe(2)
     await expect.poll(async () => (await server.client.bots.list())[0]!.working).toBe(false)
     server.providers.script(callsTools(['askQuestion', { prompt: 'Which one?', options: [{ label: 'This' }] }]))
@@ -92,6 +92,7 @@ describe('system credentials', () => {
       'chats.setPinned': await server.client.chats.setPinned({ chatIds: [bot.chatId] }),
       'chats.messages': await server.client.chats.messages({ chatId: bot.chatId }),
       'chats.send': sent,
+      'chats.attachment': await (await server.client.chats.attachment({ messageId: sent.id, attachmentId: sent.attachments[0]!.id })).body.text(),
       'chats.answer': await server.client.chats.answer({ messageId: question.id, answer: { option: 0 } }),
       events: null,
       openapi: await (await server.fetch('/api/openapi.json')).json(),

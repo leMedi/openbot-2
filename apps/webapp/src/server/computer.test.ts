@@ -107,6 +107,7 @@ describe('bots on the computer', () => {
     const system = JSON.stringify(server.providers.requests.at(-1)!.messages)
     expect(system).toContain(join(server.home, 'bots', bot.id))
     expect(system).toContain(join(server.home, 'shared'))
+    expect(system).toContain(join(server.home, 'bots', bot.id, 'uploads'))
     expect(system).toContain(`Ada: ${join(server.home, 'bots', ada.id)}`)
     expect(system).toContain('sudo')
   })

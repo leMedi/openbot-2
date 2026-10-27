@@ -1,3 +1,5 @@
+import type { Attachment } from '@openbot/db'
+
 /** Priority class of a bot's pending work, highest first. */
 export const lanes = ['owner', 'bot', 'background'] as const
 export type Lane = (typeof lanes)[number]
@@ -6,6 +8,8 @@ export type Lane = (typeof lanes)[number]
 export type BotInput = {
   lane: Lane
   text: string
+  /** Files that came with it, already on the computer; the bot is told where, and sees images. */
+  attachments?: readonly Attachment[]
   /** Makes waking again with the same id a no-op, e.g. the id of the message that woke the bot. */
   id?: string
 }

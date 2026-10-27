@@ -1,7 +1,9 @@
+import { basename } from 'node:path'
 import { SignInNotFoundError } from '@openbot/agent'
 import { contract } from '@openbot/api-contract'
 import {
   answerQuestion,
+  type AttachmentFile,
   type BotWithChat,
   ChatNotFoundError,
   listChatSummaries,
@@ -14,6 +16,7 @@ import {
   getBot,
   getChat,
   getMessage,
+  mimeTypeOf,
   NameTakenError,
   listAuditEntries,
   listBots,
@@ -31,6 +34,7 @@ import {
   writeOrchestratorModes,
 } from '@openbot/core'
 import { implement, ORPCError } from '@orpc/server'
+import { generateContentDisposition } from '@orpc/standard-server'
 import { publishChat, type ServerContext } from './context.ts'
 import { toAuditEntryInfo, toBotInfo, toChatInfo, toMessageInfo } from './views.ts'
 
@@ -128,6 +132,7 @@ export const router = os.router({
       if (!bot) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
       // Its pi history stays orphaned in pi-durable's storage, which can't delete a conversation yet; no bot reaches it.
       await context.runtime.forget(bot)
+      await context.attachments.removeChat(bot.chatId)
       context.bus.publish({ type: 'bot.deleted', botId: bot.id, chatId: bot.chatId })
     }),
 
@@ -179,12 +184,46 @@ export const router = os.router({
       const bot = chat?.botId ? await getBot(context.db, chat.botId) : undefined
       if (!bot) throw new ORPCError('NOT_FOUND', { message: 'No such chat' })
       await assertCanRun(context, bot)
-      const { message } = await postMessage(context.db, { chatId: chat!.id, author: 'owner', authorName: 'You', text: input.text })
+      // Saved one at a time, so two files of one name get distinct names.
+      const files: AttachmentFile[] = []
+      for (const file of input.files) {
+        const bytes = new Uint8Array(await file.arrayBuffer())
+        const path = await context.computer.saveUpload(bot, file.name, bytes)
+        files.push({ name: basename(path), mimeType: file.type || mimeTypeOf(file.name), path, bytes })
+      }
+      const attachments = await context.attachments.save(chat!.id, files)
+      const { message } = await postMessage(context.db, {
+        chatId: chat!.id,
+        author: 'owner',
+        authorName: 'You',
+        text: input.text,
+        attachments,
+      }).catch(async (error) => {
+        // The uploads stay on the computer; only the copies of a message never posted go.
+        await context.attachments.discard(chat!.id, attachments)
+        throw error
+      })
       const info = toMessageInfo(message)
       context.bus.publish({ type: 'message.created', message: info })
       await publishChat(context, chat!.id)
-      await context.runtime.wake(bot.id, { lane: 'owner', text: input.text, id: message.id })
+      await context.runtime.wake(bot.id, { lane: 'owner', text: input.text, attachments, id: message.id })
       return info
+    }),
+
+    attachment: os.chats.attachment.handler(async ({ context, input }) => {
+      const message = await getMessage(context.db, input.messageId)
+      const attachment = message?.attachments.find((entry) => entry.id === input.attachmentId)
+      const bytes = attachment && (await context.attachments.read(message!.chatId, attachment.id))
+      if (!bytes) throw new ORPCError('NOT_FOUND', { message: 'No such attachment' })
+      return {
+        headers: {
+          // Always a download, and never run as a page of this origin, whatever the file holds.
+          'content-disposition': generateContentDisposition(attachment.name, 'attachment'),
+          'content-security-policy': 'sandbox',
+          'x-content-type-options': 'nosniff',
+        },
+        body: new File([bytes], attachment.name, { type: attachment.mimeType }),
+      }
     }),
 
     answer: os.chats.answer.handler(async ({ context, input }) => {

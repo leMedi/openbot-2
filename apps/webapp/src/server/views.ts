@@ -15,6 +15,7 @@ export function toMessageInfo(message: Message): MessageInfo {
     botId: message.authorBotId,
     authorName: message.author === 'bot' && !message.authorBotId ? deletedAuthorName(message.authorName) : message.authorName,
     text: message.text,
+    attachments: message.attachments,
     card: toCardInfo(message),
     createdAt: message.createdAt.getTime(),
   }
@@ -36,7 +37,13 @@ export function toChatInfo(chat: ChatSummary): ChatInfo {
     pinnedPosition: chat.pinnedPosition,
     unread: chat.unread,
     waitingFor: chat.waitingFor,
-    lastMessage: last && { author: last.author, authorName: last.authorName, text: last.text, createdAt: last.createdAt },
+    lastMessage: last && {
+      author: last.author,
+      authorName: last.authorName,
+      text: last.text,
+      attachments: last.attachments,
+      createdAt: last.createdAt,
+    },
   }
 }
 

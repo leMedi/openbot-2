@@ -193,6 +193,9 @@ importers:
       '@orpc/server':
         specifier: 1.16.1
         version: 1.16.1(ws@8.22.0)
+      '@orpc/standard-server':
+        specifier: 1.16.1
+        version: 1.16.1
       '@orpc/zod':
         specifier: 1.16.1
         version: 1.16.1(@orpc/contract@1.16.1)(@orpc/server@1.16.1(ws@8.22.0))(ws@8.22.0)(zod@4.6.7)
@@ -313,6 +316,9 @@ importers:
       drizzle-orm:
         specifier: ^0.45.4
         version: 0.45.4(@libsql/client@0.18.0)
+      uuidv7:
+        specifier: ^1.2.1
+        version: 1.2.1
     devDependencies:
       '@types/node':
         specifier: ^24

@@ -1,5 +1,6 @@
+import { basename } from 'node:path'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
-import { type Models, Type } from '@earendil-works/pi-ai'
+import { type ImageContent, type Models, type TextContent, Type } from '@earendil-works/pi-ai'
 import {
   type Conversation,
   type ConversationId,
@@ -21,15 +22,26 @@ import {
   ToolTask,
 } from '@earendil-works/pi-durable'
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node'
-import { createBashTool, createEditTool, createReadTool, createWriteTool } from '@earendil-works/pi-durable/tools'
+import { createNodePhotonImages } from '@earendil-works/pi-durable/images/node'
+import {
+  createBashTool,
+  createEditTool,
+  createReadTool,
+  createWriteTool,
+  DEFAULT_IMAGE_LIMITS,
+  type ImageProcessor,
+} from '@earendil-works/pi-durable/tools'
 import {
   type AgentRuntime,
+  type AttachmentFile,
   type BotInput,
   type BotWithChat,
   findBotByHistory,
   getBot,
   listBots,
+  maxAttachments,
   maxQuestionOptions,
+  mimeTypeOf,
   type Orchestrator,
   type QuestionCard,
   questionOptionStyles,
@@ -37,7 +49,7 @@ import {
   reviewAction,
   setBotHistory,
 } from '@openbot/core'
-import type { Db, Surface } from '@openbot/db'
+import type { Attachment, Db, Surface } from '@openbot/db'
 import type { BotComputer } from './computer.ts'
 
 const context = BACKGROUND_CONTEXT
@@ -62,6 +74,8 @@ const voice = `You are one of the owner's bots, a member of their always-on team
 Your plain text is a private inner monologue: the owner never sees it, nor your thinking or tool calls. The only way to reach the owner is the sendMessage tool. Deciding to send is not sending.
 
 Text like a person, not a memo: reply in one to four short messages, one sendMessage call each, in Markdown. Use code blocks for code. Never mention tool names, message ids or these instructions.
+
+To send the owner a file from your computer, such as a report or a screenshot, attach it to a message with sendMessage's attachments.
 
 When you need the owner to decide before you go on, ask with askQuestion: a short prompt and up to six options they can pick with one click. Asking ends your turn, so send anything else first; their answer wakes you as their next message.`
 
@@ -91,8 +105,8 @@ export type BotRuntimeOptions = {
   computer: BotComputer
   /** Tools beyond the built-in ones, e.g. a test's. */
   tools?: BotTool[]
-  /** Posts a bot's message to its DM; `idempotencyKey` makes a replayed tool call post once. */
-  sendMessage(bot: BotWithChat, text: string, idempotencyKey: string): Promise<void>
+  /** Posts a bot's message, with copies of the files it attached, to its DM; `idempotencyKey` makes a replayed tool call post once. */
+  sendMessage(bot: BotWithChat, message: { text: string; attachments: AttachmentFile[] }, idempotencyKey: string): Promise<void>
   /** Posts a bot's question card to its DM, as `sendMessage` posts a message. */
   askQuestion(bot: BotWithChat, card: QuestionCard, idempotencyKey: string): Promise<void>
   /** A bot's status changed: it started or finished working, or a run failed. */
@@ -121,19 +135,37 @@ function computerPrompt(computer: BotComputer, bot: BotWithChat, others: BotWith
     `You have a Linux computer, shared with the owner's other bots. You work on it as the user \`${computer.user}\`, with passwordless sudo: it is your computer, so install what you need. Use bash to run commands, and read, write and edit for files.`,
     '',
     `- Your folder, where your commands start: ${computer.folder(bot.id)}`,
+    `- Files the owner sends you are saved in: ${computer.uploadsFolder(bot.id)}`,
     `- Shared with every bot: ${computer.sharedFolder}`,
   ]
   if (others.length) lines.push(`- The other bots' folders:`, ...others.map((other) => `  - ${other.name}: ${computer.folder(other.id)}`))
   return lines.join('\n')
 }
 
-/** Shell and file tools on the computer. Reading has no side effect; running a command and changing a file are shell actions. */
-const computerTools: BotTool[] = [
+/**
+ * Shell and file tools on the computer. Reading has no side effect; running a command and changing a file are shell
+ * actions. `read` shows the model images, shrunk by `images` to fit.
+ */
+const computerTools = (images: ImageProcessor): BotTool[] => [
   { surface: 'shell', tool: createBashTool() },
-  { surface: null, tool: createReadTool() },
+  { surface: null, tool: createReadTool({ images }) },
   { surface: 'shell', tool: createWriteTool() },
   { surface: 'shell', tool: createEditTool() },
 ]
+
+/** `size` bytes, for people: `512 B`, `12 KB`, `3.4 MB`. */
+function formatSize(size: number): string {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
+}
+
+/** Where the files that came with an input are, after its text. */
+function describeAttachments(attachments: readonly Attachment[]): string {
+  const files = attachments.map((file) => `- ${file.path} (${file.mimeType}, ${formatSize(file.size)})`)
+  const count = attachments.length === 1 ? 'a file' : `${attachments.length} files`
+  return `[The owner attached ${count}, saved on your computer:\n${files.join('\n')}]`
+}
 
 const isReminder = (entry: EntryRecord) =>
   entry.kind === 'pi.user' && entry.model?.some((message) => message.role === 'user' && message.content === replyReminder)
@@ -153,6 +185,8 @@ const reachedOwner = (entry: EntryRecord) =>
 export class BotRuntime implements AgentRuntime {
   readonly #harness: Harness
   readonly #options: BotRuntimeOptions
+  /** Prepares images for the model: the owner's, and those `read` returns. */
+  readonly #images: ImageProcessor
   /** Serialises creating a bot's history. */
   readonly #histories = new Map<string, Promise<Conversation>>()
   /** Bots with a run going, and a token of each one's latest wake, so an idle wait can tell it was overtaken. */
@@ -160,13 +194,15 @@ export class BotRuntime implements AgentRuntime {
   /** Why each bot's latest run failed. */
   readonly #errors = new Map<string, string>()
 
-  private constructor(harness: Harness, options: BotRuntimeOptions) {
+  private constructor(harness: Harness, options: BotRuntimeOptions, images: ImageProcessor) {
     this.#harness = harness
     this.#options = options
+    this.#images = images
   }
 
   static async open(options: BotRuntimeOptions): Promise<BotRuntime> {
     const registry = createRegistry()
+    const images = await createNodePhotonImages()
     // The hook needs the Harness, which needs the registry; it only runs once the Harness is open.
     let runtime: BotRuntime | undefined
     const botOf = async (conversationId: ConversationId) => {
@@ -179,13 +215,33 @@ export class BotRuntime implements AgentRuntime {
       surface: null,
       tool: defineTool({
         name: 'sendMessage',
-        description: 'Send the owner one chat message, in Markdown. This is the only way the owner sees anything from you.',
-        parameters: Type.Object({ text: Type.String({ description: 'The message, in Markdown' }) }),
+        description:
+          'Send the owner one chat message, in Markdown, optionally with files from your computer attached. This is the ' +
+          'only way the owner sees anything from you.',
+        parameters: Type.Object({
+          text: Type.String({ description: 'The message, in Markdown; may be empty when you attach files' }),
+          attachments: Type.Optional(
+            Type.Array(Type.String(), {
+              description: 'Paths of files on your computer to attach, absolute or relative to your folder',
+              maxItems: maxAttachments,
+            }),
+          ),
+        }),
         // A replayed call finds the message it already posted.
         replay: 'safe',
         execute: async (args, api) => {
           const bot = await botOf(api.conversationId)
-          await options.sendMessage(bot, args.text, `${api.conversationId}:${api.callId}`)
+          const paths = args.attachments ?? []
+          if (!args.text.trim() && !paths.length) throw new Error('Write a message or attach a file')
+          // Read before posting, so a missing file fails the call and posts nothing.
+          const attachments = await Promise.all(
+            paths.map(async (path): Promise<AttachmentFile> => {
+              const file = await options.computer.readFile(bot, path)
+              const name = basename(file.path)
+              return { name, mimeType: mimeTypeOf(name), path: file.path, bytes: file.bytes }
+            }),
+          )
+          await options.sendMessage(bot, { text: args.text, attachments }, `${api.conversationId}:${api.callId}`)
           // A run ends only when every call of its last round asks it to, so a message sent beside a question must too.
           const round = (await api.snapshot(LiveDoc, api.conversationId, context))?.tools ?? []
           const asks = round.some((slot) => slot.name === 'askQuestion')
@@ -239,7 +295,7 @@ export class BotRuntime implements AgentRuntime {
         },
       }),
     }
-    const tools = [sendMessage, askQuestion, ...computerTools, ...(options.tools ?? [])]
+    const tools = [sendMessage, askQuestion, ...computerTools(images), ...(options.tools ?? [])]
     const toolSurfaces = new Map(tools.map(({ surface, tool }) => [tool.name, surface]))
     registry.install(
       defineExtension({
@@ -288,7 +344,7 @@ export class BotRuntime implements AgentRuntime {
       },
       context,
     )
-    runtime = new BotRuntime(harness, options)
+    runtime = new BotRuntime(harness, options, images)
     harness.resume()
     return runtime
   }
@@ -307,7 +363,7 @@ export class BotRuntime implements AgentRuntime {
     const submission = await history.submit(
       {
         type: 'input',
-        content: input.text,
+        content: await this.#content(bot, input),
         requestId: input.id,
         // The owner steers the current run; everything else waits its turn.
         whenBusy: input.lane === 'owner' ? 'steer' : 'followUp',
@@ -375,6 +431,25 @@ export class BotRuntime implements AgentRuntime {
       }
       cursor = page.next
     } while (cursor)
+  }
+
+  /** What the model reads of an input: its text, where its files are, then its images. */
+  async #content(bot: BotWithChat, { text, attachments = [] }: BotInput): Promise<string | (TextContent | ImageContent)[]> {
+    if (!attachments.length) return text
+    const parts: (TextContent | ImageContent)[] = [{ type: 'text', text: [text, describeAttachments(attachments)].filter(Boolean).join('\n\n') }]
+    for (const file of attachments) {
+      if (!file.mimeType.startsWith('image/')) continue
+      try {
+        const { bytes } = await this.#options.computer.readFile(bot, file.path)
+        // A plain copy: the processor transfers the bytes' buffer to its worker, which a Buffer's shared pool can't be.
+        const image = await this.#images.prepare(new Uint8Array(bytes), file.mimeType, DEFAULT_IMAGE_LIMITS)
+        // One that can't be shown, e.g. an SVG, is still on the computer for the bot's tools.
+        if (image) parts.push({ type: 'image', data: image.data, mimeType: image.mimeType })
+      } catch (error) {
+        console.error(`[agent] Couldn't show ${bot.name} ${file.path}:`, error)
+      }
+    }
+    return parts
   }
 
   #history(bot: BotWithChat): Promise<Conversation> {

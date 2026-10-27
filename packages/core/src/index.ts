@@ -1,3 +1,4 @@
+export { AttachmentStore, type AttachmentFile, maxAttachmentBytes, maxAttachments, mimeTypeOf, safeFileName } from './attachments.ts'
 export { EventBus, type Stamp, type Stamped } from './events.ts'
 export { SecretBox } from './secret-box.ts'
 export { groupRoundRules } from './group-rules.ts'

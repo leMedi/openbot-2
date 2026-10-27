@@ -43,6 +43,7 @@ async function open(dir: string, secretKey: string, { shell, realComputer, ...op
     providers: providers.providers,
     agentStoragePath: join(dir, 'agent.sqlite'),
     computer: realComputer ? openBotComputer({ home }) : fakeBotComputer(computer, home),
+    attachmentsDir: join(dir, 'attachments'),
     ...options,
   })
   const client = createRouterClient(router, { context })
