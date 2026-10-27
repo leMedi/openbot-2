@@ -174,6 +174,13 @@ export const messages = sqliteTable(
   (table) => [index('messages_chat_idx').on(table.chatId, table.id)],
 )
 
+/**
+ * What an audit entry records: a side-effecting tool call (`action`), a page a computer-use session's browser opened
+ * (`navigation`), or what a computer-use session did once it ended (`session_summary`).
+ */
+export const auditKinds = ['action', 'navigation', 'session_summary'] as const
+export type AuditKind = (typeof auditKinds)[number]
+
 export const auditLog = sqliteTable(
   'audit_log',
   {
@@ -181,12 +188,15 @@ export const auditLog = sqliteTable(
     botId: text('bot_id')
       .notNull()
       .references(() => bots.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: auditKinds }).notNull().default('action'),
     surface: text('surface', { enum: surfaces }).notNull(),
-    /** The tool the bot called. */
+    /** The tool the bot called; for a navigation, the session's tool that opened the page. */
     tool: text('tool').notNull(),
-    /** The tool call's input, with secrets redacted. */
+    /** The tool call's input, a navigation's URL and title, or a session's summary; with secrets redacted. */
     action: text('action', { mode: 'json' }).$type<unknown>().notNull(),
-    verdict: text('verdict', { mode: 'json' }).$type<Verdict>().notNull(),
+    /** Null when nothing was reviewed: the surface was off, or the entry isn't an action. */
+    verdict: text('verdict', { mode: 'json' }).$type<Verdict>(),
+    /** The surface's mode for the bot at the time. */
     mode: text('mode', { enum: orchestratorModes }).notNull(),
     createdAt: createdAt(),
   },

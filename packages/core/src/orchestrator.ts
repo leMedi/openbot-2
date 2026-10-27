@@ -1,4 +1,4 @@
-import { type AuditEntry, auditLog, bots, type Db, type OrchestratorMode, settings, type Surface, surfaces, type Verdict } from '@openbot/db'
+import { type AuditEntry, type AuditKind, auditLog, bots, type Db, type OrchestratorMode, settings, type Surface, surfaces, type Verdict } from '@openbot/db'
 import { asc, eq } from 'drizzle-orm'
 import type { Orchestrator, ProposedAction } from './ports/orchestrator.ts'
 
@@ -100,9 +100,14 @@ export function redactSecrets(value: unknown): unknown {
   return value
 }
 
+async function surfaceMode(db: Db, botId: string, surface: Surface): Promise<OrchestratorMode> {
+  return (await readBotOrchestratorModes(db, botId))?.modes[surface] ?? defaultOrchestratorMode
+}
+
 /**
- * Reviews a bot's side-effecting tool call (secrets not yet redacted) in the mode of its surface for that bot, and writes the review to the audit
- * log. Returns why the call is blocked, or undefined to let it run. Only enforce mode blocks; off skips the review.
+ * Reviews a bot's side-effecting tool call (secrets not yet redacted) in the mode of its surface for that bot, and writes it to the audit log,
+ * with the verdict, whatever the mode: off means not reviewed, not unrecorded. Returns why the call is blocked, or undefined to let it run. Only
+ * enforce mode blocks.
  */
 export async function reviewAction(
   db: Db,
@@ -110,14 +115,26 @@ export async function reviewAction(
   botId: string,
   call: ProposedAction,
 ): Promise<string | undefined> {
-  const mode = (await readBotOrchestratorModes(db, botId))?.modes[call.surface] ?? defaultOrchestratorMode
-  if (mode === 'off') return undefined
+  const mode = await surfaceMode(db, botId, call.surface)
   const action: ProposedAction = { ...call, input: redactSecrets(call.input) }
-  const verdict = await orchestrator.review(action, { botId })
-  await db.insert(auditLog).values({ botId, surface: action.surface, tool: action.tool, action: action.input, verdict, mode })
-  if (mode !== 'enforce' || verdict.decision === 'allow') return undefined
+  const verdict = mode === 'off' ? null : await orchestrator.review(action, { botId })
+  await db.insert(auditLog).values({ botId, kind: 'action', surface: action.surface, tool: action.tool, action: action.input, verdict, mode })
+  if (mode !== 'enforce' || !verdict || verdict.decision === 'allow') return undefined
   // There are no approval cards yet, so an ask blocks like a deny.
   return `The orchestrator blocked this action: ${verdict.reason}`
+}
+
+/**
+ * Writes what a bot did that is never reviewed on its own to its audit log, under the surface whose review covered it, e.g. a page a computer-use
+ * session's browser opened. Secrets in `input` are redacted.
+ */
+export async function recordActivity(
+  db: Db,
+  botId: string,
+  entry: { kind: Exclude<AuditKind, 'action'>; surface: Surface; tool: string; input: unknown },
+): Promise<void> {
+  const mode = await surfaceMode(db, botId, entry.surface)
+  await db.insert(auditLog).values({ botId, kind: entry.kind, surface: entry.surface, tool: entry.tool, action: redactSecrets(entry.input), mode })
 }
 
 /** A bot's audit log, oldest first. */

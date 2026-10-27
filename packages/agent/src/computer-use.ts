@@ -78,11 +78,6 @@ type NeedsHelpDetails = { needsHelp: string }
 /** What `use_computer`'s result keeps in its details: its session and, when it got stuck, the take-over it asked for. */
 export type UseComputerDetails = { conversationId: number; takeOver?: { instruction: string } }
 
-/** The latest snapshot after an action, so the model verifies what it did and gets fresh references. */
-async function afterAction(browser: Browser, bot: BotWithChat, done: string) {
-  return { output: [text(`${done}\n\n${formatSnapshot(await browser.snapshot(bot))}`)] }
-}
-
 export type ComputerUseOptions = {
   browser: Browser
   desktop: Desktop
@@ -98,6 +93,24 @@ export type ComputerUseOptions = {
   waitingTakeOver(bot: BotWithChat): Promise<string | null>
   /** Posts a take-over card to the bot's DM; `idempotencyKey` makes a replayed call post once. */
   requestTakeOver(bot: BotWithChat, card: TakeOverCard, idempotencyKey: string): Promise<void>
+  /** Writes what a session did to the bot's audit log: a page its browser opened, or its summary once it ended. */
+  audit(bot: BotWithChat, entry: SessionAuditEntry): Promise<void>
+}
+
+/** A page a session's browser opened, by the tool that opened it, or the summary of a session that ended. */
+export type SessionAuditEntry =
+  | { kind: 'navigation'; tool: string; input: { url: string; title: string } }
+  | { kind: 'session_summary'; tool: 'use_computer'; input: SessionSummary }
+
+/** What a computer-use session did. */
+export type SessionSummary = {
+  /** done: it answered; needs_help: it asked the owner to take over; stopped: it ended without an answer. */
+  outcome: 'done' | 'needs_help' | 'stopped'
+  /** Its tool calls, by tool. */
+  actions: Record<string, number>
+  /** The screenshots taken: its own, and the final one. */
+  screenshots: number
+  durationMs: number
 }
 
 /**
@@ -106,6 +119,29 @@ export type ComputerUseOptions = {
  */
 export function computerUse(options: ComputerUseOptions) {
   const { browser, desktop, images, botOf } = options
+  /** The URL each running session last saw, so a navigation is logged once, when a new page shows. */
+  const pages = new Map<ConversationId, string>()
+
+  /**
+   * Notes the page a session's browser shows. When `opener` is a tool that may have loaded it (always logged for
+   * `always`, else when the URL changed), it is written to the audit log as a navigation.
+   */
+  async function sawPage(session: ConversationId, bot: BotWithChat, page: { url: string; title: string }, opener?: string, always = false) {
+    const last = pages.get(session)
+    pages.set(session, page.url)
+    if (!opener || page.url === 'about:blank' || (!always && page.url === last)) return
+    await options.audit(bot, { kind: 'navigation', tool: opener, input: { url: page.url, title: page.title } })
+  }
+
+  /**
+   * The latest snapshot after an action, so the model verifies what it did and gets fresh references; a page `opener`
+   * loaded is logged.
+   */
+  async function afterAction(api: ToolExecutionApi, bot: BotWithChat, done: string, opener?: string, always = false) {
+    const snapshot = await browser.snapshot(bot)
+    await sawPage(api.conversationId, bot, snapshot, opener, always)
+    return { output: [text(`${done}\n\n${formatSnapshot(snapshot)}`)] }
+  }
 
   /** A screenshot the model can see, shrunk to fit; undefined when it can't be shown. */
   async function image(bytes: Uint8Array): Promise<ImageContent | undefined> {
@@ -123,7 +159,12 @@ export function computerUse(options: ComputerUseOptions) {
       description: "Look at the active tab: its URL, title and accessibility tree, with a reference for each element. Old references stop working.",
       parameters: Type.Object({}),
       ...sequential,
-      execute: async (_args, api) => ({ output: [text(formatSnapshot(await browser.snapshot(await botOf(api.conversationId))))] }),
+      execute: async (_args, api) => {
+        const bot = await botOf(api.conversationId)
+        const snapshot = await browser.snapshot(bot)
+        await sawPage(api.conversationId, bot, snapshot)
+        return { output: [text(formatSnapshot(snapshot))] }
+      },
     }),
     defineTool({
       name: 'browser_navigate',
@@ -133,7 +174,7 @@ export function computerUse(options: ComputerUseOptions) {
       execute: async (args, api) => {
         const bot = await botOf(api.conversationId)
         await browser.navigate(bot, args.url)
-        return afterAction(browser, bot, `Opened ${args.url}.`)
+        return afterAction(api, bot, `Opened ${args.url}.`, 'browser_navigate', true)
       },
     }),
     defineTool({
@@ -144,7 +185,7 @@ export function computerUse(options: ComputerUseOptions) {
       execute: async (args, api) => {
         const bot = await botOf(api.conversationId)
         await browser.click(bot, args.ref)
-        return afterAction(browser, bot, `Clicked ${args.ref}.`)
+        return afterAction(api, bot, `Clicked ${args.ref}.`, 'browser_click')
       },
     }),
     defineTool({
@@ -159,7 +200,7 @@ export function computerUse(options: ComputerUseOptions) {
       execute: async (args, api) => {
         const bot = await botOf(api.conversationId)
         await browser.type(bot, args.ref, args.text, { submit: args.submit ?? false })
-        return afterAction(browser, bot, `Typed into ${args.ref}${args.submit ? ' and pressed Enter' : ''}.`)
+        return afterAction(api, bot, `Typed into ${args.ref}${args.submit ? ' and pressed Enter' : ''}.`, 'browser_type')
       },
     }),
     defineTool({
@@ -181,8 +222,9 @@ export function computerUse(options: ComputerUseOptions) {
         const tabs = await browser.tabs(bot)
         const lines = tabs.map((tab) => `- ${tab.id}${tab.active ? ' (active)' : ''}: ${tab.title || '(untitled)'} — ${tab.url}`)
         const listed = `Tabs:\n${lines.join('\n')}`
-        // A tab change shows the tab now active, with references to act on.
-        return args.action === 'list' ? { output: [text(listed)] } : afterAction(browser, bot, listed)
+        // A tab change shows the tab now active, with references to act on; only a new tab loads a page.
+        if (args.action === 'list') return { output: [text(listed)] }
+        return afterAction(api, bot, listed, args.action === 'new' ? 'browser_tabs' : undefined, args.action === 'new')
       },
     }),
     defineTool({
@@ -349,6 +391,9 @@ export function computerUse(options: ComputerUseOptions) {
         )
       }
       await api.memo('started', true, context)
+      // Kept across a rerun after a restart, so the session's duration counts from its first start.
+      const startedAt = (await api.memo<number>('startedAt', context)) ?? Date.now()
+      await api.memo('startedAt', startedAt, context)
       const model = await options.model()
       const session = await api.commit(async (tx) => {
         const existing = (await tx.scanConversations({ ownerTaskId: api.taskId }, 1)).items[0]
@@ -363,71 +408,109 @@ export function computerUse(options: ComputerUseOptions) {
       }, context)
       await api.details({ conversationId: session } satisfies UseComputerDetails, context)
 
-      // Opened once: a rerun after a restart finds the session mid-way and leaves its page alone.
-      let start = (await api.memo<string>('start', context)) ?? ''
-      if (args.startUrl && !start) {
-        await awaitWithContext(options.screenFree(bot), ctx)
-        try {
-          await browser.navigate(bot, args.startUrl)
-          start = `\n\nThe browser has opened ${args.startUrl}.`
-        } catch (error) {
-          start = `\n\nOpening ${args.startUrl} failed: ${(error as Error).message}`
-        }
-        await api.memo('start', start, context)
-      }
-      const handle = await api.conversation(session, context)
-      if (!handle) throw new Error('The computer-use session is gone')
-      const submission = await handle.submit({ type: 'input', content: `${args.goal}${start}`, requestId: `use_computer:${api.taskId}` }, context)
-      let timedOut = false
-      const timer = setTimeout(() => {
-        timedOut = true
-        void handle.abort(context)
-      }, sessionTimeoutMs)
-      const settled = await submission.wait(context).finally(() => clearTimeout(timer))
-      const instruction = await neededHelp(api, session, settled.entry)
-      const answerId = settled.status === 'done' ? settled.answer : undefined
-      if (instruction) {
-        // Stuck on what only the owner can do: they're asked on a card, and this run ends until they hand the screen back.
-        const card: TakeOverCard = { type: 'take_over', instruction, goal: args.goal }
-        await options.requestTakeOver(bot, card, `${api.conversationId}:${api.callId}`)
-        return {
-          output: [
-            text(
-              `The helper is stuck and needs the owner: ${instruction}\n\n` +
-                'A take-over card now asks them to do it on your screen. Your turn ends here; when they hand the screen back, ' +
-                'that wakes you with what they did.',
-            ),
-          ],
-          details: { conversationId: session, takeOver: { instruction } } satisfies UseComputerDetails,
-          control: { terminate: true },
-        }
-      }
-      if (answerId === undefined) {
-        const why = timedOut ? `it ran for more than ${sessionTimeoutMs / 60_000} minutes` : (settled.reason ?? 'it gave no answer')
-        throw new Error(`The computer-use session stopped before finishing: ${why}`)
-      }
-      const answer = await api.commit((tx) => tx.entry(answerId), context)
-      const summary =
-        answer?.model
-          ?.flatMap((message) => (message.role === 'assistant' ? message.content : []))
-          .flatMap((part) => (part.type === 'text' ? [part.text] : []))
-          .join('\n')
-          .trim() || 'The computer-use session ended without a summary.'
-
-      // The final screenshot, of the whole screen as the owner sees it (else of the browser's tab), is saved, not shown: images would flood the bot's
-      // history (ADR 0008), and its model may not see them. It can read the file to look, or attach it to show the owner.
-      let screenshot: string
+      // However the session ends, its summary goes to the audit log, once.
+      let outcome: SessionSummary['outcome'] = 'stopped'
+      let finalScreenshots = 0
       try {
-        const path = await options.computer.writeFile(bot, `screenshots/computer-${Date.now()}.png`, await desktop.screenshot(bot).catch(() => browser.screenshot(bot)))
-        screenshot = `The screen at the end is saved at ${path}; read it to look, or attach it with sendMessage to show the owner.`
-      } catch (error) {
-        screenshot = `No final screenshot: ${(error as Error).message}`
+        // Opened once: a rerun after a restart finds the session mid-way and leaves its page alone.
+        let start = (await api.memo<string>('start', context)) ?? ''
+        if (args.startUrl && !start) {
+          await awaitWithContext(options.screenFree(bot), ctx)
+          try {
+            await browser.navigate(bot, args.startUrl)
+            start = `\n\nThe browser has opened ${args.startUrl}.`
+            const tab = (await browser.tabs(bot)).find((entry) => entry.active)
+            if (tab) await sawPage(session, bot, tab, 'use_computer', true)
+          } catch (error) {
+            start = `\n\nOpening ${args.startUrl} failed: ${(error as Error).message}`
+          }
+          await api.memo('start', start, context)
+        }
+        const handle = await api.conversation(session, context)
+        if (!handle) throw new Error('The computer-use session is gone')
+        const submission = await handle.submit({ type: 'input', content: `${args.goal}${start}`, requestId: `use_computer:${api.taskId}` }, context)
+        let timedOut = false
+        const timer = setTimeout(() => {
+          timedOut = true
+          void handle.abort(context)
+        }, sessionTimeoutMs)
+        const settled = await submission.wait(context).finally(() => clearTimeout(timer))
+        const instruction = await neededHelp(api, session, settled.entry)
+        const answerId = settled.status === 'done' ? settled.answer : undefined
+        if (instruction) {
+          // Stuck on what only the owner can do: they're asked on a card, and this run ends until they hand the screen back.
+          const card: TakeOverCard = { type: 'take_over', instruction, goal: args.goal }
+          await options.requestTakeOver(bot, card, `${api.conversationId}:${api.callId}`)
+          outcome = 'needs_help'
+          return {
+            output: [
+              text(
+                `The helper is stuck and needs the owner: ${instruction}\n\n` +
+                  'A take-over card now asks them to do it on your screen. Your turn ends here; when they hand the screen back, ' +
+                  'that wakes you with what they did.',
+              ),
+            ],
+            details: { conversationId: session, takeOver: { instruction } } satisfies UseComputerDetails,
+            control: { terminate: true },
+          }
+        }
+        if (answerId === undefined) {
+          const why = timedOut ? `it ran for more than ${sessionTimeoutMs / 60_000} minutes` : (settled.reason ?? 'it gave no answer')
+          throw new Error(`The computer-use session stopped before finishing: ${why}`)
+        }
+        outcome = 'done'
+        const answer = await api.commit((tx) => tx.entry(answerId), context)
+        const summary =
+          answer?.model
+            ?.flatMap((message) => (message.role === 'assistant' ? message.content : []))
+            .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+            .join('\n')
+            .trim() || 'The computer-use session ended without a summary.'
+
+        // The final screenshot, of the whole screen as the owner sees it (else of the browser's tab), is saved, not shown: images would flood the bot's
+        // history (ADR 0008), and its model may not see them. It can read the file to look, or attach it to show the owner.
+        let screenshot: string
+        try {
+          const path = await options.computer.writeFile(bot, `screenshots/computer-${Date.now()}.png`, await desktop.screenshot(bot).catch(() => browser.screenshot(bot)))
+          finalScreenshots = 1
+          screenshot = `The screen at the end is saved at ${path}; read it to look, or attach it with sendMessage to show the owner.`
+        } catch (error) {
+          screenshot = `No final screenshot: ${(error as Error).message}`
+        }
+        return { output: [text(`${summary}\n\n${screenshot}`)] }
+      } finally {
+        pages.delete(session)
+        if (!(await api.memo<boolean>('summarized', context))) {
+          const actions = await sessionActions(api, session)
+          const screenshots = Object.entries(actions).reduce((sum, [tool, count]) => sum + (tool.endsWith('_screenshot') ? count : 0), finalScreenshots)
+          await options.audit(bot, {
+            kind: 'session_summary',
+            tool: 'use_computer',
+            input: { outcome, actions, screenshots, durationMs: Date.now() - startedAt },
+          })
+          await api.memo('summarized', true, context)
+        }
       }
-      return { output: [text(`${summary}\n\n${screenshot}`)] }
     },
   })
 
   return { extension, useComputer, sessionToolNames: tools.map((tool) => tool.name) }
+}
+
+/** The calls a session made, by tool. */
+async function sessionActions(api: ToolExecutionApi, session: ConversationId): Promise<Record<string, number>> {
+  const actions: Record<string, number> = {}
+  let cursor: Cursor | undefined
+  do {
+    const page = await api.commit((tx) => tx.scanEntries({ conversationId: session, order: 'ascending' }, 200, cursor), context)
+    for (const entry of page.items) {
+      for (const message of entry.model ?? []) {
+        if (message.role === 'toolResult') actions[message.toolName] = (actions[message.toolName] ?? 0) + 1
+      }
+    }
+    cursor = page.next
+  } while (cursor)
+  return actions
 }
 
 /** The instruction of a `needs_help` call the session made after its input `from`, or undefined when it made none. */
