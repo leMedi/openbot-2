@@ -18,7 +18,12 @@ export type Run = {
   ended(): Promise<boolean>
   /** Whether it ended with an answer: an interrupt came too late to stop it. */
   answered(): Promise<boolean>
+  /** Why it ended without an answer, when known. */
+  failure?(): Promise<string | undefined>
 }
+
+/** How an input's run ended for good: with an answer, or not (the model or its provider failed, or it couldn't start). */
+export type InputOutcome = { status: 'answered' } | { status: 'failed'; error: string }
 
 /** Each bot's history, as the scheduler drives it. */
 export type BotHistories = {
@@ -46,6 +51,11 @@ export type RunSchedulerOptions = {
   onError(botId: string, error: Error): void
   /** An interrupt queued `input` to run again, with its new attempt; the next run waits for it to resolve. */
   onRequeue(botId: string, input: QueuedInput): Promise<void>
+  /**
+   * The run of `input` ended for good, not to run again: answered, or failed. Not called for an input dropped because
+   * the bot was deleted or the scheduler closed, nor for one interrupted that runs again.
+   */
+  onSettled?(botId: string, input: QueuedInput, outcome: InputOutcome): void
   watchdog?: Watchdog
 }
 
@@ -122,6 +132,8 @@ export class RunScheduler {
   readonly #options: RunSchedulerOptions
   readonly #watchdog: Watchdog
   readonly #bots = new Map<string, BotState>()
+  /** Inputs an interrupt queued again, as a new input: their own run's end isn't theirs. */
+  readonly #requeued = new WeakSet<QueuedInput>()
   #closed = false
 
   constructor(options: RunSchedulerOptions) {
@@ -177,6 +189,12 @@ export class RunScheduler {
    */
   detached(botId: string): Promise<void> {
     return this.#bots.get(botId)?.active?.detached ?? new Promise(() => {})
+  }
+
+  /** Whether the bot's input `inputId` is queued, or its run is going on. */
+  pending(botId: string, inputId: string): boolean {
+    const bot = this.#bots.get(botId)
+    return !!bot && [...(bot.active?.inputs ?? []), ...(bot.adopted?.inputs ?? []), ...bot.queue].some((input) => input.id === inputId)
   }
 
   working(botId: string): boolean {
@@ -281,9 +299,11 @@ export class RunScheduler {
           await Promise.race([this.#options.histories.idle(botId), detached])
           // Any interrupt of this run, asked while it went on.
           await Promise.race([bot.chain, detached])
+          if (!this.#closed) await this.#settled(botId, active)
         } catch (error) {
           if (this.#closed) break
           this.#options.onError(botId, error as Error)
+          this.#report(botId, inputs, { status: 'failed', error: (error as Error).message })
         } finally {
           for (const timer of active.timers) clearTimeout(timer)
           bot.active = undefined
@@ -293,6 +313,26 @@ export class RunScheduler {
       bot.driving = false
       this.#setWorking(botId, bot, false)
     })()
+  }
+
+  /** Tells `onSettled` how `active`'s run ended, for its inputs not queued again. */
+  async #settled(botId: string, active: ActiveRun) {
+    const { run } = active
+    if (!this.#options.onSettled || !run) return
+    const answered = await run.answered()
+    const failure = answered ? undefined : ((await run.failure?.()) ?? 'The run ended without an answer')
+    this.#report(botId, active.inputs, failure === undefined ? { status: 'answered' } : { status: 'failed', error: failure })
+  }
+
+  #report(botId: string, inputs: QueuedInput[], outcome: InputOutcome) {
+    for (const input of inputs) {
+      if (this.#requeued.has(input)) continue
+      try {
+        this.#options.onSettled?.(botId, input, outcome)
+      } catch (error) {
+        console.error(`[agent] Couldn't report how bot ${botId}'s run ended:`, error)
+      }
+    }
   }
 
   /**
@@ -319,6 +359,7 @@ export class RunScheduler {
     const attempt = (input.attempt ?? 0) + 1
     if (input.groupChatId && attempt >= maxGroupTurnAttempts) return
     const requeued = { ...input, attempt }
+    this.#requeued.add(input)
     enqueue(bot.queue, requeued)
     input.settle = undefined
     await this.#options.onRequeue(botId, requeued)

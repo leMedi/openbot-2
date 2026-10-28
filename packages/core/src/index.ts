@@ -155,3 +155,22 @@ export {
 } from './memory.ts'
 export { type ExchangePart, MemoryExtraction, type RunExchange } from './memory-extraction.ts'
 export { MemoryConsolidation } from './memory-consolidation.ts'
+export { InvalidScheduleError, minEveryMs, nextOccurrence, parseSchedule, type Schedule } from './schedules.ts'
+export {
+  InvalidRoutineError,
+  keptRunsPerRoutine,
+  maxRoutineNameLength,
+  maxRoutinePromptLength,
+  maxRoutinesPerBot,
+  missedFireGraceMs,
+  type NewRoutine,
+  NoSuchRoutineError,
+  type Routine,
+  type RoutineAuthor,
+  type RoutineChanges,
+  type RoutineRun,
+  routineCue,
+  Routines,
+  type RoutinesOptions,
+  type RoutineState,
+} from './routines.ts'

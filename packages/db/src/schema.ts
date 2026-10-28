@@ -191,9 +191,10 @@ export const messages = sqliteTable(
  * What an audit entry records: a side-effecting tool call (`action`), a page a computer-use session's browser opened
  * (`navigation`), what a computer-use session did once it ended (`session_summary`), or a change memory extraction made
  * or was refused, or an extraction skipped after failing (`extraction`, under `memory_shared_write`), or a change nightly
- * consolidation made, rejected or was refused, or a consolidation skipped after failing (`consolidation`, likewise).
+ * consolidation made, rejected or was refused, or a consolidation skipped after failing (`consolidation`, likewise), or a
+ * routine's run that failed (`routine`, under `routine_change`).
  */
-export const auditKinds = ['action', 'navigation', 'session_summary', 'extraction', 'consolidation'] as const
+export const auditKinds = ['action', 'navigation', 'session_summary', 'extraction', 'consolidation', 'routine'] as const
 export type AuditKind = (typeof auditKinds)[number]
 
 export const auditLog = sqliteTable(
@@ -306,6 +307,69 @@ export const episodeRuns = sqliteTable(
   (table) => [index('episode_runs_bot_idx').on(table.botId)],
 )
 
+/** Who wrote a routine last: the owner (a standing instruction) or its bot (a note to itself). */
+export const routineAuthors = ['owner', 'bot'] as const
+export type RoutineAuthor = (typeof routineAuthors)[number]
+
+/**
+ * Bots' routines (design §5.4): a prompt and a schedule that wake the bot in its background lane. Deleting the bot
+ * deletes them.
+ */
+export const routines = sqliteTable(
+  'routines',
+  {
+    id: id(),
+    botId: text('bot_id')
+      .notNull()
+      .references(() => bots.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** What the bot reads when the routine wakes it. */
+    prompt: text('prompt').notNull(),
+    /** A 5-field cron expression, an alias (`@daily`), `@every 15m`, or a reminder's `at 2026-10-29T09:00` (`core`'s `parseSchedule`). */
+    schedule: text('schedule').notNull(),
+    /** Paused routines and fired reminders are disabled. */
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    /** When it fires next; null while disabled. */
+    nextRunAt: integer('next_run_at', { mode: 'timestamp_ms' }),
+    /** Who created it or last edited it: an owner's edit makes a bot's routine the owner's. Named as in the design. */
+    createdBy: text('created_by', { enum: routineAuthors }).notNull(),
+    /** Written from the server's clock. */
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [index('routines_bot_idx').on(table.botId), index('routines_next_run_idx').on(table.nextRunAt)],
+)
+
+/**
+ * How a routine's run went: queued or running (`running`), ended (`ran`), skipped as the previous was still going
+ * (`skipped_overlap`), missed while the server was down (`missed`), or `failed`.
+ */
+export const routineRunStatuses = ['running', 'ran', 'skipped_overlap', 'missed', 'failed'] as const
+export type RoutineRunStatus = (typeof routineRunStatuses)[number]
+
+/** A routine's run history; the last 100 per routine are kept. Deleted with the routine. */
+export const routineRuns = sqliteTable(
+  'routine_runs',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    routineId: text('routine_id')
+      .notNull()
+      .references(() => routines.id, { onDelete: 'cascade' }),
+    /** When it was due; for a test run, when the owner started it. */
+    scheduledFor: integer('scheduled_for', { mode: 'timestamp_ms' }).notNull(),
+    /** When it woke the bot; null when it didn't (skipped, missed). */
+    firedAt: integer('fired_at', { mode: 'timestamp_ms' }),
+    status: text('status', { enum: routineRunStatuses }).notNull(),
+    /** When it ended, or was recorded as skipped or missed; null while running. */
+    finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
+    /** The first message the bot sent the owner in its DM during the run; null when it stayed silent. */
+    messageId: text('message_id').references(() => messages.id, { onDelete: 'set null' }),
+    /** The owner's Test run, not the schedule. */
+    test: integer('test', { mode: 'boolean' }).notNull().default(false),
+  },
+  (table) => [index('routine_runs_routine_idx').on(table.routineId, table.id)],
+)
+
 export type Setting = typeof settings.$inferSelect
 export type SystemCredential = typeof systemCredentials.$inferSelect
 export type Bot = typeof bots.$inferSelect
@@ -317,3 +381,5 @@ export type NewMessage = typeof messages.$inferInsert
 export type AuditEntry = typeof auditLog.$inferSelect
 export type NewAuditEntry = typeof auditLog.$inferInsert
 export type Fact = typeof memories.$inferSelect
+export type Routine = typeof routines.$inferSelect
+export type RoutineRun = typeof routineRuns.$inferSelect

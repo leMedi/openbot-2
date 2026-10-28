@@ -25,10 +25,12 @@ import {
   MemoryConsolidation,
   MemoryExtraction,
   readModelSettings,
+  Routines,
+  getBot,
 } from '@openbot/core'
 import type { Db } from '@openbot/db'
 import type { ScreenTickets } from './screen-stream.ts'
-import { toChatInfo, toMessageInfo } from './views.ts'
+import { toChatInfo, toMessageInfo, toRoutineInfo, toRoutineRunInfo } from './views.ts'
 
 /** What every procedure runs against; built once per server start, or per test by the harness. */
 export type ServerContext = {
@@ -64,6 +66,8 @@ export type ServerContext = {
   ownerTime: OwnerTime
   /** Memory extraction after bots' runs; `extraction.close()` stops it. */
   extraction: MemoryExtraction
+  /** Bots' routines, fired on the server's clock; `routines.close()` stops them. */
+  routines: Routines
 }
 
 /** The owner's time zone (`settings.timeZone`), as scheduled jobs read it. */
@@ -168,6 +172,25 @@ export async function createServerContext({
     complete: (ref: string, request: { systemPrompt: string; prompt: string }) => providers.complete(ref, request),
   }
   const extraction = new MemoryExtraction(memoryModelOptions)
+  const ownerTime: OwnerTime = {
+    timeZone: () => ownerTimeZone(db),
+    instant: async (local) => instantAt(local, await ownerTimeZone(db)),
+  }
+  // Made before the runtime, which tells it how the routine runs it resumes end; it starts firing once the runtime is open.
+  let openRuntime: BotRuntime | undefined
+  const routines = new Routines({
+    db,
+    clock,
+    timeZone: ownerTime.timeZone,
+    wake: async (botId, input) => (await runtimeOpen).wake(botId, input),
+    pending: (botId, inputId) => openRuntime?.pending(botId, inputId) ?? false,
+    onRoutine: (routine) => bus.publish({ type: 'routine.updated', routine: toRoutineInfo(routine) }),
+    onRoutineDeleted: (routine) => bus.publish({ type: 'routine.deleted', botId: routine.botId, routineId: routine.id }),
+    onRun: async (routine, run) => {
+      const bot = await getBot(db, routine.botId)
+      if (bot) bus.publish({ type: 'routineRun.updated', botId: bot.id, run: toRoutineRunInfo(run, bot.chatId) })
+    },
+  })
   /** Posts a bot's message with copies of its files to `chatId`; returns it, or undefined for a replayed call's. */
   async function postBotMessage(bot: BotWithChat, chatId: string, text: string, files: AttachmentFile[], idempotencyKey: string) {
     const saved = await attachments.save(chatId, files)
@@ -206,8 +229,10 @@ export async function createServerContext({
     compaction,
     clock,
     ...(memoryExtraction && { onRunSettled: (botId, exchange) => extraction.extract(botId, exchange) }),
-    async sendMessage(bot, chatId, { text, attachments: files }, idempotencyKey) {
-      await postBotMessage(bot, chatId, text, files, idempotencyKey)
+    async sendMessage(bot, chatId, { text, attachments: files }, idempotencyKey, inputId) {
+      const message = await postBotMessage(bot, chatId, text, files, idempotencyKey)
+      // A routine's run links the first message it sent the owner.
+      if (message && chatId === bot.chatId) await routines.sentMessage(inputId, message.id)
     },
     async messageGroup(sender, group, { text }, idempotencyKey) {
       const message = await postBotMessage(sender, group.id, text, [], idempotencyKey)
@@ -281,17 +306,19 @@ export async function createServerContext({
       await publish(bot.chatId)
     },
     onStatus: (botId, status) => bus.publish({ type: 'bot.status', botId, ...status }),
+    onInputSettled: (_botId, inputId, outcome) =>
+      void routines.settled(inputId, outcome).catch((error) => console.error("[routines] Couldn't record how a run ended:", error)),
   })
+  openRuntime = runtime
   opened(runtime)
   const { synced: screensSynced, stop: stopSyncingScreens } = keepScreensInSync(db, screens)
   const jobs = new ServerJobs({ clock })
   bus.listen(({ event }) => {
-    if (event.type === 'timeZone.updated') void jobs.reschedule()
+    if (event.type !== 'timeZone.updated') return
+    void jobs.reschedule()
+    void routines.reschedule().catch((error) => console.error("[routines] Couldn't reschedule routines:", error))
   })
-  const ownerTime: OwnerTime = {
-    timeZone: () => ownerTimeZone(db),
-    instant: async (local) => instantAt(local, await ownerTimeZone(db)),
-  }
+  await routines.start()
   if (memoryConsolidation) {
     const consolidation = new MemoryConsolidation(memoryModelOptions)
     jobs.daily('memory consolidation', { at: '04:00', timeZone: ownerTime.timeZone }, () => consolidation.run())
@@ -312,5 +339,6 @@ export async function createServerContext({
     jobs,
     ownerTime,
     extraction,
+    routines,
   }
 }

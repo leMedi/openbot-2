@@ -99,7 +99,7 @@ import {
 import type { Attachment, Db, Message, Surface } from '@openbot/db'
 import { type BotComputer, ComputerUnavailableError } from './computer.ts'
 import { computerUse, type UseComputerDetails } from './computer-use.ts'
-import { type QueuedInput, type Run, RunScheduler, type Watchdog } from './run-scheduler.ts'
+import { type InputOutcome, type QueuedInput, type Run, RunScheduler, type Watchdog } from './run-scheduler.ts'
 
 const context = BACKGROUND_CONTEXT
 
@@ -188,7 +188,14 @@ export type BotRuntimeOptions = {
    * Posts a bot's message, with copies of the files it attached, to chat `chatId`: its DM, or the group chat whose turn
    * it is taking. `idempotencyKey` makes a replayed tool call post once.
    */
-  sendMessage(bot: BotWithChat, chatId: string, message: { text: string; attachments: AttachmentFile[] }, idempotencyKey: string): Promise<void>
+  sendMessage(
+    bot: BotWithChat,
+    chatId: string,
+    message: { text: string; attachments: AttachmentFile[] },
+    idempotencyKey: string,
+    /** The id of the input whose run sends it, when it has one, e.g. a routine's run. */
+    inputId?: string,
+  ): Promise<void>
   /**
    * Posts a bot's message to a group chat it belongs to, outside its turns, as `sendMessage` posts but text only; the
    * members answer it in rounds, as they answer the owner.
@@ -223,6 +230,11 @@ export type BotRuntimeOptions = {
    * the order the bot's runs settle, never holding up its next run.
    */
   onRunSettled?(botId: string, exchange: () => Promise<RunExchange | undefined>): void
+  /**
+   * The run of a bot- or background-lane input (`BotInput.id`) ended for good, answered or failed, e.g. a routine's;
+   * across restarts too. Not called while it runs again after an interrupt, nor once the bot is deleted.
+   */
+  onInputSettled?(botId: string, inputId: string, outcome: InputOutcome): void
 }
 
 /** `provider/modelId`, split at the first slash since model ids may contain slashes. */
@@ -430,6 +442,11 @@ const describeInputSource = (input: BotInput) =>
         ? "a teammate's message"
         : 'a background wake, e.g. a routine'
 
+/** Why a run ended without an answer, from its submission's record. */
+function describeFailure({ detail, reason }: { detail?: unknown; reason?: string }): string {
+  return typeof detail === 'string' ? detail : detail === undefined ? String(reason) : JSON.stringify(detail)
+}
+
 /** What an input's entry in the history records: its lane, and the group chat whose turn it is. */
 type InputRecord = { lane: Lane; groupChatId?: string; id?: string }
 
@@ -514,6 +531,9 @@ export class BotRuntime implements AgentRuntime {
         await requeueInput(this.#options.db, botId, toKept(input)).catch((error) =>
           console.error(`[agent] Couldn't keep bot ${botId}'s interrupted input queued:`, error),
         )
+      },
+      onSettled: (botId, input, outcome) => {
+        if (isKept(input) && input.id) options.onInputSettled?.(botId, input.id, outcome)
       },
       watchdog: options.watchdog,
     })
@@ -630,7 +650,7 @@ export class BotRuntime implements AgentRuntime {
           }
           try {
             const attachments = await readAttachments(bot, paths)
-            await options.sendMessage(bot, groupChatId ?? bot.chatId, { text: args.text, attachments }, `${api.conversationId}:${api.callId}`)
+            await options.sendMessage(bot, groupChatId ?? bot.chatId, { text: args.text, attachments }, `${api.conversationId}:${api.callId}`, turn?.id)
           } catch (error) {
             release?.()
             throw error
@@ -1113,6 +1133,11 @@ export class BotRuntime implements AgentRuntime {
     return head ? String(head.id) : null
   }
 
+  /** Whether the bot's input `inputId` is queued or running, e.g. a routine's previous run. */
+  pending(botId: string, inputId: string): boolean {
+    return this.#scheduler.pending(botId, inputId)
+  }
+
   status(botId: string): BotStatus {
     return { working: this.#scheduler.working(botId), error: this.#errors.get(botId) ?? null }
   }
@@ -1259,6 +1284,10 @@ export class BotRuntime implements AgentRuntime {
     return {
       ended: async () => ['done', 'unanswered'].includes(await status()),
       answered: async () => (await status()) === 'done',
+      failure: async () => {
+        const record = await submission.status(context)
+        return record.status === 'unanswered' ? describeFailure(record) : undefined
+      },
     }
   }
 
@@ -1278,8 +1307,7 @@ export class BotRuntime implements AgentRuntime {
       this.#options.onRunSettled?.(botId, () => this.#exchange(botId, inputs, entry))
     }
     if (settled.status !== 'unanswered' || settled.reason === 'aborted') return
-    const { detail, reason } = settled
-    const error = typeof detail === 'string' ? detail : detail === undefined ? reason : JSON.stringify(detail)
+    const error = describeFailure(settled)
     console.error(`[agent] Bot ${botId}'s run failed: ${error}`)
     this.#errors.set(botId, error)
     this.#options.onStatus(botId, this.status(botId))

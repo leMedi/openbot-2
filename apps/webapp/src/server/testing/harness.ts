@@ -159,6 +159,8 @@ async function open(
     ownerTime: context.ownerTime,
     /** Memory extraction after runs, with `extraction`; `extraction.idle()` waits for those queued. */
     extraction: context.extraction,
+    /** Bots' routines; `routines.idle()` waits for the changes and fires asked so far. */
+    routines: context.routines,
     /** The fakes, to keep across a restart. */
     kept: { computer, botComputer, clock } satisfies KeptFakes,
     /** The bots' home, a temporary folder: `shared/`, `bots/<id>/`. */
@@ -199,6 +201,7 @@ async function open(
     async shutdown() {
       for (const http of streamServers.splice(0)) http.close()
       await context.jobs.close()
+      await context.routines.close()
       context.stopSyncingScreens()
       context.rounds.close()
       await context.runtime.close()
@@ -209,6 +212,7 @@ async function open(
     async close() {
       for (const http of streamServers.splice(0)) http.close()
       await context.jobs.close()
+      await context.routines.close()
       context.stopSyncingScreens()
       await computer.close()
       context.rounds.close()

@@ -38,6 +38,8 @@ import {
   InvalidFactError,
   listBotFacts,
   NoSuchFactError,
+  NoSuchRoutineError,
+  InvalidRoutineError,
   listSharedFacts,
   listBots,
   listMessages,
@@ -65,7 +67,7 @@ import { implement, ORPCError } from '@orpc/server'
 import { generateContentDisposition } from '@orpc/standard-server'
 import { chatInfoOf, publishChat, type ServerContext } from './context.ts'
 import { screenStreamUrl } from './screen-stream.ts'
-import { toAuditEntryInfo, toBotInfo, toFactInfo, toMessageInfo } from './views.ts'
+import { toAuditEntryInfo, toBotInfo, toFactInfo, toMessageInfo, toRoutineInfo, toRoutineRunInfo } from './views.ts'
 
 const os = implement(contract).$context<ServerContext>()
 
@@ -121,6 +123,20 @@ async function factMustFit<T>(work: Promise<T>): Promise<T> {
   } catch (error) {
     if (error instanceof NoSuchFactError) throw new ORPCError('NOT_FOUND', { message: 'No such fact' })
     if (error instanceof InvalidFactError) throw new ORPCError('BAD_REQUEST', { message: error.message })
+    throw error
+  }
+}
+
+/**
+ * `work`'s result, with a routine the owner can't reach through this bot answered as NOT_FOUND, alike whether it never
+ * existed, is gone or is another bot's, and a bad name, instruction or schedule, or one routine too many, as BAD_REQUEST.
+ */
+async function routineMustFit<T>(work: Promise<T>): Promise<T> {
+  try {
+    return await work
+  } catch (error) {
+    if (error instanceof NoSuchRoutineError) throw new ORPCError('NOT_FOUND', { message: 'No such routine' })
+    if (error instanceof InvalidRoutineError) throw new ORPCError('BAD_REQUEST', { message: error.message })
     throw error
   }
 }
@@ -310,6 +326,51 @@ export const router = os.router({
     deleteFact: os.bots.deleteFact.handler(async ({ context, input }) => {
       await botMustExist(context, input.botId)
       await factMustFit(deleteOwnerFact(context.db, { botId: input.botId }, input.factId))
+    }),
+  },
+
+  routines: {
+    list: os.routines.list.handler(async ({ context, input }) => {
+      await botMustExist(context, input.botId)
+      return (await context.routines.list(input.botId)).map(toRoutineInfo)
+    }),
+
+    create: os.routines.create.handler(async ({ context, input: { botId, ...values } }) => {
+      await botMustExist(context, botId)
+      return toRoutineInfo(await routineMustFit(context.routines.create(botId, values, 'owner')))
+    }),
+
+    // Any edit by the owner makes the routine theirs.
+    update: os.routines.update.handler(async ({ context, input: { botId, routineId, ...changes } }) => {
+      await botMustExist(context, botId)
+      return toRoutineInfo(await routineMustFit(context.routines.update(botId, routineId, changes, 'owner')))
+    }),
+
+    pause: os.routines.pause.handler(async ({ context, input }) => {
+      await botMustExist(context, input.botId)
+      return toRoutineInfo(await routineMustFit(context.routines.pause(input.botId, input.routineId)))
+    }),
+
+    resume: os.routines.resume.handler(async ({ context, input }) => {
+      await botMustExist(context, input.botId)
+      return toRoutineInfo(await routineMustFit(context.routines.resume(input.botId, input.routineId)))
+    }),
+
+    delete: os.routines.delete.handler(async ({ context, input }) => {
+      await botMustExist(context, input.botId)
+      await routineMustFit(context.routines.delete(input.botId, input.routineId))
+    }),
+
+    testRun: os.routines.testRun.handler(async ({ context, input }) => {
+      const bot = await botMustExist(context, input.botId)
+      await routineMustFit(context.routines.get(bot.id, input.routineId))
+      await assertCanRun(context, bot)
+      return toRoutineRunInfo(await routineMustFit(context.routines.testRun(bot.id, input.routineId)), bot.chatId)
+    }),
+
+    runs: os.routines.runs.handler(async ({ context, input }) => {
+      const bot = await botMustExist(context, input.botId)
+      return (await routineMustFit(context.routines.runs(bot.id, input.routineId))).map((run) => toRoutineRunInfo(run, bot.chatId))
     }),
   },
 

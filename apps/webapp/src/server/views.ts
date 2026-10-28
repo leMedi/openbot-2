@@ -1,7 +1,7 @@
-import { type AuditEntryInfo, type BotInfo, type CardInfo, type ChatInfo, type FactInfo, deletedAuthorName, type MessageInfo } from '@openbot/api-contract'
+import { type AuditEntryInfo, type BotInfo, type CardInfo, type ChatInfo, type FactInfo, deletedAuthorName, type MessageInfo, type RoutineInfo, type RoutineRunInfo } from '@openbot/api-contract'
 import type { BotStatus } from '@openbot/agent'
-import { type BotWithChat, type ChatSummary, factSourceName, handBackOutcomeOf, isQuestionCard, isTakeOverCard, questionAnswerOf, questionDismissedOf } from '@openbot/core'
-import type { AuditEntry, Fact, Message } from '@openbot/db'
+import { type BotWithChat, type ChatSummary, type RoutineState, factSourceName, handBackOutcomeOf, isQuestionCard, isTakeOverCard, questionAnswerOf, questionDismissedOf } from '@openbot/core'
+import type { AuditEntry, Fact, Message, RoutineRun } from '@openbot/db'
 
 /**
  * What the API shows of a message: never its tool call's idempotency key. A bot's message whose bot was deleted keeps
@@ -99,5 +99,36 @@ export function toFactInfo(fact: Fact): FactInfo {
     sourceBotName: fact.source === 'bot' ? factSourceName(fact) : null,
     createdAt: fact.createdAt.getTime(),
     updatedAt: fact.updatedAt.getTime(),
+  }
+}
+
+/** What the Routines pane shows of a routine. */
+export function toRoutineInfo(routine: RoutineState): RoutineInfo {
+  return {
+    id: routine.id,
+    botId: routine.botId,
+    name: routine.name,
+    prompt: routine.prompt,
+    schedule: routine.schedule,
+    enabled: routine.enabled,
+    nextRunAt: routine.nextRunAt?.getTime() ?? null,
+    createdBy: routine.createdBy,
+    running: routine.running,
+    createdAt: routine.createdAt.getTime(),
+    updatedAt: routine.updatedAt.getTime(),
+  }
+}
+
+/** A run in a routine's history, its message linked in the bot's DM `chatId`. */
+export function toRoutineRunInfo(run: RoutineRun, chatId: string): RoutineRunInfo {
+  return {
+    id: run.id,
+    routineId: run.routineId,
+    scheduledFor: run.scheduledFor.getTime(),
+    firedAt: run.firedAt?.getTime() ?? null,
+    status: run.status,
+    finishedAt: run.finishedAt?.getTime() ?? null,
+    message: run.messageId ? { id: run.messageId, chatId } : null,
+    test: run.test,
   }
 }

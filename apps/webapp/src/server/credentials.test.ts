@@ -77,6 +77,16 @@ describe('system credentials', () => {
     server.providers.script(endsSilently(), endsSilently())
     const group = await server.client.groups.create({ memberIds: [bot.id, ana.id], text: 'Hello, team' })
     await server.rounds.idle(group.chat.id)
+    const routine = await server.client.routines.create({ botId: bot.id, name: 'Digest', prompt: 'Send me a digest.', schedule: '@daily' })
+    const routineUpdated = await server.client.routines.update({ botId: bot.id, routineId: routine.id, schedule: '@weekly' })
+    const routinePaused = await server.client.routines.pause({ botId: bot.id, routineId: routine.id })
+    const routineResumed = await server.client.routines.resume({ botId: bot.id, routineId: routine.id })
+    server.providers.script(callsTools(['sendMessage', { text: 'Digest.' }]), endsSilently())
+    const routineRun = await server.client.routines.testRun({ botId: bot.id, routineId: routine.id })
+    await expect.poll(async () => (await server.client.routines.runs({ botId: bot.id, routineId: routine.id }))[0]?.status).toBe('ran')
+    const routineRuns = await server.client.routines.runs({ botId: bot.id, routineId: routine.id })
+    const routineList = await server.client.routines.list({ botId: bot.id })
+    await server.client.routines.delete({ botId: bot.id, routineId: routine.id })
     server.providers.script(callsTools(['sendMessage', { text: 'OK' }]), endsSilently(), callsTools(['sendMessage', { text: 'OK' }]), endsSilently())
 
     // Each procedure that returns data, called once it has something to return. A new procedure fails the check
@@ -112,6 +122,14 @@ describe('system credentials', () => {
       'sharedMemory.edit': await server.client.sharedMemory.edit({ factId: 2, importance: 4 }),
       'sharedMemory.list': await server.client.sharedMemory.list(),
       'sharedMemory.delete': null,
+      'routines.list': routineList,
+      'routines.create': routine,
+      'routines.update': routineUpdated,
+      'routines.pause': routinePaused,
+      'routines.resume': routineResumed,
+      'routines.testRun': routineRun,
+      'routines.runs': routineRuns,
+      'routines.delete': null,
       'bots.delete': null,
       'chats.list': await server.client.chats.list(),
       'chats.read': await server.client.chats.read({ chatId: bot.chatId }),

@@ -214,6 +214,65 @@ export type Onboarding = z.infer<typeof onboarding>
 /** An IANA time zone, e.g. `Europe/Paris`. */
 const timeZone = z.string().min(1)
 
+/**
+ * A bot's routine (design §5.4): a prompt and a schedule that wake the bot in its background lane. `schedule` is a
+ * 5-field cron expression, an alias (`@hourly`, `@daily`, `@weekly`, `@monthly`, `@yearly`), `@every <n>m|h|d` (at
+ * least 5 minutes), or a reminder's `at YYYY-MM-DDTHH:MM`, all in the owner's time zone.
+ */
+export const routine = z.object({
+  id: z.string(),
+  botId: z.string(),
+  name: z.string(),
+  /** The instruction the bot reads when it fires. */
+  prompt: z.string(),
+  schedule: z.string(),
+  /** False while paused, and for a reminder that fired. */
+  enabled: z.boolean(),
+  /** When it fires next, in ms since the epoch; null while disabled. */
+  nextRunAt: z.number().nullable(),
+  /** Who created it or last edited it: the owner's routines speak for the owner, the bot's are its own notes. */
+  createdBy: z.enum(['owner', 'bot']),
+  /** Its latest run is queued or running. */
+  running: z.boolean(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+})
+export type RoutineInfo = z.infer<typeof routine>
+
+export const routineRunStatuses = ['running', 'ran', 'skipped_overlap', 'missed', 'failed'] as const
+
+/** One run in a routine's history; the last 100 are kept. */
+export const routineRun = z.object({
+  id: z.number().int(),
+  routineId: z.string(),
+  /** When it was due (for a test run, when the owner started it), in ms since the epoch. */
+  scheduledFor: z.number(),
+  /** When it woke the bot; null when skipped or missed. */
+  firedAt: z.number().nullable(),
+  /** `running` while queued or running; `skipped_overlap` when the previous run was still going; `missed` while the server was down. */
+  status: z.enum(routineRunStatuses),
+  /** When it ended, or was recorded as skipped or missed; null while running. */
+  finishedAt: z.number().nullable(),
+  /** The first message the bot sent the owner in its DM during the run, in `chatId`; null when it stayed silent. */
+  message: z.object({ id: z.string(), chatId: z.string() }).nullable(),
+  /** Started by the owner's Test run. */
+  test: z.boolean(),
+})
+export type RoutineRunInfo = z.infer<typeof routineRun>
+
+/** A routine the owner creates: enabled unless said otherwise. */
+export const newRoutine = z.object({
+  name: z.string(),
+  prompt: z.string(),
+  schedule: z.string(),
+  enabled: z.boolean().optional(),
+})
+export type NewRoutine = z.infer<typeof newRoutine>
+
+/** What the owner changes of a routine; editing a bot's routine makes it the owner's. */
+export const routineChanges = newRoutine.omit({ enabled: true }).partial()
+export type RoutineChanges = z.infer<typeof routineChanges>
+
 export const liveEvent = z.discriminatedUnion('type', [
   /**
    * First event of every subscription. With `resumed`, the events the client missed since the stamp it reconnected
@@ -236,6 +295,12 @@ export const liveEvent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('message.updated'), message }),
   /** The owner's time zone changed (or was first detected); scheduled jobs reschedule in it. */
   z.object({ type: z.literal('timeZone.updated'), timeZone }),
+  /** A routine was created or changed, e.g. fired; `routine` is all of it as it is now. */
+  z.object({ type: z.literal('routine.updated'), routine }),
+  /** A routine and its runs are gone for good. */
+  z.object({ type: z.literal('routine.deleted'), botId: z.string(), routineId: z.string() }),
+  /** A run was recorded or changed, e.g. it ended; `run` is all of it as it is now. */
+  z.object({ type: z.literal('routineRun.updated'), botId: z.string(), run: routineRun }),
 ])
 export type LiveEvent = z.infer<typeof liveEvent>
 
@@ -358,14 +423,15 @@ export const verdict = z.discriminatedUnion('decision', [
   z.object({ decision: z.literal('ask'), reason: z.string(), proposedRule: z.string().optional() }),
 ])
 
-export const auditKinds = ['action', 'navigation', 'session_summary', 'extraction', 'consolidation'] as const
+export const auditKinds = ['action', 'navigation', 'session_summary', 'extraction', 'consolidation', 'routine'] as const
 export const auditKind = z.enum(auditKinds)
 
 /**
  * One entry of a bot's audit log: a side-effecting tool call and its review (`action`), a page a computer-use session's
  * browser opened (`navigation`), a computer-use session's summary once it ended (`session_summary`), or a change memory
  * extraction made or was refused, or an extraction skipped after failing (`extraction`), or a change nightly consolidation
- * made, rejected or was refused, or a consolidation skipped after failing (`consolidation`).
+ * made, rejected or was refused, or a consolidation skipped after failing (`consolidation`), or a routine's run that
+ * failed (`routine`).
  */
 export const auditEntry = z.object({
   id: z.string(),
@@ -519,6 +585,40 @@ export const contract = {
       })
       .input(z.object({ botId: z.string(), factId: z.coerce.number().int() }))
       .output(z.void()),
+  },
+  routines: {
+    list: oc
+      .route({ method: 'GET', path: '/bots/{botId}/routines', summary: "The bot's routines, oldest first, paused ones and fired reminders included" })
+      .input(z.object({ botId: z.string() }))
+      .output(z.array(routine)),
+    create: oc
+      .route({ method: 'POST', path: '/bots/{botId}/routines', summary: 'Create a routine for the bot, the owner\'s; at most 20 per bot' })
+      .input(newRoutine.extend({ botId: z.string() }))
+      .output(routine),
+    update: oc
+      .route({ method: 'PATCH', path: '/bots/{botId}/routines/{routineId}', summary: "Change a routine's name, instruction or schedule; it becomes the owner's" })
+      .input(routineChanges.extend({ botId: z.string(), routineId: z.string() }))
+      .output(routine),
+    pause: oc
+      .route({ method: 'POST', path: '/bots/{botId}/routines/{routineId}/pause', summary: "Pause a routine: it doesn't fire until resumed" })
+      .input(z.object({ botId: z.string(), routineId: z.string() }))
+      .output(routine),
+    resume: oc
+      .route({ method: 'POST', path: '/bots/{botId}/routines/{routineId}/resume', summary: 'Resume a routine, its next run computed from now' })
+      .input(z.object({ botId: z.string(), routineId: z.string() }))
+      .output(routine),
+    delete: oc
+      .route({ method: 'DELETE', path: '/bots/{botId}/routines/{routineId}', summary: 'Delete a routine and its history for good' })
+      .input(z.object({ botId: z.string(), routineId: z.string() }))
+      .output(z.void()),
+    testRun: oc
+      .route({ method: 'POST', path: '/bots/{botId}/routines/{routineId}/test-run', summary: 'Fire a routine now, without moving its next run; skipped while its previous run is going' })
+      .input(z.object({ botId: z.string(), routineId: z.string() }))
+      .output(routineRun),
+    runs: oc
+      .route({ method: 'GET', path: '/bots/{botId}/routines/{routineId}/runs', summary: "A routine's run history, newest first" })
+      .input(z.object({ botId: z.string(), routineId: z.string() }))
+      .output(z.array(routineRun)),
   },
   chats: {
     list: oc

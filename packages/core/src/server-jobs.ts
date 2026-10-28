@@ -20,7 +20,7 @@ export type DailyJob = {
 const hourMs = 60 * 60 * 1000
 
 /** The offset of `timeZone` from UTC at `instant`, in ms (positive east of Greenwich). */
-function offsetAt(instant: number, timeZone: string): number {
+export function offsetAt(instant: number, timeZone: string): number {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' })
       .formatToParts(instant)
@@ -38,7 +38,7 @@ function parseLocalTime(at: LocalTime): [hour: number, minute: number] {
 }
 
 /** `local` as the instant UTC clocks read it, or an error for anything but a real `YYYY-MM-DDTHH:MM`. */
-function parseLocalDateTime(local: LocalDateTime): number {
+export function parseLocalDateTime(local: LocalDateTime): number {
   const invalid = () => new Error(`${local} isn't a local date and time (YYYY-MM-DDTHH:MM)`)
   const match = /^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):([0-5]\d)$/.exec(local)
   if (!match) throw invalid()
@@ -51,7 +51,7 @@ function parseLocalDateTime(local: LocalDateTime): number {
 }
 
 /** The instant when clocks in `timeZone` read `wall` (a wall-clock time written as if it were UTC). */
-function instantOfWall(wall: number, timeZone: string): number {
+export function instantOfWall(wall: number, timeZone: string): number {
   // At most one change of offset falls within a day either side; whichever offsets hold there, one or both fit.
   const before = offsetAt(wall - 24 * hourMs, timeZone)
   const after = offsetAt(wall + 24 * hourMs, timeZone)
