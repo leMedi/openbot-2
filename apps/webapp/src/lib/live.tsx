@@ -1,5 +1,5 @@
-import { type BotInfo, type ChatInfo, deletedAuthorName, type MessageInfo, type StampedEvent } from '@openbot/api-contract'
-import { type ReactNode, createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react'
+import { type BotInfo, type ChatInfo, deletedAuthorName, type LiveEvent, type MessageInfo, type StampedEvent } from '@openbot/api-contract'
+import { type ReactNode, createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { api } from './api.ts'
 
 const reconnectDelayMs = 1000
@@ -52,6 +52,7 @@ export class LiveStore {
   connected = false
   #stamp: { epoch: string; seq: number } | undefined
   #listeners = new Set<() => void>()
+  #eventListeners = new Set<(event: LiveEvent) => void>()
   #version = 0
   readonly #storage: Storage | undefined
 
@@ -63,6 +64,15 @@ export class LiveStore {
   subscribe = (listener: () => void) => {
     this.#listeners.add(listener)
     return () => this.#listeners.delete(listener)
+  }
+
+  /**
+   * Calls `listener` with every live event once the store applied it, for state kept outside the store, such as a
+   * pane's. A `hello` that isn't `resumed` means events were lost: such state must be read anew.
+   */
+  listen(listener: (event: LiveEvent) => void) {
+    this.#eventListeners.add(listener)
+    return () => void this.#eventListeners.delete(listener)
   }
 
   /** Changes on every update, for `useSyncExternalStore`. */
@@ -219,6 +229,11 @@ export class LiveStore {
     // Taken only after a refetch succeeds: if it fails, the next connection refetches again instead of resuming.
     if (event.type === 'hello' && !event.resumed) await this.#refetch()
     this.#stamp = { epoch, seq }
+    this.#handle(event)
+    for (const listener of this.#eventListeners) listener(event)
+  }
+
+  #handle(event: LiveEvent) {
     switch (event.type) {
       case 'hello':
         this.#update(() => (this.connected = true))
@@ -283,6 +298,15 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     return () => controller.abort()
   }, [store])
   return <LiveContext.Provider value={store}>{children}</LiveContext.Provider>
+}
+
+/** Calls the latest `listener` with every live event, as `LiveStore.listen`, while the component is mounted. */
+export function useLiveEvents(listener: (event: LiveEvent) => void) {
+  const store = useContext(LiveContext)
+  if (!store) throw new Error('useLiveEvents needs a LiveProvider')
+  const latest = useRef(listener)
+  latest.current = listener
+  useEffect(() => store.listen((event) => latest.current(event)), [store])
 }
 
 /** The live store, re-rendering on every change. */

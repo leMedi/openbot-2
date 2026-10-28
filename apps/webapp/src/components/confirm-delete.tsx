@@ -1,4 +1,4 @@
-import type { BotInfo, ChatInfo } from '@openbot/api-contract'
+import type { BotInfo, ChatInfo, RoutineInfo } from '@openbot/api-contract'
 import { type ReactNode, useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
 
@@ -79,6 +79,20 @@ export function ConfirmDeleteGroup({ chat, onCancel, onDeleted }: { chat: ChatIn
     <ConfirmDelete title={`Delete ${chat.name}?`} remove={() => api().groups.delete({ chatId: chat.id })} onCancel={onCancel} onDeleted={onDeleted}>
       This permanently deletes the group chat, its messages and the files sent in it, and stops its members answering. The
       members stay, and remember what they said in it. This can't be undone.
+    </ConfirmDelete>
+  )
+}
+
+/** Asks before deleting a routine and its run history for good, then deletes it. */
+export function ConfirmDeleteRoutine({ routine, onCancel, onDeleted }: { routine: RoutineInfo; onCancel: () => void; onDeleted: () => void }) {
+  return (
+    <ConfirmDelete
+      title={`Delete ${routine.name}?`}
+      remove={() => api().routines.delete({ botId: routine.botId, routineId: routine.id })}
+      onCancel={onCancel}
+      onDeleted={onDeleted}
+    >
+      This permanently deletes the routine and its run history. Messages it sent stay in the chat. This can't be undone.
     </ConfirmDelete>
   )
 }

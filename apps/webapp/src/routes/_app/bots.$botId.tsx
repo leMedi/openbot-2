@@ -6,6 +6,7 @@ import { BotAvatar } from '../../components/bot-avatar.tsx'
 import { ChatView } from '../../components/chat-view.tsx'
 import { MemoryPane } from '../../components/memory-pane.tsx'
 import { ProfilePane } from '../../components/profile-pane.tsx'
+import { RoutinesPane, type RoutineToOpen } from '../../components/routines-pane.tsx'
 import { FullscreenScreen, ScreenPane } from '../../components/screen-pane.tsx'
 import { useLive } from '../../lib/live.tsx'
 
@@ -14,17 +15,22 @@ export const Route = createFileRoute('/_app/bots/$botId')({
 })
 
 /** The right-hand pane beside a DM: one at a time, the bot's screen by default. */
-type Pane = 'screen' | 'profile' | 'memory'
+type Pane = 'screen' | 'profile' | 'routines' | 'memory'
 
-/** The DM between the owner and one bot, in Grok Bot's layout, with its Screen or Profile pane beside it. */
+/** The DM between the owner and one bot, in Grok Bot's layout, with its Screen, Profile, Routines or Memory pane beside it. */
 function Dm() {
   const { botId } = Route.useParams()
   const live = useLive()
   const navigate = useNavigate()
   const [pane, setPane] = useState<Pane | null>('screen')
+  /** The routine a timeline chip asked the Routines pane to open. */
+  const [routineToOpen, setRoutineToOpen] = useState<RoutineToOpen>()
   /** Whether the bot's screen is fullscreen, where the owner controls it; another bot's starts closed. */
   const [fullscreen, setFullscreen] = useState(false)
-  useEffect(() => setFullscreen(false), [botId])
+  useEffect(() => {
+    setFullscreen(false)
+    setRoutineToOpen(undefined)
+  }, [botId])
   const bot = live.bots?.find((entry) => entry.id === botId)
   const waitingTakeOver = bot && [...(live.messages.get(bot.chatId) ?? [])].reverse().find((message) => message.card?.type === 'take_over' && !message.card.outcome)
   function closeFullscreen() {
@@ -40,7 +46,16 @@ function Dm() {
         <ChatView
           key={bot.chatId}
           chatId={bot.chatId}
-          header={<DmHeader bot={bot} pane={pane} onTogglePane={(next) => setPane((open) => (open === next ? null : next))} />}
+          header={
+            <DmHeader
+              bot={bot}
+              pane={pane}
+              onTogglePane={(next) => {
+                setRoutineToOpen(undefined)
+                setPane((open) => (open === next ? null : next))
+              }}
+            />
+          }
           notice={bot.error && !bot.working && <ModelError bot={bot} />}
           composerLabel={`Message ${bot.name}`}
           emptyText={`Say hi to ${bot.name}.`}
@@ -48,11 +63,16 @@ function Dm() {
           allowFiles
           showAuthors={false}
           onScreen={() => setFullscreen(true)}
+          onOpenRoutine={(routineId) => {
+            setRoutineToOpen({ routineId, requestedAt: Date.now() })
+            setPane('routines')
+          }}
         />
       </div>
       {pane === 'screen' && <ScreenPane bot={bot} takeOver={waitingTakeOver} onOpen={() => setFullscreen(true)} />}
       {fullscreen && <FullscreenScreen bot={bot} takeOver={waitingTakeOver} onClose={closeFullscreen} />}
       {pane === 'memory' && <MemoryPane bot={bot} />}
+      {pane === 'routines' && <RoutinesPane key={bot.id} bot={bot} open={routineToOpen} onClose={() => setPane(null)} />}
       {pane === 'profile' && (
         <ProfilePane
           bot={bot}
@@ -67,6 +87,8 @@ function Dm() {
   )
 }
 
+const paneLabels = { screen: 'Screen', profile: 'Profile', routines: 'Routines' } as const
+
 /** The DM's bar: the bot, whether it works, and the pane toggles. */
 function DmHeader({ bot, pane, onTogglePane }: { bot: BotInfo; pane: Pane | null; onTogglePane: (pane: Pane) => void }) {
   return (
@@ -75,7 +97,7 @@ function DmHeader({ bot, pane, onTogglePane }: { bot: BotInfo; pane: Pane | null
       <span className="font-semibold">{bot.name}</span>
       {bot.working && <span className="animate-fade-in text-sm text-muted-foreground">Working</span>}
       <span className="ml-auto flex gap-1">
-        {(['screen', 'profile'] as const).map((choice) => (
+        {(['screen', 'profile', 'routines'] as const).map((choice) => (
           <button
             key={choice}
             type="button"
@@ -83,7 +105,7 @@ function DmHeader({ bot, pane, onTogglePane }: { bot: BotInfo; pane: Pane | null
             onClick={() => onTogglePane(choice)}
             className={cn('pressable rounded-md px-2 py-1 text-base hover:bg-secondary-hover', pane === choice && 'bg-selected')}
           >
-            {choice === 'screen' ? 'Screen' : 'Profile'}
+            {paneLabels[choice]}
           </button>
         ))}
         <MoreMenu pane={pane} onToggle={onTogglePane} />
