@@ -9,6 +9,7 @@ const record: RunRecord = {
     { bot: 'Linus', tool: 'use_computer', args: { goal: 'Check the weather' } },
     { bot: 'Ada', tool: 'sendMessage', args: { text: 'And warm' } },
   ],
+  pluginCalls: [],
   chats: {
     Ada: [
       { from: 'owner', author: 'You', text: 'Weather in Paris?' },
@@ -37,6 +38,29 @@ const record: RunRecord = {
 const check = (assertion: Parameters<typeof checkAssertion>[0]) => checkAssertion(assertion, record)
 
 describe('deterministic assertions', () => {
+  it("check every plugin tool call reached its plugin's server, as only granted ones do", () => {
+    const calls = (tools: string[], answered: string[]) =>
+      checkAssertion(
+        { type: 'granted_tools_only' },
+        {
+          ...record,
+          toolCalls: tools.map((tool) => ({ bot: 'Ada', tool, args: {} })),
+          pluginCalls: answered.map((tool) => ({ tool, account: 'Work', args: {}, result: 'Found' })),
+        },
+      )
+
+    expect(calls(['tool_search', 'mcp__notion_account2__search', 'mcp__notion_account2__search'], ['mcp__notion_account2__search', 'mcp__notion_account2__search'])).toEqual({
+      label: 'granted_tools_only',
+      passed: true,
+      detail: 'every plugin tool call was granted',
+    })
+    expect(calls(['mcp__notion__search', 'mcp__notion_account2__search', 'mcp__notion_account1__search'], ['mcp__notion_account2__search'])).toEqual({
+      label: 'granted_tools_only',
+      passed: false,
+      detail: 'not granted: Ada mcp__notion__search, Ada mcp__notion_account1__search',
+    })
+  })
+
   it('check whether a tool was called, by anyone or by one bot', () => {
     expect(check({ type: 'tool_called', tool: 'bash' })).toEqual({ label: 'tool_called bash', passed: true, detail: 'called 1 time' })
     expect(check({ type: 'tool_called', tool: 'use_computer', bot: 'Ada' })).toEqual({

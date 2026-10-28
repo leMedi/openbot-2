@@ -204,7 +204,7 @@ describe('plugin accounts granted to bots', () => {
   it('reconnect on the next call after the server drops their session', async () => {
     let restart = () => {}
     // The server restarts once it has answered the first search.
-    const { server, fake } = await start([{ ...searchPages, call: (args) => (restart(), searchPages.call!(args)) }])
+    const { server, fake } = await start([{ ...searchPages, call: (args, caller) => (restart(), searchPages.call!(args, caller)) }])
     restart = () => {
       restart = () => {}
       fake.dropSessions()

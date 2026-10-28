@@ -1,22 +1,29 @@
 description: >-
-  A plugin tool answers the owner's question directly. The bot uses it before the shell or the browser.
+  A plugin Linus is granted answers the owner's question directly. He loads its tool and uses it before the shell or
+  the browser.
 bots:
   - name: Linus
     title: Engineer
 world:
-  tools:
-    - name: github_list_issues
-      description: "GitHub plugin: lists a repository's open issues. Arguments: repo (owner/name)."
-      result: |
-        3 open issues in leMedi/openbot-2:
-        #41 Sidebar flickers on resize
-        #42 Screen pane stays black after a restart
-        #43 Typo in onboarding
+  plugins:
+    github:
+      display_name: GitHub
+      description: Read and manage the repositories, issues and pull requests of a GitHub account.
+      tools:
+        - name: list_issues
+          description: "Lists a repository's open issues. Arguments: repo (owner/name)."
+          result: |
+            3 open issues in leMedi/openbot-2:
+            #41 Sidebar flickers on resize
+            #42 Screen pane stays black after a restart
+            #43 Typo in onboarding
+      accounts:
+        - { name: Work, granted: [Linus] }
 script:
   - to: Linus
     text: How many open issues does leMedi/openbot-2 have right now?
 assert:
-  - tool_called: github_list_issues
+  - tool_called: mcp__github_account1__list_issues
   - tool_not_called: bash
   - tool_not_called: use_computer
   - no_silent_answer
@@ -24,6 +31,7 @@ rubric:
   - Says there are 3 open issues
 faux:
   Linus:
-    - call: { github_list_issues: { repo: leMedi/openbot-2 } }
+    - call: { tool_search: { query: github issues } }
+    - call: { mcp__github_account1__list_issues: { repo: leMedi/openbot-2 } }
     - send: 3 open right now, the sidebar flicker, the black screen pane after a restart, and an onboarding typo
     - end

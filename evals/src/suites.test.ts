@@ -5,7 +5,7 @@ import { loadScenarios } from './suites.ts'
 describe('the suites', () => {
   it('select every scenario, the smoke suite, a suite, or one scenario', () => {
     const all = loadScenarios().map((scenario) => scenario.id)
-    expect(new Set(all.map((id) => id.split('/')[0]))).toEqual(new Set(['groups', 'memory', 'routines', 'tool-priority', 'voice']))
+    expect(new Set(all.map((id) => id.split('/')[0]))).toEqual(new Set(['groups', 'memory', 'plugins', 'routines', 'tool-priority', 'voice']))
     expect(loadScenarios('smoke').map((scenario) => scenario.id)).toEqual([
       'groups/mention-answers-only-named',
       'tool-priority/fetch-with-shell',
@@ -13,7 +13,7 @@ describe('the suites', () => {
     ])
     expect(loadScenarios('voice').every((scenario) => scenario.suite === 'voice')).toBe(true)
     expect(loadScenarios('voice/short-messages').map((scenario) => scenario.id)).toEqual(['voice/short-messages'])
-    expect(() => loadScenarios('vioce')).toThrow(/No scenarios match "vioce".*groups, memory, routines, tool-priority, voice/)
+    expect(() => loadScenarios('vioce')).toThrow(/No scenarios match "vioce".*groups, memory, plugins, routines, tool-priority, voice/)
   })
 
   // Their faux scripts play what a well-behaved bot does, so every check passes: it keeps scenarios, their checks and

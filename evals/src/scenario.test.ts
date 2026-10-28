@@ -71,6 +71,7 @@ faux:
         shell: [{ match: 'curl .*wttr', stdout: 'Paris: sunny, 21C', stderr: '', exitCode: 0 }],
         pages: { 'https://shop.test/': { title: 'Shop', elements: [{ role: 'heading', name: 'Shop' }] } },
         tools: [{ name: 'weather_lookup', description: 'Current weather for a city', result: 'Sunny, 21C' }],
+        plugins: {},
       },
       extraction: false,
       memory: [],
@@ -187,6 +188,64 @@ assert:
     expect(() => parse('bots: [{ name: Ada }]\nscript: [{ advance: 2026-03-16T09:00:00Z }]')).toThrow(/script\[0\]\.advance: .*needs world\.clock/)
   })
 
+  it("reads plugins: the catalog's fake servers, their connected accounts and grants, and the owner's decisions", () => {
+    const scenario = parse(`
+bots: [{ name: Ada }, { name: Linus }]
+world:
+  plugins:
+    notion:
+      display_name: Notion
+      description: Your Notion workspace
+      tools:
+        - name: search
+          description: Search pages
+          result: { Personal: Groceries list, Work: Q3 roadmap }
+        - { name: fetch, description: Read a page, result: The page }
+      accounts:
+        - { name: Personal, granted: [Ada, Linus] }
+        - Work
+    linear:
+      description: Your issues
+      tools: [{ name: list_issues, description: List issues, result: "#1 Fix login" }]
+script:
+  - { to: Ada, text: hi }
+  - { decide: Ada, plugin: notion, grant: Work }
+  - { decide: Linus, plugin: linear, deny: true }
+`)
+
+    expect(scenario.world.plugins).toEqual({
+      notion: {
+        displayName: 'Notion',
+        description: 'Your Notion workspace',
+        tools: [
+          { name: 'search', description: 'Search pages', result: { Personal: 'Groceries list', Work: 'Q3 roadmap' } },
+          { name: 'fetch', description: 'Read a page', result: 'The page' },
+        ],
+        accounts: [
+          { name: 'Personal', granted: ['Ada', 'Linus'] },
+          { name: 'Work', granted: [] },
+        ],
+      },
+      linear: { displayName: 'linear', description: 'Your issues', tools: [{ name: 'list_issues', description: 'List issues', result: '#1 Fix login' }], accounts: [] },
+    })
+    expect(scenario.script.slice(1)).toEqual([
+      { decide: 'Ada', plugin: 'notion', grant: 'Work' },
+      { decide: 'Linus', plugin: 'linear', deny: true },
+    ])
+  })
+
+  it('rejects grants and decisions naming no bot, plugin or account', () => {
+    const world = (accounts: string) => `world: { plugins: { notion: { description: Notes, tools: [], accounts: ${accounts} } } }`
+    expect(() => parse(`bots: [{ name: Ada }]\n${world('[{ name: Work, granted: [Rex] }]')}\nscript: [{ to: Ada, text: hi }]`)).toThrow(
+      /world\.plugins\.notion\.accounts\[0\]\.granted: no bot named "Rex"/,
+    )
+    expect(() => parse(`bots: [{ name: Ada }]\n${world('[Work, Work]')}\nscript: [{ to: Ada, text: hi }]`)).toThrow(/world\.plugins\.notion\.accounts\[1\]: "Work" is already an account/)
+    expect(() => parse(`bots: [{ name: Ada }]\n${world('[Work]')}\nscript: [{ decide: Rex, plugin: notion, deny: true }]`)).toThrow(/script\[0\]\.decide: no bot named "Rex"/)
+    expect(() => parse(`bots: [{ name: Ada }]\n${world('[Work]')}\nscript: [{ decide: Ada, plugin: linear, deny: true }]`)).toThrow(/script\[0\]\.plugin: no plugin named "linear"/)
+    expect(() => parse(`bots: [{ name: Ada }]\n${world('[Work]')}\nscript: [{ decide: Ada, plugin: notion, grant: Home }]`)).toThrow(/script\[0\]\.grant: notion has no account named "Home"/)
+    expect(() => parse(`bots: [{ name: Ada }]\n${world('[Work]')}\nscript: [{ decide: Ada, plugin: notion }]`)).toThrow(/script\[0\]/)
+  })
+
   it('fills in defaults for a minimal scenario', () => {
     const scenario = parse(`
 bots: [{ name: Ada }]
@@ -197,7 +256,7 @@ assert: [no_silent_answer]
       description: '',
       smoke: false,
       groups: [],
-      world: { clock: null, shell: [], pages: {}, tools: [] },
+      world: { clock: null, shell: [], pages: {}, tools: [], plugins: {} },
       assertions: [{ type: 'no_silent_answer' }],
       rubric: [],
       faux: {},

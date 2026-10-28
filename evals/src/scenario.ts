@@ -9,6 +9,21 @@ export type ShellRule = { match: string; stdout: string; stderr: string; exitCod
 /** A fake tool server's tool: bots get it beside their built-in tools, and every call answers `result`. */
 export type FakeTool = { name: string; description: string; result: string }
 
+/**
+ * A plugin in the fake world's catalog, served by a fake hosted MCP server. Its accounts are connected before the run,
+ * `account1`, `account2`… in order, each named and granted to some bots; its tools answer `result`, or the result for
+ * the account called, by account name.
+ */
+export type FakePlugin = {
+  displayName: string
+  description: string
+  tools: { name: string; description: string; result: string | Record<string, string> }[]
+  accounts: { name: string; granted: string[] }[]
+}
+
+/** The slug of a plugin's account named `name`: its accounts are connected in order, `account1`, `account2`… */
+export const accountSlug = (plugin: FakePlugin, name: string) => `account${plugin.accounts.findIndex((account) => account.name === name) + 1}`
+
 /** One model response on the faux model: tool calls, private text ending the run, or ending it silently. */
 export type FauxTurn = { tools: [name: string, args: Record<string, unknown>][] } | { say: string } | { end: true }
 
@@ -23,6 +38,8 @@ export type Assertion =
    * those a regex `matches` (case-insensitive); with `last`, only those after the owner's last message there.
    */
   | { type: 'messages'; in: string; from?: string; matches?: string; last?: boolean; min?: number; max?: number }
+  /** Every plugin tool call (`mcp__…`) reached its plugin's server: no bot called a tool it isn't granted. */
+  | { type: 'granted_tools_only' }
   /** No bot message longer than `chars` characters: short messages. */
   | { type: 'max_message_length'; chars: number; in?: string }
   /** Every owner message in the chat (every chat when absent) was answered with at least one bot message. */
@@ -60,10 +77,18 @@ export type SeededRoutine = { bot: string; name: string; prompt: string; schedul
 /**
  * One step of the script: an owner's message to a bot's DM or a group chat; a compaction of a bot's history, as
  * pi-durable does near the context window; the owner deleting every fact a regex `forget` matches (case-insensitive);
- * or the server's clock moving forward, by `advance` ms or to the instant `advanceTo`, firing the routines due on the
- * way. Every step but `forget` waits until all is quiet.
+ * the server's clock moving forward, by `advance` ms or to the instant `advanceTo`, firing the routines due on the
+ * way; or the owner deciding the newest undecided request of a bot (`decide`) for `plugin`, granting the account named
+ * `grant` or denying it, which does nothing when there is none. Every step but `forget` waits until all is quiet.
  */
-export type ScriptStep = { to: string; text: string } | { compact: string } | { forget: string } | { advance: number } | { advanceTo: string }
+export type ScriptStep =
+  | { to: string; text: string }
+  | { compact: string }
+  | { forget: string }
+  | { advance: number }
+  | { advanceTo: string }
+  | { decide: string; plugin: string; grant: string }
+  | { decide: string; plugin: string; deny: true }
 
 /** A scenario file, or a selection of scenarios, that can't be used; its message says why. */
 export class ScenarioError extends Error {}
@@ -86,6 +111,8 @@ export type Scenario = {
     shell: ShellRule[]
     pages: Record<string, TestPage>
     tools: FakeTool[]
+    /** The plugin catalog, by plugin name; empty without plugins. */
+    plugins: Record<string, FakePlugin>
   }
   /** Extracts memory after every run, on the memory model: the bots' model on real runs, `fauxMemory` on the faux one. */
   extraction: boolean
@@ -158,6 +185,7 @@ const assertion = z.union([
   z.object({ max_message_length: z.union([z.number().int().positive(), z.object({ chars: z.number().int().positive(), in: name.optional() }).strict()]) }).strict(),
   z.object({ no_silent_answer: name.nullable() }).strict(),
   z.literal('no_silent_answer'),
+  z.literal('granted_tools_only'),
 ])
 
 const fauxTurn = z.union([
@@ -173,6 +201,20 @@ const pageElement = z.union([
   z.object({ role: z.literal('button'), name: z.string(), href: z.string().optional() }).strict(),
   z.object({ role: z.literal('textbox'), name: z.string() }).strict(),
 ])
+
+/** A catalog plugin's name, as its tools' names carry it. */
+const pluginName = z.string().regex(/^[a-z0-9-]+$/, 'not a plugin name: lowercase letters, digits and dashes')
+
+const plugin = z
+  .object({
+    display_name: z.string().min(1).optional(),
+    description: z.string().min(1),
+    tools: z.array(z.object({ name, description: z.string(), result: z.union([z.string(), z.record(name, z.string())]) }).strict()).default([]),
+    accounts: z
+      .array(z.union([name.transform((account) => ({ name: account, granted: [] })), z.object({ name, granted: z.array(name).default([]) }).strict()]))
+      .default([]),
+  })
+  .strict()
 
 const schema = z
   .object({
@@ -200,9 +242,10 @@ const schema = z
           .default([]),
         pages: z.record(z.string(), z.object({ title: z.string(), elements: z.array(pageElement) }).strict()).default({}),
         tools: z.array(z.object({ name, description: z.string(), result: z.string() }).strict()).default([]),
+        plugins: z.record(pluginName, plugin).default({}),
       })
       .strict()
-      .default({ clock: null, shell: [], pages: {}, tools: [] }),
+      .default({ clock: null, shell: [], pages: {}, tools: [], plugins: {} }),
     extraction: z.boolean().default(false),
     memory: z
       .array(
@@ -224,6 +267,8 @@ const schema = z
           z.object({ compact: name }).strict(),
           z.object({ forget: regex }).strict(),
           z.object({ advance: z.union([duration, instant], 'not a duration such as 30m, 2h or 1d, or a time') }).strict(),
+          z.object({ decide: name, plugin: pluginName, grant: name }).strict(),
+          z.object({ decide: name, plugin: pluginName, deny: z.literal(true) }).strict(),
         ]),
       )
       .min(1),
@@ -238,6 +283,7 @@ type Raw = z.infer<typeof schema>
 
 function toAssertion(raw: Raw['assert'][number]): Assertion {
   if (raw === 'no_silent_answer') return { type: 'no_silent_answer' }
+  if (raw === 'granted_tools_only') return { type: 'granted_tools_only' }
   if ('tool_called' in raw) return { type: 'tool_called', ...(typeof raw.tool_called === 'string' ? { tool: raw.tool_called } : raw.tool_called) }
   if ('tool_not_called' in raw)
     return { type: 'tool_not_called', ...(typeof raw.tool_not_called === 'string' ? { tool: raw.tool_not_called } : raw.tool_not_called) }
@@ -248,6 +294,15 @@ function toAssertion(raw: Raw['assert'][number]): Assertion {
   if ('max_message_length' in raw)
     return { type: 'max_message_length', ...(typeof raw.max_message_length === 'number' ? { chars: raw.max_message_length } : raw.max_message_length) }
   return { type: 'no_silent_answer', ...(raw.no_silent_answer ? { in: raw.no_silent_answer } : {}) }
+}
+
+function toPlugin(name: string, raw: Raw['world']['plugins'][string]): FakePlugin {
+  return {
+    displayName: raw.display_name ?? name,
+    description: raw.description,
+    tools: raw.tools,
+    accounts: raw.accounts,
+  }
 }
 
 function toScriptStep(raw: Raw['script'][number]): ScriptStep {
@@ -276,9 +331,22 @@ function unknownNames(raw: Raw): string[] {
   raw.routines.forEach((routine, i) => {
     if (!bots.has(routine.bot)) problems.push(`routines[${i}].bot: no bot named "${routine.bot}"`)
   })
+  for (const [pluginName, plugin] of Object.entries(raw.world.plugins)) {
+    plugin.accounts.forEach((account, i) => {
+      const path = `world.plugins.${pluginName}.accounts[${i}]`
+      if (plugin.accounts.findIndex((other) => other.name === account.name) < i) problems.push(`${path}: "${account.name}" is already an account of ${pluginName}`)
+      for (const bot of account.granted) if (!bots.has(bot)) problems.push(`${path}.granted: no bot named "${bot}"`)
+    })
+  }
   raw.script.forEach((step, i) => {
     if ('to' in step && !chats.has(step.to)) problems.push(`script[${i}].to: no bot or group named "${step.to}"`)
     if ('compact' in step && !bots.has(step.compact)) problems.push(`script[${i}].compact: no bot named "${step.compact}"`)
+    if (!('decide' in step)) return
+    if (!bots.has(step.decide)) problems.push(`script[${i}].decide: no bot named "${step.decide}"`)
+    const plugin = raw.world.plugins[step.plugin]
+    if (!plugin) problems.push(`script[${i}].plugin: no plugin named "${step.plugin}"`)
+    else if ('grant' in step && !plugin.accounts.some((account) => account.name === step.grant))
+      problems.push(`script[${i}].grant: ${step.plugin} has no account named "${step.grant}"`)
   })
   problems.push(...backwardMoves(raw))
   raw.assert.map(toAssertion).forEach((assertion, i) => {
@@ -326,7 +394,7 @@ export function parseScenario(yaml: string, { suite, name }: { suite: string; na
     smoke: raw.smoke,
     bots: raw.bots,
     groups: raw.groups,
-    world: raw.world,
+    world: { ...raw.world, plugins: Object.fromEntries(Object.entries(raw.world.plugins).map(([name, plugin]) => [name, toPlugin(name, plugin)])) },
     extraction: raw.extraction,
     memory: raw.memory,
     routines: raw.routines,

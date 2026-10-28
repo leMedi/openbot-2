@@ -1,12 +1,25 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { ModelProvider } from '@openbot/agent'
-import { answeringProvider, callsTools, endsSilently, says, type ExecResult, type FakeTurn, recordingTool } from '@openbot/agent/testing'
+import {
+  answeringProvider,
+  callsTools,
+  endsSilently,
+  says,
+  type ExecResult,
+  type FakeMcpServer,
+  type FakeTurn,
+  recordingTool,
+  startFakeMcpServer,
+} from '@openbot/agent/testing'
 import type { BotInfo, FactInfo, MessageInfo } from '@openbot/api-contract'
 import type { ComputerBot } from '@openbot/core'
 import { createTestServer, type TestServer } from '@openbot/webapp/testing'
 import { type AssertionResult, checkAssertion } from './assertions.ts'
 import { judgeRequest, parseVerdicts, type RubricResult } from './judge.ts'
 import type { RunResult } from './report.ts'
-import type { FauxTurn, Scenario } from './scenario.ts'
+import { accountSlug, type FakePlugin, type FauxTurn, type Scenario, type ScriptStep } from './scenario.ts'
 import type { ChatMessage, RunRecord } from './run-record.ts'
 
 /**
@@ -75,7 +88,10 @@ export async function runScenario(scenario: Scenario, models: EvalModels, { run 
     shellLog.push({ bot: bot.name, command, stdout: result?.stdout ?? '' })
     return result
   }
+  const plugins = await startPlugins(scenario.world.plugins)
   const server = await createTestServer({
+    // The world's plugins only, never the bundled ones' real servers.
+    catalog: plugins.catalog,
     shell,
     pages: scenario.world.pages,
     tools: scenario.world.tools.map((tool) => recordingTool(tool.name, 'mcp', tool).tool),
@@ -84,9 +100,12 @@ export async function runScenario(scenario: Scenario, models: EvalModels, { run 
     ...(scenario.world.clock && { now: new Date(scenario.world.clock) }),
     // Forced compactions summarize all but the newest entries, so even a short chat compacts.
     ...(scenario.script.some((step) => 'compact' in step) && { compaction: { keepRecentTokens: 1 } }),
+  }).catch(async (error: unknown) => {
+    await plugins.close()
+    throw error
   })
   now = () => server.clock.now()
-  const record: RunRecord = { toolCalls: [], chats: {}, memory: [], routines: [] }
+  const record: RunRecord = { toolCalls: [], pluginCalls: plugins.calls, chats: {}, memory: [], routines: [] }
   const result = (fields: { assertions?: AssertionResult[]; rubric?: RubricResult[]; error?: string }): ScenarioRun => ({
     scenario: scenario.id,
     run,
@@ -99,6 +118,7 @@ export async function runScenario(scenario: Scenario, models: EvalModels, { run 
 
   try {
     const bots = await setUp(server, scenario, models)
+    await connectAccounts(server, scenario, plugins, bots)
     const groups = new Map<string, string>()
     let error: string | undefined
     try {
@@ -111,6 +131,11 @@ export async function runScenario(scenario: Scenario, models: EvalModels, { run 
         }
         if ('forget' in step) {
           await forget(server, bots, new RegExp(step.forget, 'i'))
+          continue
+        }
+        if ('decide' in step) {
+          await decide(server, bots.get(step.decide)!, step, scenario.world.plugins[step.plugin]!)
+          await untilQuiet(server, [...groups.values()], deadline)
           continue
         }
         if ('advance' in step || 'advanceTo' in step) {
@@ -146,7 +171,92 @@ export async function runScenario(scenario: Scenario, models: EvalModels, { run 
     return result({ error: (caught as Error).message })
   } finally {
     await server.close()
+    await plugins.close()
   }
+}
+
+/** The instance as the owner opens it on their private network over plain HTTP: a sign-in ends in a pasted URL. */
+const privateOrigin = 'http://192.168.1.25:3000'
+
+/**
+ * Serves each of the world's plugins from a fake hosted MCP server, its tools answering by the account calling (the
+ * fake's user is the account's name) and logging the calls they answer, and writes them as the catalog the server
+ * reads: the world's plugins only.
+ */
+async function startPlugins(plugins: Record<string, FakePlugin>) {
+  const catalog = await mkdtemp(join(tmpdir(), 'openbot-eval-catalog-'))
+  const calls: RunRecord['pluginCalls'] = []
+  const fakes = new Map<string, FakeMcpServer>()
+  const close = async () => {
+    await Promise.all([...fakes.values()].map((fake) => fake.close()))
+    await rm(catalog, { recursive: true, force: true })
+  }
+  try {
+    for (const [name, plugin] of Object.entries(plugins)) {
+      const fake = await startFakeMcpServer({
+        tools: plugin.tools.map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          inputSchema: { type: 'object', properties: {}, additionalProperties: true },
+          call: (args, { user: accountName }) => {
+            const result = typeof tool.result === 'string' ? tool.result : (tool.result[accountName] ?? '')
+            calls.push({ tool: `mcp__${name}_${accountSlug(plugin, accountName)}__${tool.name}`, account: accountName, args, result })
+            return result
+          },
+        })),
+      })
+      fakes.set(name, fake)
+      await mkdir(join(catalog, name, '.claude-plugin'), { recursive: true })
+      await writeFile(join(catalog, name, '.claude-plugin', 'plugin.json'), JSON.stringify({ name, displayName: plugin.displayName, description: plugin.description }))
+      await writeFile(join(catalog, name, '.mcp.json'), JSON.stringify({ mcpServers: { [name]: { type: 'http', url: fake.url } } }))
+    }
+  } catch (error) {
+    await close()
+    throw error
+  }
+  return { catalog, calls, fakes, close }
+}
+
+type Plugins = Awaited<ReturnType<typeof startPlugins>>
+
+/**
+ * Connects each plugin's accounts in order, as the owner would by pasting the URL the browser ends on, so they are
+ * `account1`, `account2`…; names them, and grants them to their bots.
+ */
+async function connectAccounts(server: TestServer, scenario: Scenario, plugins: Plugins, bots: Map<string, BotInfo>) {
+  for (const [name, plugin] of Object.entries(scenario.world.plugins)) {
+    for (const account of plugin.accounts) {
+      await connectAccount(server, plugins.fakes.get(name)!, name, account.name)
+      const slug = accountSlug(plugin, account.name)
+      await server.client.plugins.renameAccount({ name, account: slug, displayName: account.name })
+      for (const bot of account.granted) await server.client.plugins.grant({ name, account: slug, botId: bots.get(bot)!.id })
+    }
+  }
+}
+
+/** Connects an account of plugin `name`, signing in on its fake server with the account's name as its user. */
+async function connectAccount(server: TestServer, fake: FakeMcpServer, name: string, accountName: string) {
+  let signInId = ''
+  let endsOn = ''
+  for await (const step of await server.client.plugins.connect({ name, origin: privateOrigin })) {
+    if (step.type === 'started') signInId = step.signInId
+    if (step.type === 'auth_url') endsOn = await fake.authorize(step.url, { user: accountName })
+    if (step.type === 'prompt') await server.client.plugins.answer({ signInId, promptId: step.promptId, value: endsOn })
+    if (step.type === 'failed') throw new Error(`Connecting ${accountName} to ${name} failed: ${step.message}`)
+  }
+}
+
+/**
+ * The owner decides the bot's newest undecided request for the step's plugin: grants the account the step names, or
+ * denies it. Does nothing when there is none: the bot didn't ask, which the scenario's checks catch.
+ */
+async function decide(server: TestServer, bot: BotInfo, step: Extract<ScriptStep, { decide: string }>, plugin: FakePlugin) {
+  const card = (await server.client.chats.messages({ chatId: bot.chatId }))
+    .reverse()
+    .find((message) => message.card?.type === 'plugin_request' && message.card.plugin === step.plugin && message.card.decision === null)
+  if (!card) return
+  const decision = 'grant' in step ? { outcome: 'granted' as const, account: accountSlug(plugin, step.grant) } : { outcome: 'denied' as const }
+  await server.client.chats.decidePluginRequest({ messageId: card.id, decision })
 }
 
 /** Connects the providers, picks the models, scripts the faux turns and creates the bots; returns them by name. */

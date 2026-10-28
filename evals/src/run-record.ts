@@ -10,6 +10,11 @@ export type ChatMessage = { from: 'owner' | 'bot' | 'between_bots' | 'timeline';
 export type RunRecord = {
   /** Every bot's tool calls, in the order each made them; bots' calls interleave by bot, not by time. */
   toolCalls: { bot: string; tool: string; args: unknown }[]
+  /**
+   * The plugin tool calls the plugins' servers answered, in order: the tool as bots call it (`mcp__notion_account1__search`)
+   * and the name of the account it was made as. A call to a tool a bot isn't granted never reaches a server.
+   */
+  pluginCalls: { tool: string; account: string; args: Record<string, unknown>; result: string }[]
   /** Each chat's messages, oldest first, by chat name: a bot's name for its DM, a group's for a group chat. */
   chats: Record<string, ChatMessage[]>
   /**

@@ -241,3 +241,57 @@ faux:
     expect(result.assertions).toMatchObject([{ passed: true }])
   })
 })
+
+describe('running a plugins scenario on the faux model', () => {
+  it("serves the world's plugins as the catalog, connects and grants their accounts, and decides the bots' requests", async () => {
+    const result = await runScenario(
+      scenario(`
+bots: [{ name: Ada }]
+world:
+  plugins:
+    notion:
+      display_name: Notion
+      description: Your Notion workspace
+      tools:
+        - { name: search, description: Search pages, result: { Personal: Groceries list, Work: Q3 roadmap } }
+      accounts:
+        - { name: Personal, granted: [Ada] }
+        - Work
+    linear:
+      description: Your issues
+      tools: [{ name: list_issues, description: List issues, result: "#1 Fix login" }]
+script:
+  - { to: Ada, text: Find the roadmap }
+  - { decide: Ada, plugin: notion, grant: Work }
+  - { decide: Ada, plugin: linear, deny: true }
+assert:
+  - tool_order: [search_plugins, request_plugin, mcp__notion_account2__search]
+  - granted_tools_only
+faux:
+  Ada:
+    - call: { search_plugins: {} }
+    - call: { tool_search: { query: notion search } }
+    - call: { mcp__notion_account1__search: { query: roadmap } }
+    - call: { request_plugin: { plugin: notion, reason: The roadmap is in your work Notion } }
+    # Woken by the grant.
+    - call: { tool_search: { query: notion work search } }
+    - call: { mcp__notion_account2__search: { query: roadmap } }
+    - send: Found the Q3 roadmap
+    - end
+`),
+      { kind: 'faux' },
+    )
+
+    expect(result.error).toBeUndefined()
+    expect(result.assertions.filter((assertion) => !assertion.passed)).toEqual([])
+    expect(result.record.pluginCalls).toEqual([
+      { tool: 'mcp__notion_account1__search', account: 'Personal', args: { query: 'roadmap' }, result: 'Groceries list' },
+      { tool: 'mcp__notion_account2__search', account: 'Work', args: { query: 'roadmap' }, result: 'Q3 roadmap' },
+    ])
+    expect(result.record.chats.Ada).toEqual([
+      { from: 'owner', author: 'You', text: 'Find the roadmap' },
+      { from: 'bot', author: 'Ada', text: expect.stringContaining('Notion') },
+      { from: 'bot', author: 'Ada', text: 'Found the Q3 roadmap' },
+    ])
+  })
+})

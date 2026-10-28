@@ -2,12 +2,12 @@ import { createHash, randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 
-/** A tool the fake MCP server offers; `call` answers it in text, or fails it by throwing. */
+/** A tool the fake MCP server offers; `call` answers it in text for the account (`user`) calling, or fails it by throwing. */
 export type FakeMcpTool = {
   name: string
   description?: string
   inputSchema?: Record<string, unknown>
-  call?(args: Record<string, unknown>): string | Promise<string>
+  call?(args: Record<string, unknown>, caller: { user: string }): string | Promise<string>
 }
 
 /** A client registered through the fake authorization server's dynamic client registration. */
@@ -176,7 +176,7 @@ export async function startFakeMcpServer({ tools = [] }: { tools?: FakeMcpTool[]
             if (!tool) return json(200, { jsonrpc: '2.0', id: message.id, error: { code: -32602, message: `Unknown tool ${name}` } })
             calls.push({ tool: name, args, user })
             try {
-              return reply({ content: [{ type: 'text', text: (await tool.call?.(args)) ?? '' }] })
+              return reply({ content: [{ type: 'text', text: (await tool.call?.(args, { user })) ?? '' }] })
             } catch (error) {
               // A tool's failure is its result's, as MCP reports it.
               return reply({ content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }], isError: true })

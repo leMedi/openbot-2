@@ -104,6 +104,19 @@ export function checkAssertion(assertion: Assertion, record: RunRecord): Asserti
       )
       return { label, passed, detail: listed(found.length, 'routine', described) }
     }
+    case 'granted_tools_only': {
+      const label = 'granted_tools_only'
+      const answered = record.pluginCalls.map((call) => call.tool)
+      // Each answered call accounts for one of the bots' calls of its tool; those left over never reached a server.
+      const refused = record.toolCalls.filter((call) => {
+        if (!call.tool.startsWith('mcp__')) return false
+        const i = answered.indexOf(call.tool)
+        if (i !== -1) answered.splice(i, 1)
+        return i === -1
+      })
+      if (!refused.length) return { label, passed: true, detail: 'every plugin tool call was granted' }
+      return { label, passed: false, detail: `not granted: ${refused.map((call) => `${call.bot} ${call.tool}`).join(', ')}` }
+    }
     case 'max_message_length': {
       const label = `max_message_length ${assertion.chars}${assertion.in ? ` in ${assertion.in}` : ''}`
       const long = botMessages(record, assertion.in).filter((message) => message.text.length > assertion.chars)

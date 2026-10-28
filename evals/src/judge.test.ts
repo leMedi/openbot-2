@@ -10,6 +10,7 @@ describe('the eval judge', () => {
       rubric,
       record: {
         toolCalls: [{ bot: 'Ada', tool: 'bash', args: { command: 'curl wttr.in/Paris' } }],
+        pluginCalls: [],
         chats: {
           Ada: [
             { from: 'owner', author: 'You', text: 'Weather in Paris?' },
@@ -54,6 +55,7 @@ describe('the eval judge', () => {
       rubric,
       record: {
         toolCalls: [],
+        pluginCalls: [],
         chats: {},
         memory: [
           { in: 'shared', tier: 'profile', text: 'The owner lives in Porto.', source: 'owner' },
@@ -78,6 +80,7 @@ describe('the eval judge', () => {
       rubric,
       record: {
         toolCalls: [],
+        pluginCalls: [],
         chats: { Ada: [{ from: 'timeline', author: 'Ada', text: 'Ada created routine *Dentist*' }] },
         memory: [],
         routines: [

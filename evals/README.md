@@ -50,8 +50,20 @@ world:
       exitCode: 0
   pages:                         # the fake browser's pages, by URL (see TestPage in @openbot/core/testing)
     https://shop.test/: { title: Shop, elements: [{ role: heading, name: Shop }] }
-  tools:                         # fake tool servers' tools (plugins), each answering `result`
+  tools:                         # tools every bot has (surface mcp), each answering `result`
     - { name: ci_status, description: "CI plugin: a branch's build status", result: "main: passing" }
+  plugins:                       # the plugin catalog, by name, each served by a fake hosted MCP server; without it
+    notion:                      # the catalog is empty (never the bundled plugins)
+      display_name: Notion       # optional, the name by default
+      description: Your Notion workspace
+      tools:                     # bots granted an account call them as mcp__notion_account1__search…
+        - { name: search, description: Search pages, result: "Q3 roadmap" }
+        - name: fetch
+          description: Read a page
+          result: { Personal: Groceries, Work: Q3 roadmap }   # or by the account called
+      accounts:                  # connected before the run, account1, account2… in order, named so
+        - { name: Personal, granted: [Linus] }              # and granted to these bots
+        - Work
 extraction: true                 # extracts memory after every run, on the bots' model (faux: `faux_memory`)
 memory:                          # facts the owner added before the run; without `bot`, to shared memory
   - { bot: Ada, tier: profile, text: The owner ships on Fridays., importance: 3 }   # tier and importance optional
@@ -66,6 +78,8 @@ script:                          # every step but `forget` waits until all is qu
   - advance: 2h                                     # the clock moves forward (m, h or d), or to a time
   - advance: 2026-03-15T09:00:00Z                   # (`advance: <timestamp>`), stopping at each routine fire on the
                                                     # way until the bots are done with it
+  - { decide: Linus, plugin: notion, grant: Work }  # the owner grants an account on the bot's newest undecided
+  - { decide: Linus, plugin: notion, deny: true }   # request for the plugin, or denies it; nothing without one
 assert:
   - tool_called: bash                          # or { tool: bash, bot: Ada }
   - tool_not_called: use_computer
@@ -80,6 +94,7 @@ assert:
                                                     # or that messaged the owner
   - max_message_length: 400                    # or { chars: 400, in: Ada }
   - no_silent_answer                           # or no_silent_answer: Ada; every owner message got a reply
+  - granted_tools_only                         # every mcp__… call reached its plugin's server: none ungranted
 rubric:
   - Linus says main is green
 faux:                            # each bot's model turns on the faux model, in order
@@ -95,6 +110,9 @@ faux_memory:                     # the memory model's answers, one per extractio
 A faux script must use every turn it scripts: a turn left over (or a request with none) fails the run, so scripts
 stay in step with how the agent works (reply reminders, group rounds). The same goes for `faux_memory`: an extraction
 it has no answer for, or an answer left over, fails the run. Compaction summaries come from the runner, on every model.
+
+A plugin request card is one of the bot's messages to the owner ("Wants to use Notion: …"). The run's record lists
+the plugin tool calls the plugins' servers answered (`pluginCalls`), with the account's name.
 
 A bot's change to a routine posts a timeline row in its DM; it isn't a message to the owner, so message checks skip it.
 The judge sees it marked as such, and the routines at the end with their runs.

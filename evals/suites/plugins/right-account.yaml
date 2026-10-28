@@ -1,0 +1,37 @@
+description: >-
+  Ada is granted two Notion accounts, Personal and Work. Asked for a page from the owner's work Notion, she searches
+  with the Work account's tools, not the Personal one's.
+bots:
+  - name: Ada
+    title: Personal assistant
+world:
+  plugins:
+    notion:
+      display_name: Notion
+      description: Search, read and edit the pages and databases of a Notion workspace.
+      tools:
+        - name: search
+          description: "Search the workspace's pages and databases. Arguments: query."
+          result:
+            Personal: No pages match.
+            Work: "Q3 roadmap (page): ship plugins in July, the vault in August, mobile in September"
+      accounts:
+        - { name: Personal, granted: [Ada] }
+        - { name: Work, granted: [Ada] }
+script:
+  - to: Ada
+    text: What's in the Q3 roadmap? It's in my work Notion
+assert:
+  - granted_tools_only
+  - tool_called: mcp__notion_account2__search
+  - tool_not_called: mcp__notion_account1__search
+  - tool_not_called: request_plugin
+  - no_silent_answer
+rubric:
+  - Ada sums up the roadmap from the Work account, plugins in July, the vault in August, mobile in September
+faux:
+  Ada:
+    - call: { tool_search: { query: notion work search } }
+    - call: { mcp__notion_account2__search: { query: Q3 roadmap } }
+    - send: Plugins in July, the vault in August, mobile in September
+    - end
