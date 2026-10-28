@@ -62,8 +62,8 @@ faux:
       description: 'Ada answers a quick question in short messages',
       smoke: true,
       bots: [
-        { name: 'Ada', title: 'Researcher', instructions: 'Be brief.', model: null },
-        { name: 'Linus', title: null, instructions: '', model: 'anthropic/claude-haiku' },
+        { name: 'Ada', title: 'Researcher', instructions: 'Be brief.', model: null, scripted: false },
+        { name: 'Linus', title: null, instructions: '', model: 'anthropic/claude-haiku', scripted: false },
       ],
       groups: [{ name: 'Launch', members: ['Ada', 'Linus'] }],
       world: {
@@ -72,6 +72,8 @@ faux:
         pages: { 'https://shop.test/': { title: 'Shop', elements: [{ role: 'heading', name: 'Shop' }] } },
         tools: [{ name: 'weather_lookup', description: 'Current weather for a city', result: 'Sunny, 21C' }],
       },
+      extraction: false,
+      memory: [],
       script: [
         { to: 'Ada', text: "What's the weather in Paris?" },
         { to: 'Launch', text: 'Morning team' },
@@ -90,7 +92,60 @@ faux:
         Ada: [{ tools: [['bash', { command: 'curl wttr.in/Paris' }]] }, { tools: [['sendMessage', { text: 'Sunny, 21C' }]] }, { end: true }],
         Linus: [{ say: 'Nothing to add' }],
       },
+      fauxMemory: [],
     })
+  })
+
+  it("reads memory: extraction, scripted bots, the owner's facts, compactions, deletions and memory checks", () => {
+    const scenario = parse(`
+extraction: true
+bots:
+  - name: Ada
+  - name: Linus
+    scripted: true
+memory:
+  - { bot: Ada, tier: profile, text: "The owner's dog is called Biscuit." }
+  - { text: The owner lives in Porto., importance: 4 }
+script:
+  - { to: Ada, text: hi }
+  - compact: Ada
+  - forget: biscuit
+assert:
+  - messages: { in: Ada, from: Ada, matches: Biscuit, max: 0 }
+  - memory: { matches: peanut, max: 0 }
+  - memory: { in: shared, matches: Porto, min: 1 }
+faux:
+  Ada: [end]
+  Linus: [end]
+faux_memory:
+  - NONE
+  - "new shared profile 4: The owner lives in Porto."
+`)
+
+    expect(scenario).toMatchObject({
+      extraction: true,
+      bots: [{ name: 'Ada', scripted: false }, { name: 'Linus', scripted: true }],
+      memory: [
+        { bot: 'Ada', tier: 'profile', text: "The owner's dog is called Biscuit.", importance: 3 },
+        { bot: null, tier: 'profile', text: 'The owner lives in Porto.', importance: 4 },
+      ],
+      script: [{ to: 'Ada', text: 'hi' }, { compact: 'Ada' }, { forget: 'biscuit' }],
+      assertions: [
+        { type: 'messages', in: 'Ada', from: 'Ada', matches: 'Biscuit', max: 0 },
+        { type: 'memory', matches: 'peanut', max: 0 },
+        { type: 'memory', in: 'shared', matches: 'Porto', min: 1 },
+      ],
+      fauxMemory: ['NONE', 'new shared profile 4: The owner lives in Porto.'],
+    })
+  })
+
+  it('rejects memory steps and checks naming no bot, and faux memory answers without extraction', () => {
+    expect(() => parse('bots: [{ name: Ada }]\nscript: [{ compact: Rex }]')).toThrow(/script\[0\]\.compact: no bot named "Rex"/)
+    expect(() => parse('bots: [{ name: Ada }]\nscript: [{ to: Ada, text: hi }]\nmemory: [{ bot: Rex, text: x }]')).toThrow(/memory\[0\]\.bot: no bot named "Rex"/)
+    expect(() => parse('bots: [{ name: Ada }]\nscript: [{ to: Ada, text: hi }]\nassert: [{ memory: { in: Rex, matches: x } }]')).toThrow(
+      /assert\[0\]: no bot named "Rex"/,
+    )
+    expect(() => parse('bots: [{ name: Ada }]\nscript: [{ to: Ada, text: hi }]\nfaux_memory: [NONE]')).toThrow(/faux_memory: .*extraction/)
   })
 
   it('fills in defaults for a minimal scenario', () => {
@@ -107,6 +162,9 @@ assert: [no_silent_answer]
       assertions: [{ type: 'no_silent_answer' }],
       rubric: [],
       faux: {},
+      extraction: false,
+      memory: [],
+      fauxMemory: [],
     })
   })
 

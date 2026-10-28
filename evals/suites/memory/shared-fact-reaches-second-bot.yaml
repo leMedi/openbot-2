@@ -1,0 +1,36 @@
+description: >-
+  The owner tells one bot something about themselves. Another bot, whose history has been compacted since, knows it
+  too: shared memory reaches every bot from its next compaction.
+extraction: true
+bots:
+  - name: Ada
+    title: Personal assistant
+  - name: Linus
+    title: Travel planner
+script:
+  - to: Linus
+    text: Hi Linus! I'll need help planning a few trips this spring.
+  - to: Ada
+    text: "Big news: I'm moving to Lisbon in March, so from then on I'm based there."
+  - compact: Linus
+  - to: Linus
+    text: I want a weekend away in April. Which city will I be flying from?
+assert:
+  - memory: { in: shared, matches: lisbon, min: 1 }
+  - messages: { in: Linus, matches: lisbon, min: 1 }
+  - no_silent_answer
+rubric:
+  - Linus says the owner will be flying from Lisbon
+faux:
+  Linus:
+    - send: Happy to help, just tell me where and when
+    - end
+    - send: From Lisbon, since you'll have moved there by April
+    - end
+  Ada:
+    - send: Big news indeed, congrats! Noted that you're Lisbon-based from March
+    - end
+faux_memory:
+  - NONE
+  - "new shared profile 4: The owner moves to Lisbon in March and is based there from then."
+  - NONE

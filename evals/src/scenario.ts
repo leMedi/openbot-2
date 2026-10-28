@@ -1,3 +1,4 @@
+import { factTiers, type FactTier } from '@openbot/api-contract'
 import type { TestPage } from '@openbot/core/testing'
 import { parse as parseYaml } from 'yaml'
 import { z } from 'zod'
@@ -17,12 +18,30 @@ export type Assertion =
   | { type: 'tool_not_called'; tool: string; bot?: string }
   /** The tools' first calls happened in this order. */
   | { type: 'tool_order'; tools: string[]; bot?: string }
-  /** How many messages bots posted in a chat (a bot's DM or a group chat), optionally only `from` one of them. */
-  | { type: 'messages'; in: string; from?: string; min?: number; max?: number }
+  /**
+   * How many messages bots posted in a chat (a bot's DM or a group chat), optionally only `from` one of them, and only
+   * those a regex `matches` (case-insensitive); with `last`, only those after the owner's last message there.
+   */
+  | { type: 'messages'; in: string; from?: string; matches?: string; last?: boolean; min?: number; max?: number }
   /** No bot message longer than `chars` characters: short messages. */
   | { type: 'max_message_length'; chars: number; in?: string }
   /** Every owner message in the chat (every chat when absent) was answered with at least one bot message. */
   | { type: 'no_silent_answer'; in?: string }
+  /**
+   * How many facts are in memory at the end whose text a regex `matches` (case-insensitive): in shared memory, a bot's
+   * bot memory (`in` the bot's name), or anywhere.
+   */
+  | { type: 'memory'; matches: string; in?: string; min?: number; max?: number }
+
+/** A fact the owner added before the run: to a bot's bot memory, or to shared memory when `bot` is null. */
+export type SeededFact = { bot: string | null; tier: FactTier; text: string; importance: number }
+
+/**
+ * One step of the script: an owner's message to a bot's DM or a group chat; a compaction of a bot's history, as
+ * pi-durable does near the context window; or the owner deleting every fact a regex `forget` matches (case-insensitive).
+ * Messages and compactions wait until all is quiet.
+ */
+export type ScriptStep = { to: string; text: string } | { compact: string } | { forget: string }
 
 /** A scenario file, or a selection of scenarios, that can't be used; its message says why. */
 export class ScenarioError extends Error {}
@@ -36,7 +55,8 @@ export type Scenario = {
   description: string
   /** Part of the smoke suite CI runs. */
   smoke: boolean
-  bots: { name: string; title: string | null; instructions: string; model: string | null }[]
+  /** A `scripted` bot plays its faux turns on every model, real ones too, and passes once they run out. */
+  bots: { name: string; title: string | null; instructions: string; model: string | null; scripted: boolean }[]
   groups: { name: string; members: string[] }[]
   world: {
     /** What `date` on the computer says; bots' prompts carry no date, so it is their only clock. */
@@ -45,16 +65,31 @@ export type Scenario = {
     pages: Record<string, TestPage>
     tools: FakeTool[]
   }
-  /** The owner's messages, in order: each goes to a bot's DM or a group chat, and the next waits until all is quiet. */
-  script: { to: string; text: string }[]
+  /** Extracts memory after every run, on the memory model: the bots' model on real runs, `fauxMemory` on the faux one. */
+  extraction: boolean
+  /** Facts the owner added before the run. */
+  memory: SeededFact[]
+  /** The owner's messages and memory steps, in order. */
+  script: ScriptStep[]
   assertions: Assertion[]
   /** What the eval judge scores the run on, one item each. */
   rubric: string[]
   /** Each bot's turns when the scenario runs on the faux model, by bot name. */
   faux: Record<string, FauxTurn[]>
+  /** The memory model's answers on the faux model, one per extraction, in order. */
+  fauxMemory: string[]
 }
 
 const name = z.string().min(1)
+const count = z.number().int().min(0)
+const regex = z.string().min(1).refine((source) => {
+  try {
+    new RegExp(source, 'i')
+    return true
+  } catch {
+    return false
+  }
+}, 'not a valid regex')
 const bot = z.union([name, z.object({ tool: name, bot: name.optional() }).strict()])
 const toolCalls = z.record(name, z.record(z.string(), z.unknown()).nullable())
 
@@ -65,10 +100,11 @@ const assertion = z.union([
   z
     .object({
       messages: z
-        .object({ in: name, from: name.optional(), min: z.number().int().min(0).optional(), max: z.number().int().min(0).optional() })
+        .object({ in: name, from: name.optional(), matches: regex.optional(), last: z.boolean().optional(), min: count.optional(), max: count.optional() })
         .strict(),
     })
     .strict(),
+  z.object({ memory: z.object({ matches: regex, in: name.optional(), min: count.optional(), max: count.optional() }).strict() }).strict(),
   z.object({ max_message_length: z.union([z.number().int().positive(), z.object({ chars: z.number().int().positive(), in: name.optional() }).strict()]) }).strict(),
   z.object({ no_silent_answer: name.nullable() }).strict(),
   z.literal('no_silent_answer'),
@@ -95,7 +131,13 @@ const schema = z
     bots: z
       .array(
         z
-          .object({ name, title: z.string().nullable().default(null), instructions: z.string().default(''), model: z.string().nullable().default(null) })
+          .object({
+            name,
+            title: z.string().nullable().default(null),
+            instructions: z.string().default(''),
+            model: z.string().nullable().default(null),
+            scripted: z.boolean().default(false),
+          })
           .strict(),
       )
       .min(1),
@@ -112,10 +154,26 @@ const schema = z
       })
       .strict()
       .default({ clock: null, shell: [], pages: {}, tools: [] }),
-    script: z.array(z.object({ to: name, text: z.string().min(1) }).strict()).min(1),
+    extraction: z.boolean().default(false),
+    memory: z
+      .array(
+        z
+          .object({
+            bot: name.nullable().default(null),
+            tier: z.enum(factTiers).default('profile'),
+            text: z.string().min(1).max(500),
+            importance: z.number().int().min(1).max(5).default(3),
+          })
+          .strict(),
+      )
+      .default([]),
+    script: z
+      .array(z.union([z.object({ to: name, text: z.string().min(1) }).strict(), z.object({ compact: name }).strict(), z.object({ forget: regex }).strict()]))
+      .min(1),
     assert: z.array(assertion).default([]),
     rubric: z.array(z.string().min(1)).default([]),
     faux: z.record(name, z.array(fauxTurn)).default({}),
+    faux_memory: z.array(z.string().min(1)).default([]),
   })
   .strict()
 
@@ -128,6 +186,7 @@ function toAssertion(raw: Raw['assert'][number]): Assertion {
     return { type: 'tool_not_called', ...(typeof raw.tool_not_called === 'string' ? { tool: raw.tool_not_called } : raw.tool_not_called) }
   if ('tool_order' in raw) return { type: 'tool_order', ...(Array.isArray(raw.tool_order) ? { tools: raw.tool_order } : raw.tool_order) }
   if ('messages' in raw) return { type: 'messages', ...raw.messages }
+  if ('memory' in raw) return { type: 'memory', ...raw.memory }
   if ('max_message_length' in raw)
     return { type: 'max_message_length', ...(typeof raw.max_message_length === 'number' ? { chars: raw.max_message_length } : raw.max_message_length) }
   return { type: 'no_silent_answer', ...(raw.no_silent_answer ? { in: raw.no_silent_answer } : {}) }
@@ -148,15 +207,22 @@ function unknownNames(raw: Raw): string[] {
   raw.groups.forEach((group, i) => {
     for (const member of group.members) if (!bots.has(member)) problems.push(`groups[${i}].members: no bot named "${member}"`)
   })
+  raw.memory.forEach((fact, i) => {
+    if (fact.bot && !bots.has(fact.bot)) problems.push(`memory[${i}].bot: no bot named "${fact.bot}"`)
+  })
   raw.script.forEach((step, i) => {
-    if (!chats.has(step.to)) problems.push(`script[${i}].to: no bot or group named "${step.to}"`)
+    if ('to' in step && !chats.has(step.to)) problems.push(`script[${i}].to: no bot or group named "${step.to}"`)
+    if ('compact' in step && !bots.has(step.compact)) problems.push(`script[${i}].compact: no bot named "${step.compact}"`)
   })
   raw.assert.map(toAssertion).forEach((assertion, i) => {
     if ('bot' in assertion && assertion.bot && !bots.has(assertion.bot)) problems.push(`assert[${i}]: no bot named "${assertion.bot}"`)
     if ('from' in assertion && assertion.from && !bots.has(assertion.from)) problems.push(`assert[${i}]: no bot named "${assertion.from}"`)
-    if ('in' in assertion && assertion.in && !chats.has(assertion.in)) problems.push(`assert[${i}]: no bot or group named "${assertion.in}"`)
+    if (assertion.type === 'memory') {
+      if (assertion.in && assertion.in !== 'shared' && !bots.has(assertion.in)) problems.push(`assert[${i}]: no bot named "${assertion.in}"`)
+    } else if ('in' in assertion && assertion.in && !chats.has(assertion.in)) problems.push(`assert[${i}]: no bot or group named "${assertion.in}"`)
   })
   for (const bot of Object.keys(raw.faux)) if (!bots.has(bot)) problems.push(`faux: no bot named "${bot}"`)
+  if (raw.faux_memory.length && !raw.extraction) problems.push('faux_memory: the memory model only answers with `extraction: true`')
   return problems
 }
 
@@ -176,10 +242,13 @@ export function parseScenario(yaml: string, { suite, name }: { suite: string; na
     bots: raw.bots,
     groups: raw.groups,
     world: raw.world,
+    extraction: raw.extraction,
+    memory: raw.memory,
     script: raw.script,
     assertions: raw.assert.map(toAssertion),
     rubric: raw.rubric,
     faux: Object.fromEntries(Object.entries(raw.faux).map(([bot, turns]) => [bot, turns.map(toFauxTurn)])),
+    fauxMemory: raw.faux_memory,
   }
 }
 

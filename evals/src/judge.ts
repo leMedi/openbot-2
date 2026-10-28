@@ -6,7 +6,7 @@ export type RubricResult = { item: string; passed: boolean; reason: string }
 
 const systemPrompt = `You grade how an AI bot behaved in an eval scenario. The bot is one of the owner's always-on bots; it reaches the owner only through chat messages, and its tool calls are private.
 
-You get the scenario, every chat's messages, the bots' tool calls, and a numbered rubric. Judge each rubric item on the evidence alone; when the evidence doesn't clearly meet an item, it fails.
+You get the scenario, every chat's messages, the bots' tool calls, what they remember at the end, and a numbered rubric. Judge each rubric item on the evidence alone; when the evidence doesn't clearly meet an item, it fails.
 
 Answer with JSON only, no other text:
 {"verdicts": [{"item": <number>, "pass": <true or false>, "reason": "<one short sentence>"}]}`
@@ -22,6 +22,12 @@ export function judgeRequest({ description, rubric, record }: { description: str
   lines.push('', 'Tool calls (private, the owner never sees them):')
   if (!record.toolCalls.length) lines.push('(none)')
   for (const call of record.toolCalls) lines.push(`- ${call.bot}: ${call.tool} ${JSON.stringify(call.args)}`)
+  lines.push('', 'Memory at the end (facts the bots remember):')
+  if (!record.memory.length) lines.push('(none)')
+  for (const fact of record.memory) {
+    const where = fact.in === 'shared' ? 'shared memory' : `${fact.in}'s memory`
+    lines.push(`- ${where}, ${fact.tier}, by ${fact.source === 'owner' ? 'the owner' : fact.source}: ${fact.text}`)
+  }
   lines.push('', 'Rubric:', ...rubric.map((item, i) => `${i + 1}. ${item}`))
   return { systemPrompt, prompt: lines.join('\n') }
 }

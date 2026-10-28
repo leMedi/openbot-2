@@ -1,0 +1,35 @@
+description: >-
+  The owner deletes a shared fact after the bots have seen it in their prompts. On its next run a bot no longer knows
+  it. Linus uses the fact first, showing it reaches prompts; Ada's prompt has it too, unused, until the deletion.
+bots:
+  - name: Ada
+    title: Personal assistant
+  - name: Linus
+    title: Party planner
+memory:
+  - { tier: profile, text: "The owner's dog is called Biscuit." }
+script:
+  - to: Linus
+    text: It's my dog's birthday on Saturday. Any idea for a cake topper with his name on it?
+  # Ada's prompt now has the fact, though her conversation never mentions it.
+  - to: Ada
+    text: Morning! Quick one, how many grams are in a pound?
+  - forget: biscuit
+  - to: Ada
+    text: Remind me, what's my dog called?
+assert:
+  - messages: { in: Linus, matches: biscuit, min: 1 }
+  - messages: { in: Ada, matches: biscuit, max: 0 }
+  - memory: { matches: biscuit, max: 0 }
+  - no_silent_answer
+rubric:
+  - To the last question, Ada says she doesn't know the dog's name (or asks for it) rather than giving one
+faux:
+  Linus:
+    - send: A bone-shaped topper that says "Happy birthday, Biscuit!"
+    - end
+  Ada:
+    - send: About 454 grams
+    - end
+    - send: You haven't told me your dog's name yet. What is it?
+    - end

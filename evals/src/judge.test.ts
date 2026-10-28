@@ -17,6 +17,7 @@ describe('the eval judge', () => {
             { from: 'between_bots', author: 'Ada', text: 'FYI it is sunny' },
           ],
         },
+        memory: [],
       },
     })
 
@@ -33,9 +34,35 @@ describe('the eval judge', () => {
         'Tool calls (private, the owner never sees them):',
         '- Ada: bash {"command":"curl wttr.in/Paris"}',
         '',
+        'Memory at the end (facts the bots remember):',
+        '(none)',
+        '',
         'Rubric:',
         '1. Sounds like a colleague texting',
         '2. Says where the number came from',
+      ].join('\n'),
+    )
+  })
+
+  it('is shown the facts in memory at the end, with where they are and who wrote them', () => {
+    const { prompt } = judgeRequest({
+      description: '',
+      rubric,
+      record: {
+        toolCalls: [],
+        chats: {},
+        memory: [
+          { in: 'shared', tier: 'profile', text: 'The owner lives in Porto.', source: 'owner' },
+          { in: 'Ada', tier: 'note', text: 'Checked the weather.', source: 'Ada' },
+        ],
+      },
+    })
+
+    expect(prompt).toContain(
+      [
+        'Memory at the end (facts the bots remember):',
+        '- shared memory, profile, by the owner: The owner lives in Porto.',
+        "- Ada's memory, note, by Ada: Checked the weather.",
       ].join('\n'),
     )
   })

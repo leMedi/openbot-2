@@ -90,6 +90,63 @@ faux:
   })
 })
 
+describe('running a memory scenario on the faux model', () => {
+  it("seeds the owner's facts, extracts on the faux memory model, compacts, forgets, and records memory at the end", async () => {
+    const result = await runScenario(
+      scenario(`
+extraction: true
+bots: [{ name: Ada }]
+memory:
+  - { bot: Ada, text: "The owner's dog is called Biscuit." }
+  - { text: The owner drinks tea., tier: log, importance: 2 }
+script:
+  - { to: Ada, text: "I moved to Porto last week." }
+  - compact: Ada
+  - forget: biscuit
+  - { to: Ada, text: "What's my dog called?" }
+assert:
+  - memory: { in: shared, matches: porto, min: 1 }
+  - memory: { matches: biscuit, max: 0 }
+  - messages: { in: Ada, matches: biscuit, max: 0 }
+faux:
+  Ada:
+    - send: Porto, nice! Noted
+    - end
+    - send: You haven't told me yet
+    - end
+faux_memory:
+  - "new shared profile 4: The owner lives in Porto."
+  - NONE
+`),
+      { kind: 'faux' },
+    )
+
+    expect(result.error).toBeUndefined()
+    expect(result.assertions.filter((assertion) => !assertion.passed)).toEqual([])
+    expect(result.record.memory).toEqual([
+      { in: 'shared', tier: 'log', text: 'The owner drinks tea.', source: 'owner' },
+      { in: 'shared', tier: 'profile', text: 'The owner lives in Porto.', source: 'Ada' },
+    ])
+  })
+
+  it('fails a run whose extraction the faux memory model could not answer, or left an answer over', async () => {
+    const run = (fauxMemory: string) =>
+      runScenario(
+        scenario(`
+extraction: true
+bots: [{ name: Ada }]
+script: [{ to: Ada, text: "I moved to Porto last week." }]
+faux:
+  Ada: [{ send: Noted }, end]
+${fauxMemory}`),
+        { kind: 'faux' },
+      )
+
+    expect((await run('')).error).toMatch(/Ada's memory extraction was skipped/)
+    expect((await run('faux_memory: [NONE, NONE]')).error).toBe("The faux memory model has 1 answer left over: it no longer fits the scenario")
+  })
+})
+
 describe('running a scenario on real models', () => {
   it('connects their providers from the environment and judges with the judge model', async () => {
     // Stands in for a real provider: the bot only ever thinks aloud, and the judge fails the item.
@@ -115,5 +172,24 @@ describe('running a scenario on real models', () => {
     expect(result.error).toBeUndefined()
     expect(result.assertions).toMatchObject([{ passed: false }])
     expect(result.rubric).toEqual([{ item: 'Answers', passed: false, reason: 'Said nothing' }])
+  })
+
+  it('has a scripted bot play its faux turns, then pass, while the others answer on the model', async () => {
+    const stub = answeringProvider('stub', (prompt) => (prompt.includes('\nRubric:') ? '{"verdicts": []}' : 'Thinking about it…'))
+    const result = await runScenario(
+      scenario(`
+bots: [{ name: Linus, scripted: true }, { name: Ada }]
+groups: [{ name: Lunch, members: [Linus, Ada] }]
+script: [{ to: Lunch, text: Where should we eat on Friday? }]
+assert:
+  - messages: { in: Lunch, from: Linus, matches: vegan, min: 1 }
+faux:
+  Linus: [{ send: "The owner is vegan, so the green place" }, end]
+`),
+      { kind: 'real', model: 'stub/model', judge: 'stub/model', env: {}, providers: [stub] },
+    )
+
+    expect(result.error).toBeUndefined()
+    expect(result.assertions).toMatchObject([{ passed: true }])
   })
 })

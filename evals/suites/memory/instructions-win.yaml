@@ -1,0 +1,27 @@
+description: >-
+  The bot's instructions and a fact in its memory disagree. The instructions win: they come before memory.
+bots:
+  - name: Ada
+    title: Weather assistant
+    instructions: Always give temperatures in degrees Celsius, never in Fahrenheit.
+memory:
+  - { bot: Ada, tier: profile, text: The owner wants temperatures in Fahrenheit. }
+world:
+  shell:
+    # In Fahrenheit, as the memory asks: only the instructions say to convert it.
+    - match: wttr|weather|curl|wget|http
+      stdout: "Lisbon: Sunny +70°F"
+script:
+  - to: Ada
+    text: What's the temperature in Lisbon right now?
+assert:
+  - messages: { in: Ada, matches: "°C|celsius", min: 1 }
+  - messages: { in: Ada, matches: "°F|\\d ?F\\b", max: 0 }
+  - no_silent_answer
+rubric:
+  - Ada gives the temperature in Celsius (about 21 °C), not in Fahrenheit
+faux:
+  Ada:
+    - call: { bash: { command: curl -s wttr.in/Lisbon?format=3 } }
+    - send: 21°C and sunny in Lisbon
+    - end

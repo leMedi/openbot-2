@@ -1,6 +1,6 @@
 import type { ModelProvider } from '@openbot/agent'
-import { answeringProvider, callsTools, endsSilently, type ExecResult, type FakeTurn, recordingTool, says } from '@openbot/agent/testing'
-import type { BotInfo, MessageInfo } from '@openbot/api-contract'
+import { answeringProvider, callsTools, endsSilently, says, type ExecResult, type FakeTurn, recordingTool } from '@openbot/agent/testing'
+import type { BotInfo, FactInfo, MessageInfo } from '@openbot/api-contract'
 import type { ComputerBot } from '@openbot/core'
 import { createTestServer, type TestServer } from '@openbot/webapp/testing'
 import { type AssertionResult, checkAssertion } from './assertions.ts'
@@ -43,6 +43,15 @@ const fauxJudgeProvider = () =>
     return JSON.stringify({ verdicts })
   })
 
+/** Silent ends a scripted bot gets after its turns on a real model, so it passes whenever the others make it answer again. */
+const scriptedPasses = 20
+
+/**
+ * Who pi-durable's compaction summaries are scripted for: its summarizer's prompt says "You are a context
+ * summarization assistant.", and the fake routes a request to whoever its prompt says it is.
+ */
+const summarizer = 'a context summarization assistant'
+
 const toFakeTurn = (turn: FauxTurn): FakeTurn =>
   'tools' in turn ? callsTools(...(turn.tools as Parameters<typeof callsTools>)) : 'say' in turn ? says(turn.say) : endsSilently()
 
@@ -69,8 +78,11 @@ export async function runScenario(scenario: Scenario, models: EvalModels, { run 
     pages: scenario.world.pages,
     tools: scenario.world.tools.map((tool) => recordingTool(tool.name, 'mcp', tool).tool),
     modelProviders: models.kind === 'faux' ? [fauxJudgeProvider()] : models.providers,
+    extraction: scenario.extraction,
+    // Forced compactions summarize all but the newest entries, so even a short chat compacts.
+    ...(scenario.script.some((step) => 'compact' in step) && { compaction: { keepRecentTokens: 1 } }),
   })
-  const record: RunRecord = { toolCalls: [], chats: {} }
+  const record: RunRecord = { toolCalls: [], chats: {}, memory: [] }
   const result = (fields: { assertions?: AssertionResult[]; rubric?: RubricResult[]; error?: string }): ScenarioRun => ({
     scenario: scenario.id,
     run,
@@ -88,6 +100,15 @@ export async function runScenario(scenario: Scenario, models: EvalModels, { run 
     try {
       for (const step of scenario.script) {
         const deadline = Date.now() + stepTimeoutMs
+        if ('compact' in step) {
+          await compact(server, bots.get(step.compact)!)
+          await untilQuiet(server, [...groups.values()], deadline)
+          continue
+        }
+        if ('forget' in step) {
+          await forget(server, bots, new RegExp(step.forget, 'i'))
+          continue
+        }
         const bot = bots.get(step.to)
         if (bot) {
           await server.client.chats.send({ chatId: bot.chatId, text: step.text })
@@ -108,7 +129,7 @@ export async function runScenario(scenario: Scenario, models: EvalModels, { run 
     }
 
     await collect(server, scenario, bots, groups, record)
-    error ??= await runFailures(server, models)
+    error ??= await runFailures(server, bots, models)
     const assertions = scenario.assertions.map((assertion) => checkAssertion(assertion, record))
     const rubric = scenario.rubric.length ? await judge(server, scenario, record, models.kind === 'faux' ? fauxJudge : models.judge) : []
     return result({ assertions, rubric, error })
@@ -121,14 +142,26 @@ export async function runScenario(scenario: Scenario, models: EvalModels, { run 
 
 /** Connects the providers, picks the models, scripts the faux turns and creates the bots; returns them by name. */
 async function setUp(server: TestServer, scenario: Scenario, models: EvalModels): Promise<Map<string, BotInfo>> {
+  // First, so a summary goes to the summarizer whatever the conversation it summarizes says.
+  server.providers.scriptFor(summarizer)
+  const scripted = (name: string) => models.kind === 'faux' || scenario.bots.some((bot) => bot.name === name && bot.scripted)
+  if (models.kind === 'faux' || scenario.bots.some((bot) => bot.scripted) || scenario.script.some((step) => 'compact' in step)) await server.connectProvider()
+  for (const [bot, turns] of Object.entries(scenario.faux)) {
+    if (!scripted(bot)) continue
+    const padding = models.kind === 'faux' ? [] : Array.from({ length: scriptedPasses }, endsSilently)
+    server.providers.scriptFor(bot, ...turns.map(toFakeTurn), ...padding)
+  }
   if (models.kind === 'faux') {
-    await server.connectProvider()
-    for (const [bot, turns] of Object.entries(scenario.faux)) server.providers.scriptFor(bot, ...turns.map(toFakeTurn))
+    for (const answer of scenario.fauxMemory) server.providers.memoryModel.script(says(answer))
   } else {
-    const refs = [models.model, models.judge, ...scenario.bots.flatMap((bot) => (bot.model ? [bot.model] : []))]
+    const refs = [models.model, models.judge, ...scenario.bots.flatMap((bot) => (bot.model && !bot.scripted ? [bot.model] : []))]
     for (const provider of new Set(refs.map(providerOf))) await server.connectProviderFromEnv(provider, models.env)
   }
-  await server.client.models.updateSettings({ defaultModel: models.kind === 'faux' ? fauxModel : models.model })
+  await server.client.models.updateSettings({
+    defaultModel: models.kind === 'faux' ? fauxModel : models.model,
+    // On real models, memory is extracted on the bots' model; on the faux one, on the faux memory model.
+    ...(models.kind === 'real' && { memoryModel: null }),
+  })
   const bots = new Map<string, BotInfo>()
   for (const bot of scenario.bots) {
     const created = await server.client.bots.create({
@@ -137,12 +170,40 @@ async function setUp(server: TestServer, scenario: Scenario, models: EvalModels)
       instructions: bot.instructions,
       avatarShape: 'hex',
       avatarColor: 'blue',
-      // On the faux model every bot plays its script.
-      model: models.kind === 'faux' ? null : bot.model,
+      // On the faux model every bot plays its script; a scripted bot plays it on every model.
+      model: models.kind === 'faux' ? null : bot.scripted ? fauxModel : bot.model,
     })
     bots.set(bot.name, created)
   }
+  for (const fact of scenario.memory) {
+    const added = { tier: fact.tier, text: fact.text, importance: fact.importance }
+    if (fact.bot) await server.client.bots.addFact({ botId: bots.get(fact.bot)!.id, ...added })
+    else await server.client.sharedMemory.add(added)
+  }
   return bots
+}
+
+/**
+ * Compacts the bot's history with a summary that says nothing of the conversation, on whatever model: what the bot
+ * knows afterwards comes from its memory and the newest entries the compaction keeps verbatim, not from the summary.
+ */
+async function compact(server: TestServer, bot: BotInfo) {
+  const { model } = (await server.client.bots.list()).find((candidate) => candidate.id === bot.id)!
+  server.providers.scriptFor(summarizer, says('The conversation so far is summarized elsewhere.'))
+  await server.client.bots.update({ botId: bot.id, model: fauxModel })
+  try {
+    await server.runtime.compact(bot.id)
+  } finally {
+    await server.client.bots.update({ botId: bot.id, model })
+  }
+}
+
+/** The owner deletes every fact `pattern` matches, in shared memory and every bot's, as in the Memory pane and Settings. */
+async function forget(server: TestServer, bots: Map<string, BotInfo>, pattern: RegExp) {
+  for (const fact of await server.client.sharedMemory.list()) if (pattern.test(fact.content)) await server.client.sharedMemory.delete({ factId: fact.id })
+  for (const bot of bots.values())
+    for (const fact of await server.client.bots.memory({ botId: bot.id }))
+      if (pattern.test(fact.content)) await server.client.bots.deleteFact({ botId: bot.id, factId: fact.id })
 }
 
 /** Polls this often while waiting for the bots. */
@@ -151,10 +212,20 @@ const pollMs = 50
 const quietPolls = 10
 
 /**
- * Waits until no bot is working and no group chat is playing rounds, for a few polls in a row: a bot's message to
- * another wakes it a moment later.
+ * Waits until no bot is working and no group chat is playing rounds, for a few polls in a row (a bot's message to
+ * another wakes it a moment later), then until memory extraction is done with their runs.
  */
 async function untilQuiet(server: TestServer, groupChatIds: string[], deadline: number) {
+  await untilNoBotWorks(server, groupChatIds, deadline)
+  let timer: NodeJS.Timeout | undefined
+  const timedOut = new Promise<'timeout'>((resolve) => (timer = setTimeout(() => resolve('timeout'), Math.max(0, deadline - Date.now()))))
+  const extracted = await Promise.race([server.extraction.idle().then(() => 'idle' as const), timedOut])
+  clearTimeout(timer)
+  if (extracted === 'timeout') throw new Error('Timed out waiting for memory extraction to finish')
+}
+
+/** Waits until no bot is working and no group chat is playing rounds, for `quietPolls` polls in a row. */
+async function untilNoBotWorks(server: TestServer, groupChatIds: string[], deadline: number) {
   let quiet = 0
   while (quiet < quietPolls) {
     if (Date.now() > deadline) throw new Error('Timed out waiting for the bots to finish')
@@ -183,14 +254,31 @@ async function collect(server: TestServer, scenario: Scenario, bots: Map<string,
     record.chats[group.name] = chatId ? (await server.client.chats.messages({ chatId })).map(toChatMessage) : []
   }
   for (const [name, bot] of bots) record.toolCalls.push(...(await server.runtime.toolCalls(bot.id)).map((call) => ({ bot: name, ...call })))
+  const source = (fact: FactInfo) => (fact.source === 'owner' ? 'owner' : (fact.sourceBotName ?? 'a bot'))
+  for (const fact of await server.client.sharedMemory.list()) record.memory.push({ in: 'shared', tier: fact.tier, text: fact.content, source: source(fact) })
+  for (const [name, bot] of bots)
+    for (const fact of await server.client.bots.memory({ botId: bot.id })) record.memory.push({ in: name, tier: fact.tier, text: fact.content, source: source(fact) })
 }
 
-/** Why the run failed outside the bots' behaviour: a bot's model failed it, or the faux script didn't fit. */
-async function runFailures(server: TestServer, models: EvalModels): Promise<string | undefined> {
+/**
+ * Why the run failed outside the bots' behaviour: a bot's model failed it, the memory model failed an extraction, or
+ * the faux script didn't fit.
+ */
+async function runFailures(server: TestServer, bots: Map<string, BotInfo>, models: EvalModels): Promise<string | undefined> {
   const failed = (await server.client.bots.list()).filter((bot) => bot.error)
   if (failed.length) return failed.map((bot) => `${bot.name}'s run failed: ${bot.error}`).join('; ')
-  const left = models.kind === 'faux' ? server.providers.pendingTurns : 0
+  const skipped: string[] = []
+  for (const [name, bot] of bots)
+    for (const entry of await server.client.bots.audit({ botId: bot.id })) {
+      const input = entry.input as { status?: string; error?: string } | null
+      if (entry.kind === 'extraction' && input?.status === 'skipped') skipped.push(`${name}'s memory extraction was skipped: ${input.error}`)
+    }
+  if (skipped.length) return skipped.join('; ')
+  if (models.kind === 'real') return
+  const left = server.providers.pendingTurns
   if (left) return `The faux script has ${left} turn${left === 1 ? '' : 's'} left over: it no longer fits the scenario`
+  const answers = server.providers.memoryModel.pendingTurns
+  if (answers) return `The faux memory model has ${answers} answer${answers === 1 ? '' : 's'} left over: it no longer fits the scenario`
 }
 
 /** Scores the run on the scenario's rubric; a judge that can't be reached fails every item. */

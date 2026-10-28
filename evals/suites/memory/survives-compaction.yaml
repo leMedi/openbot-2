@@ -1,0 +1,34 @@
+description: >-
+  The owner tells the bot something worth remembering. After the bot's history is compacted (with a summary that
+  says nothing of it), the bot still knows it, from its memory.
+extraction: true
+bots:
+  - name: Ada
+    title: Personal assistant
+script:
+  - to: Ada
+    text: "Heads up: my daughter Lina turns 7 on 12 May, so keep that weekend free."
+  # So the newest entries, which the compaction keeps verbatim, say nothing of Lina.
+  - to: Ada
+    text: Unrelated, how many grams are in a pound?
+  - compact: Ada
+  - to: Ada
+    text: When is Lina's birthday again, and how old is she turning?
+assert:
+  - memory: { matches: Lina, min: 1 }
+  - messages: { in: Ada, last: true, matches: "12(th)? May|May 12", min: 1 }
+  - no_silent_answer
+rubric:
+  - After the compaction, Ada answers that Lina's birthday is on 12 May and that she turns 7
+faux:
+  Ada:
+    - send: Noted, I'll keep the weekend of 12 May free for Lina's 7th
+    - end
+    - send: About 454 grams
+    - end
+    - send: 12 May, and she's turning 7
+    - end
+faux_memory:
+  - "new shared profile 4: The owner's daughter Lina turns 7 on 12 May."
+  - NONE
+  - NONE

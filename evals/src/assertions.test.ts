@@ -23,6 +23,11 @@ const record: RunRecord = {
       { from: 'bot', author: 'Linus', text: 'Morning! The build is green and the release notes are drafted, ready for review.' },
     ],
   },
+  memory: [
+    { in: 'shared', tier: 'profile', text: 'The owner lives in Porto.', source: 'owner' },
+    { in: 'Ada', tier: 'note', text: 'Checked the weather in Paris for the owner.', source: 'Ada' },
+    { in: 'Linus', tier: 'log', text: 'The owner is moving to Porto in June.', source: 'Linus' },
+  ],
 }
 
 const check = (assertion: Parameters<typeof checkAssertion>[0]) => checkAssertion(assertion, record)
@@ -62,6 +67,41 @@ describe('deterministic assertions', () => {
       detail: '0 messages',
     })
     expect(check({ type: 'messages', in: 'Launch', from: 'Linus', min: 1 })).toMatchObject({ label: 'messages in Launch from Linus: at least 1', passed: true })
+  })
+
+  it('count only the messages a regex matches, ignoring case', () => {
+    expect(check({ type: 'messages', in: 'Ada', from: 'Ada', matches: 'sunny|rain', min: 1 })).toEqual({
+      label: 'messages in Ada from Ada matching /sunny|rain/: at least 1',
+      passed: true,
+      detail: '1 message: "Sunny"',
+    })
+    expect(check({ type: 'messages', in: 'Launch', matches: 'red', max: 0 })).toMatchObject({ passed: true, detail: '0 messages' })
+  })
+
+  it("count only the answer to the owner's last message in the chat", () => {
+    expect(check({ type: 'messages', in: 'Ada', last: true, max: 0 })).toEqual({
+      label: "messages in Ada after the owner's last: at most 0",
+      passed: true,
+      detail: '0 messages',
+    })
+    expect(check({ type: 'messages', in: 'Launch', last: true, matches: 'green', min: 1 })).toMatchObject({ passed: true })
+  })
+
+  it('count the facts in memory a regex matches: in shared memory, one bot\'s, or anywhere', () => {
+    expect(check({ type: 'memory', matches: 'porto', min: 2 })).toEqual({
+      label: 'memory matching /porto/: at least 2',
+      passed: true,
+      detail: '2 facts: shared "The owner lives in Porto.", Linus "The owner is moving to Porto in June."',
+    })
+    expect(check({ type: 'memory', in: 'shared', matches: 'porto', max: 0 })).toMatchObject({
+      label: 'memory in shared matching /porto/: at most 0',
+      passed: false,
+    })
+    expect(check({ type: 'memory', in: 'Ada', matches: 'peanut', max: 0 })).toEqual({
+      label: 'memory in Ada matching /peanut/: at most 0',
+      passed: true,
+      detail: '0 facts',
+    })
   })
 
   it('check that bots\' messages are short', () => {

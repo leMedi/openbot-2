@@ -37,6 +37,8 @@ bots:
     title: Designer              # optional
     instructions: You own the UI. # optional
     model: openai/gpt-5          # optional, real runs only
+  - name: Linus
+    scripted: true               # plays its faux turns on every model, then passes: lines a test needs said
 groups:
   - name: Launch
     members: [Ada, Linus]        # created by the first message to it, then titled with its name
@@ -50,13 +52,23 @@ world:
     https://shop.test/: { title: Shop, elements: [{ role: heading, name: Shop }] }
   tools:                         # fake tool servers' tools (plugins), each answering `result`
     - { name: ci_status, description: "CI plugin: a branch's build status", result: "main: passing" }
-script:                          # the owner's messages to a bot's DM or a group; each waits until all is quiet
-  - { to: Launch, text: "@Linus is main green?" }
+extraction: true                 # extracts memory after every run, on the bots' model (faux: `faux_memory`)
+memory:                          # facts the owner added before the run; without `bot`, to shared memory
+  - { bot: Ada, tier: profile, text: The owner ships on Fridays., importance: 3 }   # tier and importance optional
+script:                          # messages and compactions wait until all is quiet, memory extraction included
+  - { to: Launch, text: "@Linus is main green?" }   # the owner's message to a bot's DM or a group
+  - compact: Linus                                  # compacts the bot's history, as near its context window, with a
+                                                    # summary that says nothing: past it, the bot knows only its memory
+                                                    # and the newest entries (kept verbatim)
+  - forget: fridays                                 # the owner deletes every fact this regex matches (any case)
 assert:
   - tool_called: bash                          # or { tool: bash, bot: Ada }
   - tool_not_called: use_computer
   - tool_order: [bash, sendMessage]            # first calls in this order; or { tools: [...], bot: Ada }
   - messages: { in: Launch, from: Ada, min: 1, max: 2 }   # messages bots sent the owner in a chat
+  - messages: { in: Launch, matches: green, min: 1 }      # only those a regex matches (any case)
+  - messages: { in: Ada, last: true, max: 0 }             # only those after the owner's last message in the chat
+  - memory: { in: shared, matches: fridays, max: 0 }      # facts at the end a regex matches: in shared, a bot's, or anywhere
   - max_message_length: 400                    # or { chars: 400, in: Ada }
   - no_silent_answer                           # or no_silent_answer: Ada; every owner message got a reply
 rubric:
@@ -66,7 +78,14 @@ faux:                            # each bot's model turns on the faux model, in 
     - call: { ci_status: { branch: main } }    # tool calls, several at once allowed
     - send: Yep, main is green                 # a sendMessage call
     - end                                      # ends the run silently; `say: text` ends it with private text
+faux_memory:                     # the memory model's answers, one per extraction, in order (needs `extraction`)
+  - NONE
+  - "new shared profile 4: The owner ships on Fridays."
 ```
 
 A faux script must use every turn it scripts: a turn left over (or a request with none) fails the run, so scripts
-stay in step with how the agent works (reply reminders, group rounds).
+stay in step with how the agent works (reply reminders, group rounds). The same goes for `faux_memory`: an extraction
+it has no answer for, or an answer left over, fails the run. Compaction summaries come from the runner, on every model.
+
+On real models the bots' model is also the memory model, and a skipped extraction (the model failed twice) fails
+the run. The judge sees the facts in memory at the end beside the chats and tool calls.

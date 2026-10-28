@@ -16,11 +16,29 @@ function bounds(min: number | undefined, max: number | undefined): string {
   return 'any number'
 }
 
-/** The messages bots sent the owner, in one chat or every chat, with the chat's name. */
-function botMessages(record: RunRecord, chat?: string): (ChatMessage & { chat: string })[] {
+/** What a label shows of a regex: ` matching /x/`, or nothing. */
+const matching = (regex: string | undefined) => (regex ? ` matching /${regex}/` : '')
+/** Whether `text` has a match of the case-insensitive `regex`; any text does without one. */
+const matches = (regex: string | undefined, text: string) => !regex || new RegExp(regex, 'i').test(text)
+/** Whether `count` is within the bounds. */
+const within = (count: number, { min, max }: { min?: number; max?: number }) => count >= (min ?? 0) && count <= (max ?? Infinity)
+/** `2 facts: a, b`, or `0 facts`. */
+
+const listed = (count: number, word: string, items: string[]) => `${plural(count, word)}${items.length ? `: ${items.join(', ')}` : ''}`
+
+/**
+ * The messages bots sent the owner, in one chat or every chat, with the chat's name; with `last`, only those after the
+ * owner's last message in each chat.
+ */
+function botMessages(record: RunRecord, chat?: string, last = false): (ChatMessage & { chat: string })[] {
   return Object.entries(record.chats)
     .filter(([name]) => !chat || name === chat)
-    .flatMap(([name, messages]) => messages.filter((message) => message.from === 'bot').map((message) => ({ ...message, chat: name })))
+    .flatMap(([name, messages]) =>
+      messages
+        .slice(last ? messages.map((message) => message.from).lastIndexOf('owner') + 1 : 0)
+        .filter((message) => message.from === 'bot')
+        .map((message) => ({ ...message, chat: name })),
+    )
 }
 
 /** Checks one assertion against what a run left behind. */
@@ -46,10 +64,18 @@ export function checkAssertion(assertion: Assertion, record: RunRecord): Asserti
       return { label, passed, detail: `first calls in order: ${firsts.join(', ')}` }
     }
     case 'messages': {
-      const label = `messages in ${assertion.in}${assertion.from ? ` from ${assertion.from}` : ''}: ${bounds(assertion.min, assertion.max)}`
-      const count = botMessages(record, assertion.in).filter((message) => !assertion.from || message.author === assertion.from).length
-      const passed = count >= (assertion.min ?? 0) && count <= (assertion.max ?? Infinity)
-      return { label, passed, detail: plural(count, 'message') }
+      const label = `messages in ${assertion.in}${assertion.from ? ` from ${assertion.from}` : ''}${assertion.last ? " after the owner's last" : ''}${matching(assertion.matches)}: ${bounds(assertion.min, assertion.max)}`
+      const found = botMessages(record, assertion.in, assertion.last).filter(
+        (message) => (!assertion.from || message.author === assertion.from) && matches(assertion.matches, message.text),
+      )
+      const passed = within(found.length, assertion)
+      return { label, passed, detail: assertion.matches ? listed(found.length, 'message', found.map((message) => JSON.stringify(message.text))) : plural(found.length, 'message') }
+    }
+    case 'memory': {
+      const label = `memory${assertion.in ? ` in ${assertion.in}` : ''}${matching(assertion.matches)}: ${bounds(assertion.min, assertion.max)}`
+      const found = record.memory.filter((fact) => (!assertion.in || fact.in === assertion.in) && matches(assertion.matches, fact.text))
+      const passed = within(found.length, assertion)
+      return { label, passed, detail: listed(found.length, 'fact', found.map((fact) => `${fact.in} ${JSON.stringify(fact.text)}`)) }
     }
     case 'max_message_length': {
       const label = `max_message_length ${assertion.chars}${assertion.in ? ` in ${assertion.in}` : ''}`
