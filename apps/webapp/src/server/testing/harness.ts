@@ -3,11 +3,11 @@ import { createServer as createHttpServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { botUser, type BotTool, type ModelProvider, openBotComputer, type Watchdog } from '@openbot/agent'
+import { botUser, type BotRuntimeOptions, type BotTool, type ModelProvider, openBotComputer, type Watchdog } from '@openbot/agent'
 import { createFakeModel, createFakeProviders, fakeBotComputer, type FakeBotComputer, type FakeProviders, type FakeShellScript } from '@openbot/agent/testing'
 import { connectBrowser, connectDesktop, connectScreens, defaultDaemonSocket } from '@openbot/computer'
 import type { Orchestrator, Screens, ScreenStatus } from '@openbot/core'
-import { createFakeComputer, type FakeComputer, type FakeComputerScript } from '@openbot/core/testing'
+import { createFakeClock, createFakeComputer, type FakeClock, type FakeComputer, type FakeComputerScript } from '@openbot/core/testing'
 import { openDb } from '@openbot/db'
 import { createRouterClient } from '@orpc/server'
 import { createServerContext } from '../context.ts'
@@ -59,6 +59,15 @@ export type TestServerOptions = {
   fetch?: typeof fetch
   /** Scripts the model before the server starts, e.g. for the runs and queued inputs a restart resumes. */
   script?: (providers: FakeProviders) => void
+  /**
+   * When and how much bots' histories are compacted; pi-durable's defaults otherwise, which keep a short history
+   * verbatim. `{ keepRecentTokens: 1 }` lets `runtime.compact` summarize all but the newest entries.
+   */
+  compaction?: BotRuntimeOptions['compaction']
+  /** Where the server's fake clock starts; the real time by default. Kept across a restart, as the clock moves on. */
+  now?: Date
+  /** Adds `fake/fake-memory`, scripted apart from the bots' models through `providers.memoryModel`. */
+  memoryModel?: boolean
 }
 
 /**
@@ -69,22 +78,23 @@ export async function createTestServer(options: TestServerOptions = {}) {
   return open(await mkdtemp(join(tmpdir(), 'openbot-test-')), testSecretKey, options)
 }
 
-/** The fakes that outlive a server, as the computer does. */
-type KeptComputers = { computer: FakeComputer; botComputer: FakeBotComputer }
+/** The fakes that outlive a server, as the computer and the time do. */
+type KeptFakes = { computer: FakeComputer; botComputer: FakeBotComputer; clock: FakeClock }
 
 async function open(
   dir: string,
   secretKey: string,
-  { shell, pages, realComputer, outsideImage, modelProviders = [], script, ...options }: TestServerOptions,
-  kept?: KeptComputers,
+  { shell, pages, realComputer, outsideImage, modelProviders = [], script, memoryModel, compaction, now, ...options }: TestServerOptions,
+  kept?: KeptFakes,
 ) {
   const db = await openDb(join(dir, 'openbot.db'))
-  const providers = createFakeProviders()
+  const providers = createFakeProviders({ memoryModel })
   script?.(providers)
   const home = realComputer ? process.env.OPENBOT_HOME! : join(dir, 'home')
   // The computer outlives the server, as the screen daemon does.
   const computer = kept?.computer ?? createFakeComputer({ pages })
   const botComputer = kept?.botComputer ?? fakeBotComputer(home, shell)
+  const clock = kept?.clock ?? createFakeClock(now)
   const screenTickets = new ScreenTickets()
   // The real screens without the test's display offset, so the browser finds each screen's DevTools where it is.
   const realScreens = realComputer ? connectScreens({ socketPath: process.env.OPENBOT_DESKTOPD_SOCKET || defaultDaemonSocket }) : undefined
@@ -103,6 +113,8 @@ async function open(
     attachmentsDir: join(dir, 'attachments'),
     screens: realScreens ? testScreens(realScreens) : computer.screens,
     screenTickets,
+    compaction,
+    clock,
     ...options,
   })
   await context.screensSynced
@@ -126,8 +138,12 @@ async function open(
     computer,
     /** Every shell command bots ran, keyed by bot name; kept across restarts. */
     commands: botComputer.commands,
+    /** The server's time, standing still until the test moves it forward with `advance` or `advanceTo`. */
+    clock,
+    /** The server's scheduled jobs; a test may schedule its own. */
+    jobs: context.jobs,
     /** The fakes, to keep across a restart. */
-    kept: { computer, botComputer } satisfies KeptComputers,
+    kept: { computer, botComputer, clock } satisfies KeptFakes,
     /** The bots' home, a temporary folder: `shared/`, `bots/<id>/`. */
     home,
     /** An HTTP request against the API, e.g. `fetch('/api/health')`. */
@@ -165,6 +181,7 @@ async function open(
     /** Stops the runtime and closes the database, keeping the data. */
     async shutdown() {
       for (const http of streamServers.splice(0)) http.close()
+      await context.jobs.close()
       context.stopSyncingScreens()
       context.rounds.close()
       await context.runtime.close()
@@ -173,6 +190,7 @@ async function open(
     /** Closes the database and deletes the data. */
     async close() {
       for (const http of streamServers.splice(0)) http.close()
+      await context.jobs.close()
       context.stopSyncingScreens()
       await computer.close()
       context.rounds.close()

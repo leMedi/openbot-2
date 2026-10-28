@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { type ImageContent, type Models, type TextContent, Type } from '@earendil-works/pi-ai'
 import {
+  type CompactionPolicy,
   type Conversation,
   type ConversationId,
   type EntryRecord,
@@ -185,6 +186,8 @@ export type BotRuntimeOptions = {
   watchdog?: Watchdog
   /** Downloads the https:// images bots send each other; the global `fetch` by default. */
   fetch?: typeof fetch
+  /** When and how much bots' histories are compacted; pi-durable's defaults otherwise. Tests keep less verbatim. */
+  compaction?: Partial<CompactionPolicy>
 }
 
 /** `provider/modelId`, split at the first slash since model ids may contain slashes. */
@@ -767,7 +770,7 @@ export class BotRuntime implements AgentRuntime {
       {
         models: options.models,
         registry,
-        settings: { extensions: [bots] },
+        settings: { extensions: [bots], ...(options.compaction && { compaction: options.compaction }) },
         // Each tool call runs in its bot's environment on the computer.
         env: async ({ conversationId }) => options.computer.env(await botOf(conversationId)),
         onReport: (error) => console.error('[agent]', error),
@@ -939,6 +942,28 @@ export class BotRuntime implements AgentRuntime {
     this.#histories.delete(id)
     this.#errors.delete(id)
     this.#groupMessages.delete(id)
+  }
+
+  /**
+   * Compacts the bot's history now, as pi-durable does once it nears the model's context window: older entries are
+   * summarized on the bot's model, beginning a new compaction epoch. Resolves once the summary is in place (at once
+   * when the bot is idle, otherwise at its run's next boundary); does nothing for a bot without a history yet.
+   */
+  async compact(botId: string): Promise<void> {
+    const history = await this.#existingHistory(botId)
+    if (!history) return
+    const { outcome } = (await this.#harness.waitForTask(await history.compact(undefined, context), context)).state
+    if (outcome.status !== 'completed') throw new Error(`Couldn't compact bot ${botId}'s history: ${outcome.error?.message ?? outcome.status}`)
+    if (outcome.result.submissionId !== undefined) await (await this.#harness.submission(outcome.result.submissionId, context))?.wait(context)
+  }
+
+  /**
+   * The bot's compaction epoch: the entry its current context starts from, the newest compaction (or reset) of its
+   * history; null before the first. Whatever is frozen per epoch, e.g. the memory block, is rendered anew once it changes.
+   */
+  async compactionEpoch(botId: string): Promise<string | null> {
+    const head = (await (await this.#existingHistory(botId))?.context(context))?.head
+    return head ? String(head.id) : null
   }
 
   status(botId: string): BotStatus {

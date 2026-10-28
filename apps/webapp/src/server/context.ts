@@ -1,4 +1,4 @@
-import { type BotComputer, BotRuntime, type BotTool, type ModelProvider, Providers, type Watchdog } from '@openbot/agent'
+import { type BotComputer, BotRuntime, type BotRuntimeOptions, type BotTool, type ModelProvider, Providers, type Watchdog } from '@openbot/agent'
 import type { ChatInfo, LiveEvent } from '@openbot/api-contract'
 import {
   AllowAllOrchestrator,
@@ -6,6 +6,7 @@ import {
   AttachmentStore,
   type BotWithChat,
   type ChatSummary,
+  type Clock,
   type Browser,
   type Desktop,
   EventBus,
@@ -15,6 +16,8 @@ import {
   postMessage,
   type Screens,
   SecretBox,
+  ServerJobs,
+  systemClock,
   keepScreensInSync,
 } from '@openbot/core'
 import type { Db } from '@openbot/db'
@@ -41,6 +44,13 @@ export type ServerContext = {
   stopSyncingScreens(): void
   /** Plays group chats' rounds of member turns. */
   rounds: GroupRounds
+  /**
+   * The server's time: its scheduled jobs wait on it, and so tests can move it, timestamps new server code writes
+   * (e.g. memory facts') should read it. Older writes and pi-durable's entries still read the system's time.
+   */
+  clock: Clock
+  /** The server's scheduled jobs, e.g. memory consolidation; `jobs.close()` stops them. */
+  jobs: ServerJobs
 }
 
 /** A chat as the sidebar shows it, with the member taking its turn in a group. */
@@ -73,6 +83,8 @@ export async function createServerContext({
   tools,
   watchdog,
   fetch,
+  compaction,
+  clock = systemClock,
 }: {
   db: Db
   /** Encrypts system credentials. */
@@ -100,6 +112,10 @@ export async function createServerContext({
   watchdog?: Watchdog
   /** Downloads the https:// images bots send each other; the global `fetch` by default. */
   fetch?: typeof globalThis.fetch
+  /** When and how much bots' histories are compacted; pi-durable's defaults otherwise. */
+  compaction?: BotRuntimeOptions['compaction']
+  /** The server's time; the system's by default, a fake one tests move forward. */
+  clock?: Clock
 }): Promise<ServerContext> {
   const bus = new EventBus<LiveEvent>()
   const attachments = new AttachmentStore(attachmentsDir)
@@ -148,6 +164,7 @@ export async function createServerContext({
     tools,
     watchdog,
     fetch,
+    compaction,
     async sendMessage(bot, chatId, { text, attachments: files }, idempotencyKey) {
       await postBotMessage(bot, chatId, text, files, idempotencyKey)
     },
@@ -226,5 +243,6 @@ export async function createServerContext({
   })
   opened(runtime)
   const { synced: screensSynced, stop: stopSyncingScreens } = keepScreensInSync(db, screens)
-  return { db, bus, providers, runtime, computer, attachments, screens, screenTickets, screensSynced, stopSyncingScreens, rounds }
+  const jobs = new ServerJobs({ clock })
+  return { db, bus, providers, runtime, computer, attachments, screens, screenTickets, screensSynced, stopSyncingScreens, rounds, clock, jobs }
 }

@@ -9,3 +9,4 @@ export {
   refOf,
 } from './computer-contract.ts'
 export { type PageElement, renderPage, servePages, type TestPage } from './pages.ts'
+export { createFakeClock, type FakeClock } from './fake-clock.ts'

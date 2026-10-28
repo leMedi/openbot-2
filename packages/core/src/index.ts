@@ -85,6 +85,8 @@ export {
   type TakeOverCard,
   TakeOverNotFoundError,
 } from './take-overs.ts'
+export { type Clock, type ClockTimer, systemClock } from './ports/clock.ts'
+export { type DailyJob, type LocalTime, nextLocalTime, ServerJobs } from './server-jobs.ts'
 export { readModelSettings, writeModelSettings, type ModelSettings } from './settings.ts'
 export { lanes, type AgentRuntime, type BotInput, type Lane } from './ports/agent-runtime.ts'
 export { keepInput, keptInput, type KeptInput, pruneTakenInputs, queuedInputs, requeueInput, takeInputs } from './bot-inputs.ts'

@@ -1,7 +1,9 @@
 import {
   type AssistantMessage,
   type FauxModelDefinition,
+  type FauxResponseFactory,
   type Message,
+  type Model,
   type OAuthAuth,
   type OAuthCredential,
   type Provider,
@@ -16,17 +18,27 @@ import { HeldTurn } from './fake-model.ts'
 /** Sign-ins are scripted in tests; tokens they mint are good for an hour unless `expired` is set. */
 const tokenLifetimeMs = 60 * 60 * 1000
 
-/** A faux provider whose sign-in methods the test supplies. */
-function fauxProviderWith(id: string, name: string, models: FauxModelDefinition[], auth: ProviderAuth) {
-  const faux = createFauxCore({ provider: id, models })
+/**
+ * A faux provider whose sign-in methods the test supplies. Models in `apart` answer from their own queue, `faux` of
+ * `apart`, instead of the provider's `faux` queue the other models share.
+ */
+function fauxProviderWith(id: string, name: string, models: FauxModelDefinition[], auth: ProviderAuth, apart: FauxModelDefinition[] = []) {
+  const api = `faux-${id}`
+  const faux = createFauxCore({ api, provider: id, models })
+  const own = apart.length ? createFauxCore({ api, provider: id, models: apart }) : undefined
+  const ownIds = new Set(apart.map((model) => model.id))
+  const core = (model: Model<string>) => (own && ownIds.has(model.id) ? own : faux)
   const provider = createProvider({
     id,
     name,
     auth,
-    models: faux.models,
-    api: { stream: faux.stream, streamSimple: faux.streamSimple },
+    models: [...faux.models, ...(own?.models ?? [])],
+    api: {
+      stream: (model, context, options) => core(model).stream(model, context, options),
+      streamSimple: (model, context, options) => core(model).streamSimple(model, context, options),
+    },
   })
-  return { faux, provider }
+  return { faux, apart: own, provider }
 }
 
 function deferred<T>() {
@@ -146,10 +158,11 @@ function toolNames(messages: readonly Message[]): string[] {
 /**
  * Two scripted providers for Seam 1 tests, standing in for pi's built-in ones:
  * - `fake` (models `fake-model`, vision, and `fake-mini`, text only): API key (`FAKE_API_KEY` from an environment) or a
- *   loopback subscription sign-in.
+ *   loopback subscription sign-in. With `memoryModel`, also `fake-memory` (text only), scripted apart from the others
+ *   through `memoryModel`, for side calls such as memory extraction.
  * - `fake-device` (model `fake-text`, text only): device-code sign-in only.
  */
-export function createFakeProviders() {
+export function createFakeProviders({ memoryModel = false }: { memoryModel?: boolean } = {}) {
   const signIn = createLoopbackSignIn()
   const device = createDeviceSignIn()
   const fake = fauxProviderWith(
@@ -160,6 +173,7 @@ export function createFakeProviders() {
       { id: 'fake-mini', name: 'Fake Mini', input: ['text'] },
     ],
     { apiKey: envApiKeyAuth('Fake API key', ['FAKE_API_KEY']), oauth: signIn.oauth },
+    memoryModel ? [{ id: 'fake-memory', name: 'Fake Memory', input: ['text'] }] : [],
   )
   const fakeDevice = fauxProviderWith('fake-device', 'Fake Device', [{ id: 'fake-text', input: ['text'] }], {
     oauth: device.oauth,
@@ -170,21 +184,34 @@ export function createFakeProviders() {
   const botTurns = new Map<string, (AssistantMessage | HeldTurn)[]>()
   const answer = (turn: AssistantMessage | HeldTurn, signal: AbortSignal | undefined) =>
     turn instanceof HeldTurn ? turn.answer(signal) : turn
+  /** Responses that record their request, then answer with `turns` in order. */
+  const recorded = (turns: (AssistantMessage | HeldTurn)[]): FauxResponseFactory[] =>
+    turns.map((turn) => (context, options, _state, model) => {
+      requests.push({ model: `${model.provider}/${model.id}`, messages: [...context.messages], tools: toolNames(context.messages) })
+      return answer(turn, options?.signal)
+    })
 
   return {
     providers: [fake.provider, fakeDevice.provider] as Provider[],
     /** Queues responses of `fake` models, one per request in order; build them with `callsTools`, `says`, `held`… */
     script(...turns: (AssistantMessage | HeldTurn)[]) {
-      fake.faux.appendResponses(
-        turns.map((turn) => (context, options, _state, model) => {
-          requests.push({
-            model: `${model.provider}/${model.id}`,
-            messages: [...context.messages],
-            tools: toolNames(context.messages),
-          })
-          return answer(turn, options?.signal)
-        }),
-      )
+      fake.faux.appendResponses(recorded(turns))
+    },
+    /**
+     * `fake/fake-memory`, when asked for with `memoryModel`: its responses are queued apart from the other `fake`
+     * models', so side calls are scripted independently of bots' runs. Its requests are in `requests` too.
+     */
+    memoryModel: {
+      ref: 'fake/fake-memory',
+      /** Queues responses of the memory model, one per request in order. */
+      script(...turns: (AssistantMessage | HeldTurn)[]) {
+        if (!fake.apart) throw new Error('No memory model: create the fake providers with `memoryModel: true`')
+        fake.apart.appendResponses(recorded(turns))
+      },
+      /** Its scripted turns not requested yet. */
+      get pendingTurns() {
+        return fake.apart?.getPendingResponseCount() ?? 0
+      },
     },
     /**
      * Queues responses for the bot named `name` alone, one per request of its own in order, so bots working at once
