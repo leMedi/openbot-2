@@ -28,6 +28,10 @@ const record: RunRecord = {
     { in: 'Ada', tier: 'note', text: 'Checked the weather in Paris for the owner.', source: 'Ada' },
     { in: 'Linus', tier: 'log', text: 'The owner is moving to Porto in June.', source: 'Linus' },
   ],
+  routines: [
+    { bot: 'Ada', name: 'Morning digest', prompt: "Send the owner a digest of the night's build failures.", schedule: '0 8 * * 1-5', enabled: true, by: 'bot', runs: [] },
+    { bot: 'Linus', name: 'Build watch', prompt: 'Check CI.', schedule: '0 9 * * *', enabled: true, by: 'owner', runs: [{ status: 'ran', messaged: false }] },
+  ],
 }
 
 const check = (assertion: Parameters<typeof checkAssertion>[0]) => checkAssertion(assertion, record)
@@ -102,6 +106,31 @@ describe('deterministic assertions', () => {
       passed: true,
       detail: '0 facts',
     })
+  })
+
+  it('count the routines at the end: one bot\'s or any, by the owner or a bot, by name, prompt and schedule', () => {
+    expect(check({ type: 'routines', bot: 'Ada', schedule: '^0 8 \\* \\* (1-5|mon-fri)$', prompt: 'digest', min: 1, max: 1 })).toEqual({
+      label: 'routines of Ada with prompt /digest/, schedule /^0 8 \\* \\* (1-5|mon-fri)$/: 1–1',
+      passed: true,
+      detail: '1 routine: Ada "Morning digest" (0 8 * * 1-5, by Ada): "Send the owner a digest of the night\'s build failures."',
+    })
+    expect(check({ type: 'routines', by: 'bot', max: 0 })).toMatchObject({ label: 'routines by a bot: at most 0', passed: false })
+    expect(check({ type: 'routines', by: 'owner', name: 'build', min: 1 })).toMatchObject({ label: 'routines by the owner with name /build/: at least 1', passed: true })
+    expect(check({ type: 'routines', bot: 'Linus', schedule: '^at ', min: 1 })).toEqual({
+      label: 'routines of Linus with schedule /^at /: at least 1',
+      passed: false,
+      detail: '0 routines',
+    })
+  })
+
+  it('count only the routines that ran, or ran and messaged the owner', () => {
+    expect(check({ type: 'routines', ran: true, messaged: false, min: 1, max: 1 })).toEqual({
+      label: 'routines that ran, without messaging the owner: 1–1',
+      passed: true,
+      detail: '1 routine: Linus "Build watch" (0 9 * * *, by the owner): "Check CI."',
+    })
+    expect(check({ type: 'routines', bot: 'Linus', messaged: true, min: 1 })).toMatchObject({ label: 'routines of Linus that messaged the owner: at least 1', passed: false })
+    expect(check({ type: 'routines', ran: false, max: 0 })).toMatchObject({ label: "routines that didn't run: at most 0", passed: false })
   })
 
   it('check that bots\' messages are short', () => {

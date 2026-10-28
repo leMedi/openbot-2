@@ -57,18 +57,20 @@ const toFakeTurn = (turn: FauxTurn): FakeTurn =>
 
 const providerOf = (ref: string) => ref.slice(0, ref.indexOf('/'))
 
-/** What `date` prints for the clock. */
-const dateOutput = (clock: string) => `${new Date(clock).toUTCString()}\n`
+/** What `date` prints at `now` (ms since the epoch). */
+const dateOutput = (now: number) => `${new Date(now).toUTCString()}\n`
 
 /** Runs one scenario on a fresh server: sets it up, sends the owner's messages, then checks and judges what happened. */
 export async function runScenario(scenario: Scenario, models: EvalModels, { run = 1, stepTimeoutMs = 300_000 }: RunOptions = {}): Promise<ScenarioRun> {
   const shellLog: ScenarioRun['world']['shell'] = []
+  // The server's clock starts at the world's and moves only with the script's `advance` steps.
+  let now = () => Date.now()
   const shell = (command: string, bot: ComputerBot): ExecResult | undefined => {
     const rule = scenario.world.shell.find((candidate) => new RegExp(candidate.match).test(command))
     const result = rule
       ? { stdout: rule.stdout, stderr: rule.stderr, exitCode: rule.exitCode }
       : scenario.world.clock && /^\s*date\b/.test(command)
-        ? { stdout: dateOutput(scenario.world.clock), stderr: '', exitCode: 0 }
+        ? { stdout: dateOutput(now()), stderr: '', exitCode: 0 }
         : undefined
     shellLog.push({ bot: bot.name, command, stdout: result?.stdout ?? '' })
     return result
@@ -79,10 +81,12 @@ export async function runScenario(scenario: Scenario, models: EvalModels, { run 
     tools: scenario.world.tools.map((tool) => recordingTool(tool.name, 'mcp', tool).tool),
     modelProviders: models.kind === 'faux' ? [fauxJudgeProvider()] : models.providers,
     extraction: scenario.extraction,
+    ...(scenario.world.clock && { now: new Date(scenario.world.clock) }),
     // Forced compactions summarize all but the newest entries, so even a short chat compacts.
     ...(scenario.script.some((step) => 'compact' in step) && { compaction: { keepRecentTokens: 1 } }),
   })
-  const record: RunRecord = { toolCalls: [], chats: {}, memory: [] }
+  now = () => server.clock.now()
+  const record: RunRecord = { toolCalls: [], chats: {}, memory: [], routines: [] }
   const result = (fields: { assertions?: AssertionResult[]; rubric?: RubricResult[]; error?: string }): ScenarioRun => ({
     scenario: scenario.id,
     run,
@@ -107,6 +111,11 @@ export async function runScenario(scenario: Scenario, models: EvalModels, { run 
         }
         if ('forget' in step) {
           await forget(server, bots, new RegExp(step.forget, 'i'))
+          continue
+        }
+        if ('advance' in step || 'advanceTo' in step) {
+          const until = 'advance' in step ? server.clock.now() + step.advance : Date.parse(step.advanceTo)
+          await advance(server, [...bots.values()], until, [...groups.values()], deadline)
           continue
         }
         const bot = bots.get(step.to)
@@ -180,6 +189,7 @@ async function setUp(server: TestServer, scenario: Scenario, models: EvalModels)
     if (fact.bot) await server.client.bots.addFact({ botId: bots.get(fact.bot)!.id, ...added })
     else await server.client.sharedMemory.add(added)
   }
+  for (const { bot, ...routine } of scenario.routines) await server.client.routines.create({ botId: bots.get(bot)!.id, ...routine })
   return bots
 }
 
@@ -195,6 +205,25 @@ async function compact(server: TestServer, bot: BotInfo) {
     await server.runtime.compact(bot.id)
   } finally {
     await server.client.bots.update({ botId: bot.id, model })
+  }
+}
+
+/**
+ * Moves the server's clock forward to `until`, stopping at each routine fire on the way until the bots are done with
+ * it, so a bot's run happens at the time its routine was due (as `date` says), not at the end of the move.
+ */
+async function advance(server: TestServer, bots: BotInfo[], until: number, groupChatIds: string[], deadline: number) {
+  for (;;) {
+    const due = (await Promise.all(bots.map((bot) => server.client.routines.list({ botId: bot.id }))))
+      .flat()
+      .flatMap((routine) => (routine.nextRunAt !== null && routine.nextRunAt <= until ? [routine.nextRunAt] : []))
+    const next = Math.min(...due, until)
+    // A fire moves its routine's next run past now; one that didn't would have the loop stand still.
+    if (next < until && next <= server.clock.now()) throw new Error(`A routine due at ${new Date(next).toISOString()} didn't fire`)
+    await server.clock.advanceTo(next)
+    await server.routines.idle()
+    await untilQuiet(server, groupChatIds, deadline)
+    if (next >= until) return
   }
 }
 
@@ -241,12 +270,12 @@ async function untilNoBotWorks(server: TestServer, groupChatIds: string[], deadl
 }
 
 const toChatMessage = (message: MessageInfo): ChatMessage => ({
-  from: message.author === 'owner' ? 'owner' : message.botMessage ? 'between_bots' : 'bot',
+  from: message.author === 'owner' ? 'owner' : message.card?.type === 'routine_change' ? 'timeline' : message.botMessage ? 'between_bots' : 'bot',
   author: message.authorName,
   text: message.text,
 })
 
-/** Fills `record` with every chat's messages and every bot's tool calls. */
+/** Fills `record` with every chat's messages, every bot's tool calls, memory at the end and every bot's routines. */
 async function collect(server: TestServer, scenario: Scenario, bots: Map<string, BotInfo>, groups: Map<string, string>, record: RunRecord) {
   for (const [name, bot] of bots) record.chats[name] = (await server.client.chats.messages({ chatId: bot.chatId })).map(toChatMessage)
   for (const group of scenario.groups) {
@@ -258,6 +287,19 @@ async function collect(server: TestServer, scenario: Scenario, bots: Map<string,
   for (const fact of await server.client.sharedMemory.list()) record.memory.push({ in: 'shared', tier: fact.tier, text: fact.content, source: source(fact) })
   for (const [name, bot] of bots)
     for (const fact of await server.client.bots.memory({ botId: bot.id })) record.memory.push({ in: name, tier: fact.tier, text: fact.content, source: source(fact) })
+  for (const [name, bot] of bots)
+    for (const routine of await server.client.routines.list({ botId: bot.id })) {
+      const runs = await server.client.routines.runs({ botId: bot.id, routineId: routine.id })
+      record.routines.push({
+        bot: name,
+        name: routine.name,
+        prompt: routine.prompt,
+        schedule: routine.schedule,
+        enabled: routine.enabled,
+        by: routine.createdBy,
+        runs: runs.map((run) => ({ status: run.status, messaged: run.message !== null })).reverse(),
+      })
+    }
 }
 
 /**

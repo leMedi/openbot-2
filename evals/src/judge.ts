@@ -6,7 +6,7 @@ export type RubricResult = { item: string; passed: boolean; reason: string }
 
 const systemPrompt = `You grade how an AI bot behaved in an eval scenario. The bot is one of the owner's always-on bots; it reaches the owner only through chat messages, and its tool calls are private.
 
-You get the scenario, every chat's messages, the bots' tool calls, what they remember at the end, and a numbered rubric. Judge each rubric item on the evidence alone; when the evidence doesn't clearly meet an item, it fails.
+You get the scenario, every chat's messages, the bots' tool calls, what they remember at the end, their routines (instructions that wake them on a schedule) at the end, and a numbered rubric. Judge each rubric item on the evidence alone; when the evidence doesn't clearly meet an item, it fails.
 
 Answer with JSON only, no other text:
 {"verdicts": [{"item": <number>, "pass": <true or false>, "reason": "<one short sentence>"}]}`
@@ -17,7 +17,12 @@ export function judgeRequest({ description, rubric, record }: { description: str
   for (const [chat, messages] of Object.entries(record.chats)) {
     lines.push('', `Chat "${chat}":`)
     if (!messages.length) lines.push('(no messages)')
-    for (const message of messages) lines.push(`${message.author}${message.from === 'between_bots' ? ' (to another bot)' : ''}: ${message.text}`)
+    for (const message of messages)
+      lines.push(
+        message.from === 'timeline'
+          ? `(timeline, not a message) ${message.text}`
+          : `${message.author}${message.from === 'between_bots' ? ' (to another bot)' : ''}: ${message.text}`,
+      )
   }
   lines.push('', 'Tool calls (private, the owner never sees them):')
   if (!record.toolCalls.length) lines.push('(none)')
@@ -27,6 +32,13 @@ export function judgeRequest({ description, rubric, record }: { description: str
   for (const fact of record.memory) {
     const where = fact.in === 'shared' ? 'shared memory' : `${fact.in}'s memory`
     lines.push(`- ${where}, ${fact.tier}, by ${fact.source === 'owner' ? 'the owner' : fact.source}: ${fact.text}`)
+  }
+  lines.push('', 'Routines at the end:')
+  if (!record.routines.length) lines.push('(none)')
+  for (const routine of record.routines) {
+    const by = routine.by === 'owner' ? 'the owner' : routine.bot
+    const runs = routine.runs.length ? `runs: ${routine.runs.map((run) => `${run.status}${run.messaged ? ' (messaged the owner)' : ''}`).join(', ')}` : 'never ran'
+    lines.push(`- ${routine.bot}'s ${JSON.stringify(routine.name)}, by ${by}, ${routine.enabled ? 'on' : 'off'}, schedule ${routine.schedule}, ${runs}: ${routine.prompt}`)
   }
   lines.push('', 'Rubric:', ...rubric.map((item, i) => `${i + 1}. ${item}`))
   return { systemPrompt, prompt: lines.join('\n') }

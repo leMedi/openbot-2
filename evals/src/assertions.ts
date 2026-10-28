@@ -77,6 +77,33 @@ export function checkAssertion(assertion: Assertion, record: RunRecord): Asserti
       const passed = within(found.length, assertion)
       return { label, passed, detail: listed(found.length, 'fact', found.map((fact) => `${fact.in} ${JSON.stringify(fact.text)}`)) }
     }
+    case 'routines': {
+      const filters = (['name', 'prompt', 'schedule'] as const).filter((field) => assertion[field] !== undefined)
+      const label = [
+        'routines',
+        assertion.bot && ` of ${assertion.bot}`,
+        assertion.by && ` by ${assertion.by === 'owner' ? 'the owner' : 'a bot'}`,
+        filters.length > 0 && ` with ${filters.map((field) => `${field} /${assertion[field]}/`).join(', ')}`,
+        assertion.ran !== undefined && (assertion.ran ? ' that ran' : " that didn't run"),
+        assertion.messaged !== undefined && (assertion.messaged ? (assertion.ran ? ', messaging the owner' : ' that messaged the owner') : assertion.ran ? ', without messaging the owner' : " that didn't message the owner"),
+        `: ${bounds(assertion.min, assertion.max)}`,
+      ]
+        .filter(Boolean)
+        .join('')
+      const found = record.routines.filter(
+        (routine) =>
+          (!assertion.bot || routine.bot === assertion.bot) &&
+          (!assertion.by || routine.by === assertion.by) &&
+          filters.every((field) => matches(assertion[field], routine[field])) &&
+          (assertion.ran === undefined || routine.runs.some((run) => run.status === 'ran') === assertion.ran) &&
+          (assertion.messaged === undefined || routine.runs.some((run) => run.messaged) === assertion.messaged),
+      )
+      const passed = within(found.length, assertion)
+      const described = found.map(
+        (routine) => `${routine.bot} ${JSON.stringify(routine.name)} (${routine.schedule}, by ${routine.by === 'owner' ? 'the owner' : routine.bot}): ${JSON.stringify(routine.prompt)}`,
+      )
+      return { label, passed, detail: listed(found.length, 'routine', described) }
+    }
     case 'max_message_length': {
       const label = `max_message_length ${assertion.chars}${assertion.in ? ` in ${assertion.in}` : ''}`
       const long = botMessages(record, assertion.in).filter((message) => message.text.length > assertion.chars)

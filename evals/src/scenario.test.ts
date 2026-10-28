@@ -93,6 +93,7 @@ faux:
         Linus: [{ say: 'Nothing to add' }],
       },
       fauxMemory: [],
+      routines: [],
     })
   })
 
@@ -148,6 +149,44 @@ faux_memory:
     expect(() => parse('bots: [{ name: Ada }]\nscript: [{ to: Ada, text: hi }]\nfaux_memory: [NONE]')).toThrow(/faux_memory: .*extraction/)
   })
 
+  it("reads routines: the owner's routines, clock moves and routine checks", () => {
+    const scenario = parse(`
+bots: [{ name: Ada }]
+world: { clock: 2026-03-16T08:30:00Z }
+routines:
+  - { bot: Ada, name: Build watch, prompt: Tell me about failing builds., schedule: "0 9 * * *" }
+script:
+  - advance: 90m
+  - advance: 1d
+  - advance: 2026-03-18T09:00:00Z
+assert:
+  - routines: { bot: Ada, schedule: "^0 8 \\\\* \\\\* 1-5$", prompt: digest, min: 1, max: 1 }
+  - routines: { name: dentist, by: bot, ran: true, messaged: false, max: 0 }
+`)
+
+    expect(scenario).toMatchObject({
+      routines: [{ bot: 'Ada', name: 'Build watch', prompt: 'Tell me about failing builds.', schedule: '0 9 * * *' }],
+      script: [{ advance: 90 * 60_000 }, { advance: 24 * 60 * 60_000 }, { advanceTo: '2026-03-18T09:00:00Z' }],
+      assertions: [
+        { type: 'routines', bot: 'Ada', schedule: '^0 8 \\* \\* 1-5$', prompt: 'digest', min: 1, max: 1 },
+        { type: 'routines', name: 'dentist', by: 'bot', ran: true, messaged: false, max: 0 },
+      ],
+    })
+  })
+
+  it('rejects routines and routine checks naming no bot, and clock moves it cannot read', () => {
+    expect(() => parse('bots: [{ name: Ada }]\nscript: [{ to: Ada, text: hi }]\nroutines: [{ bot: Rex, name: x, prompt: y, schedule: "@daily" }]')).toThrow(
+      /routines\[0\]\.bot: no bot named "Rex"/,
+    )
+    expect(() => parse('bots: [{ name: Ada }]\nscript: [{ to: Ada, text: hi }]\nassert: [{ routines: { bot: Rex } }]')).toThrow(/assert\[0\]: no bot named "Rex"/)
+    expect(() => parse('bots: [{ name: Ada }]\nscript: [{ advance: soon }]')).toThrow(/script\[0\]/)
+    expect(() => parse('bots: [{ name: Ada }]\nworld: { clock: soon }\nscript: [{ to: Ada, text: hi }]')).toThrow(/world\.clock/)
+    expect(() => parse('bots: [{ name: Ada }]\nworld: { clock: 2026-03-16T08:30:00Z }\nscript: [{ advance: 1h }, { advance: 2026-03-16T09:00:00Z }]')).toThrow(
+      /script\[1\]\.advance: 2026-03-16T09:00:00Z isn't after the clock \(2026-03-16T09:30:00Z\)/,
+    )
+    expect(() => parse('bots: [{ name: Ada }]\nscript: [{ advance: 2026-03-16T09:00:00Z }]')).toThrow(/script\[0\]\.advance: .*needs world\.clock/)
+  })
+
   it('fills in defaults for a minimal scenario', () => {
     const scenario = parse(`
 bots: [{ name: Ada }]
@@ -164,6 +203,7 @@ assert: [no_silent_answer]
       faux: {},
       extraction: false,
       memory: [],
+      routines: [],
       fauxMemory: [],
     })
   })

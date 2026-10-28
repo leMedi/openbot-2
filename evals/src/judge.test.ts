@@ -18,6 +18,7 @@ describe('the eval judge', () => {
           ],
         },
         memory: [],
+        routines: [],
       },
     })
 
@@ -35,6 +36,9 @@ describe('the eval judge', () => {
         '- Ada: bash {"command":"curl wttr.in/Paris"}',
         '',
         'Memory at the end (facts the bots remember):',
+        '(none)',
+        '',
+        'Routines at the end:',
         '(none)',
         '',
         'Rubric:',
@@ -55,6 +59,7 @@ describe('the eval judge', () => {
           { in: 'shared', tier: 'profile', text: 'The owner lives in Porto.', source: 'owner' },
           { in: 'Ada', tier: 'note', text: 'Checked the weather.', source: 'Ada' },
         ],
+        routines: [],
       },
     })
 
@@ -63,6 +68,31 @@ describe('the eval judge', () => {
         'Memory at the end (facts the bots remember):',
         '- shared memory, profile, by the owner: The owner lives in Porto.',
         "- Ada's memory, note, by Ada: Checked the weather.",
+      ].join('\n'),
+    )
+  })
+
+  it('is shown timeline rows, and the routines at the end with who wrote them, their schedule and runs', () => {
+    const { prompt } = judgeRequest({
+      description: '',
+      rubric,
+      record: {
+        toolCalls: [],
+        chats: { Ada: [{ from: 'timeline', author: 'Ada', text: 'Ada created routine *Dentist*' }] },
+        memory: [],
+        routines: [
+          { bot: 'Ada', name: 'Build watch', prompt: 'Tell me about failing builds.', schedule: '0 9 * * *', enabled: true, by: 'owner', runs: [{ status: 'ran', messaged: true }, { status: 'skipped_overlap', messaged: false }] },
+          { bot: 'Ada', name: 'Dentist', prompt: 'Remind the owner to call the dentist.', schedule: 'at 2026-03-16T10:00', enabled: false, by: 'bot', runs: [] },
+        ],
+      },
+    })
+
+    expect(prompt).toContain(['Chat "Ada":', '(timeline, not a message) Ada created routine *Dentist*'].join('\n'))
+    expect(prompt).toContain(
+      [
+        'Routines at the end:',
+        '- Ada\'s "Build watch", by the owner, on, schedule 0 9 * * *, runs: ran (messaged the owner), skipped_overlap: Tell me about failing builds.',
+        '- Ada\'s "Dentist", by Ada, off, schedule at 2026-03-16T10:00, never ran: Remind the owner to call the dentist.',
       ].join('\n'),
     )
   })

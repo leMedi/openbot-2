@@ -1,0 +1,31 @@
+description: >-
+  The owner asks for a recurring digest. Ada creates one routine that fires every weekday at 08:00 in the owner's time
+  zone, whose prompt says what goes in the digest, and tells the owner it's set up.
+bots:
+  - name: Ada
+    title: Personal assistant
+world:
+  clock: 2026-03-16T10:00:00Z
+  tools:
+    - { name: ci_failures, description: "CI plugin: the builds that failed since a time", result: "No failed builds." }
+script:
+  - to: Ada
+    text: Every weekday at 8am, send me a digest of the CI builds that failed overnight.
+assert:
+  - routines: { bot: Ada, by: bot, schedule: "^0{1,2} 0?8 \\* \\* (1-5|mon-fri|1,2,3,4,5)$", prompt: "build|\\bci\\b", min: 1, max: 1 }
+  - routines: { bot: Ada, max: 1 }
+  - no_silent_answer
+rubric:
+  - "The routine's prompt says what the digest holds (the CI builds that failed overnight) and that it goes to the owner"
+  - Ada tells the owner the digest is set up for weekdays at 8
+faux:
+  Ada:
+    - call:
+        update_state:
+          target: routine
+          action: create
+          name: Overnight CI digest
+          prompt: Check which CI builds failed overnight with ci_failures and send the owner a short digest.
+          schedule: 0 8 * * 1-5
+    - send: Done, you'll get a digest of overnight CI failures every weekday at 8:00
+    - end

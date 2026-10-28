@@ -1,0 +1,25 @@
+description: >-
+  The owner's routine has Ada check the builds every morning and tell them about failures. When it fires, every build
+  is passing: Ada checks, then ends without messaging the owner.
+bots:
+  - name: Ada
+    title: Personal assistant
+world:
+  clock: 2026-03-16T08:30:00Z
+  tools:
+    - { name: ci_status, description: "CI plugin: every branch's latest build status", result: "main: passing\nrelease/2.4: passing" }
+routines:
+  - { bot: Ada, name: Build watch, prompt: Check the builds with ci_status and tell me about any that are failing., schedule: "0 9 * * *" }
+script:
+  # Fires the routine at 09:00.
+  - advance: 1h
+assert:
+  - tool_called: { tool: ci_status, bot: Ada }
+  - messages: { in: Ada, max: 0 }
+  - routines: { bot: Ada, name: build watch, ran: true, messaged: false, min: 1 }
+rubric:
+  - Ada checks the builds when the routine fires and, as all are passing, sends the owner nothing
+faux:
+  Ada:
+    - call: { ci_status: {} }
+    - end

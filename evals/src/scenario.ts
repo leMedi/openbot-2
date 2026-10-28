@@ -32,16 +32,38 @@ export type Assertion =
    * bot memory (`in` the bot's name), or anywhere.
    */
   | { type: 'memory'; matches: string; in?: string; min?: number; max?: number }
+  /**
+   * How many routines there are at the end, of one `bot` or any, written `by` the owner or a bot (who created or last
+   * edited them), whose name, prompt and schedule regexes match (case-insensitive).
+   */
+  | {
+      type: 'routines'
+      bot?: string
+      by?: 'owner' | 'bot'
+      name?: string
+      prompt?: string
+      schedule?: string
+      /** Only those with (true) or without (false) a run that ran. */
+      ran?: boolean
+      /** Only those with (true) or without (false) a run that messaged the owner. */
+      messaged?: boolean
+      min?: number
+      max?: number
+    }
 
 /** A fact the owner added before the run: to a bot's bot memory, or to shared memory when `bot` is null. */
 export type SeededFact = { bot: string | null; tier: FactTier; text: string; importance: number }
 
+/** A routine the owner set up for a bot before the run. */
+export type SeededRoutine = { bot: string; name: string; prompt: string; schedule: string }
+
 /**
  * One step of the script: an owner's message to a bot's DM or a group chat; a compaction of a bot's history, as
- * pi-durable does near the context window; or the owner deleting every fact a regex `forget` matches (case-insensitive).
- * Messages and compactions wait until all is quiet.
+ * pi-durable does near the context window; the owner deleting every fact a regex `forget` matches (case-insensitive);
+ * or the server's clock moving forward, by `advance` ms or to the instant `advanceTo`, firing the routines due on the
+ * way. Every step but `forget` waits until all is quiet.
  */
-export type ScriptStep = { to: string; text: string } | { compact: string } | { forget: string }
+export type ScriptStep = { to: string; text: string } | { compact: string } | { forget: string } | { advance: number } | { advanceTo: string }
 
 /** A scenario file, or a selection of scenarios, that can't be used; its message says why. */
 export class ScenarioError extends Error {}
@@ -69,7 +91,9 @@ export type Scenario = {
   extraction: boolean
   /** Facts the owner added before the run. */
   memory: SeededFact[]
-  /** The owner's messages and memory steps, in order. */
+  /** Routines the owner set up before the run. */
+  routines: SeededRoutine[]
+  /** The owner's messages, compactions, memory deletions and clock moves, in order. */
   script: ScriptStep[]
   assertions: Assertion[]
   /** What the eval judge scores the run on, one item each. */
@@ -91,6 +115,15 @@ const regex = z.string().min(1).refine((source) => {
   }
 }, 'not a valid regex')
 const bot = z.union([name, z.object({ tool: name, bot: name.optional() }).strict()])
+/** `90m`, `2h`, `1d`, in ms. */
+const duration = z
+  .string()
+  .regex(/^\d+[mhd]$/, 'not a duration such as 30m, 2h or 1d')
+  .transform((text) => Number.parseInt(text) * { m: 60_000, h: 3_600_000, d: 86_400_000 }[text.at(-1) as 'm' | 'h' | 'd'])
+// YAML reads an unquoted timestamp as a date.
+const instant = z
+  .union([z.string(), z.date().transform((date) => date.toISOString().replace('.000Z', 'Z'))])
+  .refine((text) => !Number.isNaN(Date.parse(text)), 'not a time')
 const toolCalls = z.record(name, z.record(z.string(), z.unknown()).nullable())
 
 const assertion = z.union([
@@ -105,6 +138,23 @@ const assertion = z.union([
     })
     .strict(),
   z.object({ memory: z.object({ matches: regex, in: name.optional(), min: count.optional(), max: count.optional() }).strict() }).strict(),
+  z
+    .object({
+      routines: z
+        .object({
+          bot: name.optional(),
+          by: z.enum(['owner', 'bot']).optional(),
+          name: regex.optional(),
+          prompt: regex.optional(),
+          schedule: regex.optional(),
+          ran: z.boolean().optional(),
+          messaged: z.boolean().optional(),
+          min: count.optional(),
+          max: count.optional(),
+        })
+        .strict(),
+    })
+    .strict(),
   z.object({ max_message_length: z.union([z.number().int().positive(), z.object({ chars: z.number().int().positive(), in: name.optional() }).strict()]) }).strict(),
   z.object({ no_silent_answer: name.nullable() }).strict(),
   z.literal('no_silent_answer'),
@@ -144,8 +194,7 @@ const schema = z
     groups: z.array(z.object({ name, members: z.array(name).min(2) }).strict()).default([]),
     world: z
       .object({
-        // YAML reads an unquoted timestamp as a date.
-        clock: z.union([z.string(), z.date().transform((date) => date.toISOString().replace('.000Z', 'Z'))]).nullable().default(null),
+        clock: instant.nullable().default(null),
         shell: z
           .array(z.object({ match: z.string(), stdout: z.string().default(''), stderr: z.string().default(''), exitCode: z.number().int().default(0) }).strict())
           .default([]),
@@ -167,8 +216,16 @@ const schema = z
           .strict(),
       )
       .default([]),
+    routines: z.array(z.object({ bot: name, name: z.string().min(1), prompt: z.string().min(1), schedule: z.string().min(1) }).strict()).default([]),
     script: z
-      .array(z.union([z.object({ to: name, text: z.string().min(1) }).strict(), z.object({ compact: name }).strict(), z.object({ forget: regex }).strict()]))
+      .array(
+        z.union([
+          z.object({ to: name, text: z.string().min(1) }).strict(),
+          z.object({ compact: name }).strict(),
+          z.object({ forget: regex }).strict(),
+          z.object({ advance: z.union([duration, instant], 'not a duration such as 30m, 2h or 1d, or a time') }).strict(),
+        ]),
+      )
       .min(1),
     assert: z.array(assertion).default([]),
     rubric: z.array(z.string().min(1)).default([]),
@@ -187,9 +244,15 @@ function toAssertion(raw: Raw['assert'][number]): Assertion {
   if ('tool_order' in raw) return { type: 'tool_order', ...(Array.isArray(raw.tool_order) ? { tools: raw.tool_order } : raw.tool_order) }
   if ('messages' in raw) return { type: 'messages', ...raw.messages }
   if ('memory' in raw) return { type: 'memory', ...raw.memory }
+  if ('routines' in raw) return { type: 'routines', ...raw.routines }
   if ('max_message_length' in raw)
     return { type: 'max_message_length', ...(typeof raw.max_message_length === 'number' ? { chars: raw.max_message_length } : raw.max_message_length) }
   return { type: 'no_silent_answer', ...(raw.no_silent_answer ? { in: raw.no_silent_answer } : {}) }
+}
+
+function toScriptStep(raw: Raw['script'][number]): ScriptStep {
+  if (!('advance' in raw)) return raw
+  return typeof raw.advance === 'number' ? { advance: raw.advance } : { advanceTo: raw.advance }
 }
 
 function toFauxTurn(raw: Raw['faux'][string][number]): FauxTurn {
@@ -210,10 +273,14 @@ function unknownNames(raw: Raw): string[] {
   raw.memory.forEach((fact, i) => {
     if (fact.bot && !bots.has(fact.bot)) problems.push(`memory[${i}].bot: no bot named "${fact.bot}"`)
   })
+  raw.routines.forEach((routine, i) => {
+    if (!bots.has(routine.bot)) problems.push(`routines[${i}].bot: no bot named "${routine.bot}"`)
+  })
   raw.script.forEach((step, i) => {
     if ('to' in step && !chats.has(step.to)) problems.push(`script[${i}].to: no bot or group named "${step.to}"`)
     if ('compact' in step && !bots.has(step.compact)) problems.push(`script[${i}].compact: no bot named "${step.compact}"`)
   })
+  problems.push(...backwardMoves(raw))
   raw.assert.map(toAssertion).forEach((assertion, i) => {
     if ('bot' in assertion && assertion.bot && !bots.has(assertion.bot)) problems.push(`assert[${i}]: no bot named "${assertion.bot}"`)
     if ('from' in assertion && assertion.from && !bots.has(assertion.from)) problems.push(`assert[${i}]: no bot named "${assertion.from}"`)
@@ -223,6 +290,24 @@ function unknownNames(raw: Raw): string[] {
   })
   for (const bot of Object.keys(raw.faux)) if (!bots.has(bot)) problems.push(`faux: no bot named "${bot}"`)
   if (raw.faux_memory.length && !raw.extraction) problems.push('faux_memory: the memory model only answers with `extraction: true`')
+  return problems
+}
+
+/** Clock moves to a time that isn't after the clock's, which the clock (never going back) would skip silently. */
+function backwardMoves(raw: Raw): string[] {
+  const problems: string[] = []
+  let now = raw.world.clock === null ? null : Date.parse(raw.world.clock)
+  raw.script.forEach((step, i) => {
+    if (!('advance' in step)) return
+    if (typeof step.advance === 'number') {
+      if (now !== null) now += step.advance
+      return
+    }
+    const to = Date.parse(step.advance)
+    if (now === null) problems.push(`script[${i}].advance: moving to ${step.advance} needs world.clock, where the clock starts`)
+    else if (to <= now) problems.push(`script[${i}].advance: ${step.advance} isn't after the clock (${new Date(now).toISOString().replace('.000Z', 'Z')})`)
+    now = to
+  })
   return problems
 }
 
@@ -244,7 +329,8 @@ export function parseScenario(yaml: string, { suite, name }: { suite: string; na
     world: raw.world,
     extraction: raw.extraction,
     memory: raw.memory,
-    script: raw.script,
+    routines: raw.routines,
+    script: raw.script.map(toScriptStep),
     assertions: raw.assert.map(toAssertion),
     rubric: raw.rubric,
     faux: Object.fromEntries(Object.entries(raw.faux).map(([bot, turns]) => [bot, turns.map(toFauxTurn)])),

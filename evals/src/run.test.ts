@@ -147,6 +147,54 @@ ${fauxMemory}`),
   })
 })
 
+describe('running a routines scenario on the faux model', () => {
+  it("starts the clock at the world's, sets up the owner's routines, fires them as the clock moves, and records routines at the end", async () => {
+    const result = await runScenario(
+      scenario(`
+bots: [{ name: Ada }]
+world: { clock: 2026-03-16T08:30:00Z }
+routines:
+  - { bot: Ada, name: Build watch, prompt: Tell me about failing builds., schedule: "0 9 * * *" }
+script:
+  - { to: Ada, text: Remind me at 10 to call the dentist }
+  - advance: 1h
+  - advance: 2026-03-16T10:00:00Z
+assert:
+  - routines: { bot: Ada, by: bot, schedule: "^at 2026-03-16T10:00$", min: 1, max: 1 }
+  - no_silent_answer
+faux:
+  Ada:
+    - call: { bash: { command: date } }
+    - call: { update_state: { target: routine, action: create, name: Dentist, prompt: Remind the owner to call the dentist., schedule: "at 2026-03-16T10:00" } }
+    - send: Will do
+    - end
+    # The build watch at 09:00: nothing to report.
+    - call: { bash: { command: date } }
+    - end
+    # The reminder at 10:00.
+    - send: Time to call the dentist
+    - end
+`),
+      { kind: 'faux' },
+    )
+
+    expect(result.error).toBeUndefined()
+    expect(result.assertions.filter((assertion) => !assertion.passed)).toEqual([])
+    expect(result.world.shell.map((command) => command.stdout)).toEqual(['Mon, 16 Mar 2026 08:30:00 GMT\n', 'Mon, 16 Mar 2026 09:00:00 GMT\n'])
+    expect(result.record.routines).toEqual([
+      { bot: 'Ada', name: 'Build watch', prompt: 'Tell me about failing builds.', schedule: '0 9 * * *', enabled: true, by: 'owner', runs: [{ status: 'ran', messaged: false }] },
+      { bot: 'Ada', name: 'Dentist', prompt: 'Remind the owner to call the dentist.', schedule: 'at 2026-03-16T10:00', enabled: false, by: 'bot', runs: [{ status: 'ran', messaged: true }] },
+    ])
+    // The routine's timeline row is no message to the owner.
+    expect(result.record.chats.Ada).toEqual([
+      { from: 'owner', author: 'You', text: 'Remind me at 10 to call the dentist' },
+      { from: 'timeline', author: 'Ada', text: 'Ada created routine *Dentist*' },
+      { from: 'bot', author: 'Ada', text: 'Will do' },
+      { from: 'bot', author: 'Ada', text: 'Time to call the dentist' },
+    ])
+  })
+})
+
 describe('running a scenario on real models', () => {
   it('connects their providers from the environment and judges with the judge model', async () => {
     // Stands in for a real provider: the bot only ever thinks aloud, and the judge fails the item.

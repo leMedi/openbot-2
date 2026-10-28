@@ -1,0 +1,36 @@
+description: >-
+  On a Monday afternoon the owner asks for a reminder tomorrow at 9. Ada creates a one-off reminder for Tuesday 09:00
+  in the owner's time zone; when it fires, she reminds the owner.
+bots:
+  - name: Ada
+    title: Personal assistant
+world:
+  clock: 2026-03-16T15:20:00Z
+script:
+  - to: Ada
+    text: Remind me tomorrow at 9 to call the dentist
+  # Fires the reminder.
+  - advance: 2026-03-17T09:00:00Z
+assert:
+  # It fired at 09:00 on the 17th and Ada messaged the owner then.
+  - routines: { bot: Ada, by: bot, schedule: "^at 2026-03-17T09:00$", ran: true, messaged: true, min: 1, max: 1 }
+  - routines: { bot: Ada, max: 1 }
+  - no_silent_answer
+rubric:
+  - Ada confirms the reminder for tomorrow (Tuesday) at 9
+  - When the reminder fires, Ada messages the owner to call the dentist
+faux:
+  Ada:
+    - call: { bash: { command: date } }
+    - call:
+        update_state:
+          target: routine
+          action: create
+          name: Call the dentist
+          prompt: Remind the owner to call the dentist.
+          schedule: at 2026-03-17T09:00
+    - send: Will do, I'll remind you tomorrow at 9:00
+    - end
+    # The reminder fires.
+    - send: Reminder to call the dentist
+    - end
