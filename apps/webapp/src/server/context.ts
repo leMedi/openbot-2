@@ -7,6 +7,9 @@ import {
   type BotWithChat,
   type ChatSummary,
   type Clock,
+  instantAt,
+  type LocalDateTime,
+  ownerTimeZone,
   type Browser,
   type Desktop,
   EventBus,
@@ -49,8 +52,21 @@ export type ServerContext = {
    * (e.g. memory facts') should read it. Older writes and pi-durable's entries still read the system's time.
    */
   clock: Clock
-  /** The server's scheduled jobs, e.g. memory consolidation; `jobs.close()` stops them. */
+  /**
+   * The server's scheduled jobs, e.g. memory consolidation; `jobs.close()` stops them. They are rescheduled whenever
+   * the owner's time zone changes.
+   */
   jobs: ServerJobs
+  /** The owner's time, as scheduled jobs (routines, memory consolidation) read it. */
+  ownerTime: OwnerTime
+}
+
+/** The owner's time zone (`settings.timeZone`), as scheduled jobs read it. */
+export type OwnerTime = {
+  /** The owner's IANA time zone, or UTC until the web app detects it; a `DailyJob`'s `timeZone`. */
+  timeZone(): Promise<string>
+  /** The instant when the owner's clocks read `local`, e.g. a reminder's `2026-10-29T09:00`. */
+  instant(local: LocalDateTime): Promise<number>
 }
 
 /** A chat as the sidebar shows it, with the member taking its turn in a group. */
@@ -244,5 +260,12 @@ export async function createServerContext({
   opened(runtime)
   const { synced: screensSynced, stop: stopSyncingScreens } = keepScreensInSync(db, screens)
   const jobs = new ServerJobs({ clock })
-  return { db, bus, providers, runtime, computer, attachments, screens, screenTickets, screensSynced, stopSyncingScreens, rounds, clock, jobs }
+  bus.listen(({ event }) => {
+    if (event.type === 'timeZone.updated') void jobs.reschedule()
+  })
+  const ownerTime: OwnerTime = {
+    timeZone: () => ownerTimeZone(db),
+    instant: async (local) => instantAt(local, await ownerTimeZone(db)),
+  }
+  return { db, bus, providers, runtime, computer, attachments, screens, screenTickets, screensSynced, stopSyncingScreens, rounds, clock, jobs, ownerTime }
 }

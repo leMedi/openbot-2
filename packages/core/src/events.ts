@@ -32,6 +32,17 @@ export class EventBus<E> {
     return stamped
   }
 
+  /**
+   * Calls `listener` with every event published from now on, as it is published, e.g. for the server's own reactions
+   * (scheduled jobs following the owner's time zone). Returns a function that stops listening.
+   */
+  listen(listener: (event: Stamped<E>) => void): () => void {
+    this.#subscribers.add(listener)
+    return () => {
+      this.#subscribers.delete(listener)
+    }
+  }
+
   /** Whether every event of this epoch published after `seq` is still kept, so a subscriber can resume from it. */
   canResume(seq: number): boolean {
     return seq <= this.#seq && seq >= this.#seq - this.#kept.length

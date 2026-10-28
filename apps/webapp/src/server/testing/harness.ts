@@ -142,6 +142,8 @@ async function open(
     clock,
     /** The server's scheduled jobs; a test may schedule its own. */
     jobs: context.jobs,
+    /** The owner's time zone and local times, as scheduled jobs read them. */
+    ownerTime: context.ownerTime,
     /** The fakes, to keep across a restart. */
     kept: { computer, botComputer, clock } satisfies KeptFakes,
     /** The bots' home, a temporary folder: `shared/`, `bots/<id>/`. */

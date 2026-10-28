@@ -211,6 +211,9 @@ export const onboarding = z.object({
 })
 export type Onboarding = z.infer<typeof onboarding>
 
+/** An IANA time zone, e.g. `Europe/Paris`. */
+const timeZone = z.string().min(1)
+
 export const liveEvent = z.discriminatedUnion('type', [
   /**
    * First event of every subscription. With `resumed`, the events the client missed since the stamp it reconnected
@@ -231,6 +234,8 @@ export const liveEvent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('chat.updated'), chat }),
   /** A message changed, e.g. the owner answered its card; `message` is all of it as it is now. */
   z.object({ type: z.literal('message.updated'), message }),
+  /** The owner's time zone changed (or was first detected); scheduled jobs reschedule in it. */
+  z.object({ type: z.literal('timeZone.updated'), timeZone }),
 ])
 export type LiveEvent = z.infer<typeof liveEvent>
 
@@ -311,6 +316,13 @@ export const modelSettings = z.object({
   computerUseModel: z.string().nullable(),
 })
 export type ModelSettings = z.infer<typeof modelSettings>
+
+/** Settings → General. A null time zone is not detected yet; jobs then follow UTC. */
+export const generalSettings = z.object({
+  /** The owner's IANA time zone, which routines and memory consolidation follow. */
+  timeZone: timeZone.nullable(),
+})
+export type GeneralSettings = z.infer<typeof generalSettings>
 
 /** Kinds of side effect the orchestrator reviews. Messages between bots are not one. */
 export const surfaces = [
@@ -586,6 +598,23 @@ export const contract = {
       })
       .input(modelSettings.partial())
       .output(modelSettings),
+  },
+  general: {
+    getSettings: oc
+      .route({ method: 'GET', path: '/settings/general', summary: "The owner's time zone" })
+      .output(generalSettings),
+    updateSettings: oc
+      .route({ method: 'PATCH', path: '/settings/general', summary: "Set the owner's time zone; it must be an IANA time zone" })
+      .input(z.object({ timeZone }))
+      .output(generalSettings),
+    detectTimeZone: oc
+      .route({
+        method: 'POST',
+        path: '/settings/general/detected-time-zone',
+        summary: "The browser's time zone, kept as the owner's only if none is set yet",
+      })
+      .input(z.object({ timeZone }))
+      .output(generalSettings),
   },
   screens: {
     status: oc

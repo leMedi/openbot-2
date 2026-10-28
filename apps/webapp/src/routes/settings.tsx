@@ -5,6 +5,7 @@ export const Route = createFileRoute('/settings')({
 })
 
 const sections = [
+  { to: '/settings/general', label: 'General' },
   { to: '/settings/providers', label: 'Providers' },
   { to: '/settings/models', label: 'Models' },
 ] as const

@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react'
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
+import { type ReactNode, useEffect } from 'react'
+import { HeadContent, Outlet, Scripts, createRootRoute } from '@tanstack/react-router'
+import { api } from '../lib/api.ts'
 import styles from '../styles.css?url'
 
 export const Route = createRootRoute({
@@ -12,7 +13,21 @@ export const Route = createRootRoute({
     links: [{ rel: 'stylesheet', href: styles }],
   }),
   shellComponent: RootDocument,
+  component: Root,
 })
+
+/**
+ * Every page. Each load offers the browser's time zone, so the first visit sets the owner's; the server keeps one
+ * already set, so later loads change nothing.
+ */
+function Root() {
+  useEffect(() => {
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    // Best effort: a zone the server doesn't know is left for the owner to choose in Settings → General.
+    if (timeZone) api().general.detectTimeZone({ timeZone }).catch(() => {})
+  }, [])
+  return <Outlet />
+}
 
 /**
  * Follows the system theme before first paint, so dark mode never flashes light. A later switch crossfades through a

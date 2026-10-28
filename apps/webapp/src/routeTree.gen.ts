@@ -14,6 +14,7 @@ import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
+import { Route as SettingsGeneralRouteImport } from './routes/settings/general'
 import { Route as SettingsModelsRouteImport } from './routes/settings/models'
 import { Route as SettingsProvidersRouteImport } from './routes/settings/providers'
 import { Route as AppBotsBotIdRouteImport } from './routes/_app/bots.$botId'
@@ -43,6 +44,11 @@ const ApiSplatRoute = ApiSplatRouteImport.update({
   id: '/api/$',
   path: '/api/$',
   getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsGeneralRoute = SettingsGeneralRouteImport.update({
+  id: '/general',
+  path: '/general',
+  getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsModelsRoute = SettingsModelsRouteImport.update({
   id: '/models',
@@ -75,6 +81,7 @@ export interface FileRoutesByFullPath {
   '/onboarding': typeof OnboardingRoute
   '/settings': typeof SettingsRouteWithChildren
   '/api/$': typeof ApiSplatRoute
+  '/settings/general': typeof SettingsGeneralRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/providers': typeof SettingsProvidersRoute
   '/bots/$botId': typeof AppBotsBotIdRoute
@@ -85,6 +92,7 @@ export interface FileRoutesByTo {
   '/onboarding': typeof OnboardingRoute
   '/settings': typeof SettingsRouteWithChildren
   '/api/$': typeof ApiSplatRoute
+  '/settings/general': typeof SettingsGeneralRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/providers': typeof SettingsProvidersRoute
   '/': typeof AppIndexRoute
@@ -98,6 +106,7 @@ export interface FileRoutesById {
   '/onboarding': typeof OnboardingRoute
   '/settings': typeof SettingsRouteWithChildren
   '/api/$': typeof ApiSplatRoute
+  '/settings/general': typeof SettingsGeneralRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/providers': typeof SettingsProvidersRoute
   '/_app/': typeof AppIndexRoute
@@ -112,6 +121,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/settings'
     | '/api/$'
+    | '/settings/general'
     | '/settings/models'
     | '/settings/providers'
     | '/bots/$botId'
@@ -122,6 +132,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/settings'
     | '/api/$'
+    | '/settings/general'
     | '/settings/models'
     | '/settings/providers'
     | '/'
@@ -134,6 +145,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/settings'
     | '/api/$'
+    | '/settings/general'
     | '/settings/models'
     | '/settings/providers'
     | '/_app/'
@@ -185,6 +197,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/$'
       preLoaderRoute: typeof ApiSplatRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/settings/general': {
+      id: '/settings/general'
+      path: '/general'
+      fullPath: '/settings/general'
+      preLoaderRoute: typeof SettingsGeneralRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/settings/models': {
       id: '/settings/models'
@@ -241,11 +260,13 @@ const AppRouteChildren: AppRouteChildren = {
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
 interface SettingsRouteChildren {
+  SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsModelsRoute: typeof SettingsModelsRoute
   SettingsProvidersRoute: typeof SettingsProvidersRoute
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsModelsRoute: SettingsModelsRoute,
   SettingsProvidersRoute: SettingsProvidersRoute,
 }

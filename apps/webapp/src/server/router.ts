@@ -9,6 +9,7 @@ import {
   ChatNotFoundError,
   createGroup,
   deleteGroup,
+  detectTimeZone,
   getGroup,
   GroupMembersError,
   listGroups,
@@ -23,6 +24,7 @@ import {
   handBack,
   HandedBackError,
   InvalidAnswerError,
+  InvalidTimeZoneError,
   deleteBot,
   getBot,
   getChat,
@@ -40,6 +42,7 @@ import {
   readBotOrchestratorModes,
   readModelSettings,
   readOrchestratorModes,
+  readTimeZone,
   screenSize,
   startScreen,
   TakeOverNotFoundError,
@@ -48,6 +51,8 @@ import {
   updateGroup,
   writeModelSettings,
   writeOrchestratorModes,
+  writeTimeZone,
+  type TimeZoneWrite,
 } from '@openbot/core'
 import { implement, ORPCError } from '@orpc/server'
 import { generateContentDisposition } from '@orpc/standard-server'
@@ -56,6 +61,18 @@ import { screenStreamUrl } from './screen-stream.ts'
 import { toAuditEntryInfo, toBotInfo, toMessageInfo } from './views.ts'
 
 const os = implement(contract).$context<ServerContext>()
+
+/** Writes the owner's time zone with `write`, refusing an invalid one; a change is published for scheduled jobs. */
+async function setTimeZone(context: ServerContext, write: () => Promise<TimeZoneWrite>) {
+  try {
+    const { timeZone, changed } = await write()
+    if (changed) context.bus.publish({ type: 'timeZone.updated', timeZone })
+    return { timeZone }
+  } catch (error) {
+    if (error instanceof InvalidTimeZoneError) throw new ORPCError('BAD_REQUEST', { message: error.message })
+    throw error
+  }
+}
 
 /** Throws unless the bot's model can run, so the owner's input is never left without a bot to answer it. */
 async function assertCanRun(context: ServerContext, bot: BotWithChat) {
@@ -479,6 +496,14 @@ export const router = os.router({
       }
       return writeModelSettings(context.db, input)
     }),
+  },
+
+  general: {
+    getSettings: os.general.getSettings.handler(async ({ context }) => ({ timeZone: await readTimeZone(context.db) })),
+
+    updateSettings: os.general.updateSettings.handler(({ context, input }) => setTimeZone(context, () => writeTimeZone(context.db, input.timeZone))),
+
+    detectTimeZone: os.general.detectTimeZone.handler(({ context, input }) => setTimeZone(context, () => detectTimeZone(context.db, input.timeZone))),
   },
 
   screens: {
