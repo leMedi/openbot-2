@@ -120,6 +120,13 @@
       "when": 1793186115569,
       "tag": "0016_bot_skills_block",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1793212798377,
+      "tag": "0017_plugin_accounts_needs_reconnect",
+      "breakpoints": true
     }
   ]
 }

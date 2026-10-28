@@ -64,6 +64,11 @@ export class PluginConnections {
     const listed = this.#listed.get(serverName(account.plugin, account.slug))
     if (listed) return listed
     await this.#connection(account)
+    return this.listed(account)
+  }
+
+  /** The tools the account's server listed when it last connected, without connecting; none if it never did. */
+  listed(account: AccountServer): Tool[] {
     return this.#listed.get(serverName(account.plugin, account.slug)) ?? []
   }
 

@@ -1,0 +1,1 @@
+ALTER TABLE `plugin_accounts` ADD `needs_reconnect_at` integer;

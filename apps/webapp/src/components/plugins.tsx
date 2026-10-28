@@ -2,6 +2,7 @@ import type { BotInfo, PluginAccountInfo, PluginInfo } from '@openbot/api-contra
 import { cn } from '@openbot/ui/lib/utils'
 import { useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
+import { SignInWizard } from './sign-in-wizard.tsx'
 
 /** A plugin's icon, or its name's first letter when it has none. */
 export function PluginIcon({ plugin, size = 36 }: { plugin: PluginInfo; size?: number }) {
@@ -98,5 +99,26 @@ function Switch({ label, on, change }: { label: string; on: boolean; change: (gr
       </span>
       {error && <span className="text-sm text-destructive-foreground">{error}</span>}
     </label>
+  )
+}
+
+/** Signs in to a plugin's connected account again, e.g. once it needs reconnecting, keeping its slug and grants. */
+export function ReconnectWizard({
+  plugin,
+  account,
+  onClose,
+}: {
+  plugin: Pick<PluginInfo, 'name' | 'displayName'>
+  account: Pick<PluginAccountInfo, 'slug' | 'displayName'>
+  onClose: (connected: boolean) => void
+}) {
+  return (
+    <SignInWizard
+      title={`Reconnect ${plugin.displayName}`}
+      subtitle={account.displayName}
+      start={(signal) => api().plugins.connect({ name: plugin.name, origin: window.location.origin, account: account.slug }, { signal })}
+      answer={(signInId, promptId, value) => api().plugins.answer({ signInId, promptId, value })}
+      onClose={onClose}
+    />
   )
 }

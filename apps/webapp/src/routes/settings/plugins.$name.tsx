@@ -2,7 +2,7 @@ import { type PluginAccountInfo, type PluginInfo, pluginAccountNameMax } from '@
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { useCallback, useEffect, useState } from 'react'
 import { Dialog } from '../../components/dialog.tsx'
-import { GrantSwitch, PluginIcon, PluginStatus, SkillsGrantSwitch } from '../../components/plugins.tsx'
+import { GrantSwitch, PluginIcon, PluginStatus, ReconnectWizard, SkillsGrantSwitch } from '../../components/plugins.tsx'
 import { SignInWizard } from '../../components/sign-in-wizard.tsx'
 import { api, errorMessage } from '../../lib/api.ts'
 import { useLive } from '../../lib/live.tsx'
@@ -138,12 +138,16 @@ function PluginDetail() {
   )
 }
 
-/** One connected account: its name, which the owner can change, its slug, Disconnect, and the bots granted it. */
+/**
+ * One connected account: its name, which the owner can change, its slug, Reconnect once its sign-in expired, Disconnect,
+ * and the bots granted it.
+ */
 function AccountRow({ plugin, account, onChanged }: { plugin: PluginInfo; account: PluginAccountInfo; onChanged: () => void }) {
   const { bots } = useLive()
   const [renaming, setRenaming] = useState(false)
   const [displayName, setDisplayName] = useState(account.displayName)
   const [disconnecting, setDisconnecting] = useState(false)
+  const [reconnecting, setReconnecting] = useState(false)
   const [error, setError] = useState<string>()
 
   async function rename(event: React.FormEvent) {
@@ -195,7 +199,10 @@ function AccountRow({ plugin, account, onChanged }: { plugin: PluginInfo; accoun
       ) : (
         <div className="flex items-center gap-2">
           <span className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate font-medium">{account.displayName}</span>
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="truncate font-medium">{account.displayName}</span>
+              {account.needsReconnect && <PluginStatus status="needs_reconnect" />}
+            </span>
             <span className="text-sm text-muted-foreground">
               <span className="font-mono">{account.slug}</span> · connected {new Date(account.connectedAt).toLocaleDateString()}
             </span>
@@ -203,6 +210,15 @@ function AccountRow({ plugin, account, onChanged }: { plugin: PluginInfo; accoun
           <button type="button" className="pressable rounded-md px-3 py-1.5 text-base hover:bg-secondary-hover" onClick={() => setRenaming(true)}>
             Rename
           </button>
+          {account.needsReconnect && (
+            <button
+              type="button"
+              className="pressable rounded-md bg-primary px-3 py-1.5 text-base text-primary-foreground hover:bg-primary-hover"
+              onClick={() => setReconnecting(true)}
+            >
+              Reconnect
+            </button>
+          )}
           <button
             type="button"
             className="pressable rounded-md bg-secondary px-3 py-1.5 text-base hover:bg-secondary-hover"
@@ -220,6 +236,17 @@ function AccountRow({ plugin, account, onChanged }: { plugin: PluginInfo; accoun
             <GrantSwitch key={bot.id} plugin={plugin} account={account} bot={bot} label={bot.name} onChanged={onChanged} />
           ))}
         </fieldset>
+      )}
+
+      {reconnecting && (
+        <ReconnectWizard
+          plugin={plugin}
+          account={account}
+          onClose={(connected) => {
+            setReconnecting(false)
+            if (connected) onChanged()
+          }}
+        />
       )}
 
       {disconnecting && (

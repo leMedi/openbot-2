@@ -81,7 +81,7 @@ export async function listChatSummaries(db: Db, chatIds?: readonly string[]): Pr
       )`,
       waitingFor: sql<string | null>`(
         select coalesce(json_extract(${messages.card}, '$.prompt'), json_extract(${messages.card}, '$.instruction'), ${messages.text}) from ${messages}
-        where ${messages.chatId} = ${chats.id} and json_extract(${messages.card}, '$.type') in ('question', 'take_over', 'plugin_request')
+        where ${messages.chatId} = ${chats.id} and json_extract(${messages.card}, '$.type') in ('question', 'take_over', 'plugin_request', 'plugin_reconnect')
           and json_extract(${messages.cardState}, '$.answer') is null and json_extract(${messages.cardState}, '$.dismissed') is null
           and json_extract(${messages.cardState}, '$.outcome') is null
         order by ${messages.id} desc limit 1

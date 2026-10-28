@@ -124,7 +124,7 @@ A bundle from OpenBot's catalog of a hosted tool server, skills, or both, giving
 _Avoid_: Connector, integration, extension
 
 **Plugin account**:
-One sign-in to a plugin's service; a plugin may have several. Each keeps the slug it was given when connected (`account1`, `account2`…, never reused) and has a display name the owner can change.
+One sign-in to a plugin's service; a plugin may have several. Each keeps the slug it was given when connected (`account1`, `account2`…, never reused) and has a display name the owner can change. It **needs reconnect** once its sign-in expired and couldn't be refreshed: the owner signs in to it again (from Settings → Plugins or a **Reconnect card** in each granted bot's DM), keeping its slug and grants.
 _Avoid_: Connection, profile
 
 **Skill**:

@@ -1,6 +1,6 @@
 import { type AuditEntryInfo, type BotInfo, type CardInfo, type ChatInfo, type FactInfo, deletedAuthorName, type MessageInfo, type PluginAccountInfo, type PluginInfo, pluginIconPath, type RoutineInfo, type RoutineRunInfo } from '@openbot/api-contract'
 import type { BotStatus, PluginAccountSummary } from '@openbot/agent'
-import { type BotWithChat, type ChatSummary, type RoutineState, factSourceName, handBackOutcomeOf, isPluginRequestCard, isQuestionCard, pluginRequestDecisionOf, isRoutineChangeCard, isTakeOverCard, questionAnswerOf, questionDismissedOf } from '@openbot/core'
+import { type BotWithChat, type ChatSummary, type RoutineState, factSourceName, handBackOutcomeOf, isPluginReconnectCard, isPluginRequestCard, isQuestionCard, pluginReconnectOutcomeOf, pluginRequestDecisionOf, isRoutineChangeCard, isTakeOverCard, questionAnswerOf, questionDismissedOf } from '@openbot/core'
 import type { AuditEntry, Fact, Message, RoutineRun } from '@openbot/db'
 import type { Plugin } from '@openbot/plugins'
 
@@ -33,6 +33,7 @@ function toCardInfo(message: Message): CardInfo | null {
   // The goal is the bot's, for when it goes on; the owner sees the instruction.
   if (isTakeOverCard(message.card)) return { type: 'take_over', instruction: message.card.instruction, outcome: handBackOutcomeOf(message) }
   if (isPluginRequestCard(message.card)) return { ...message.card, decision: pluginRequestDecisionOf(message) }
+  if (isPluginReconnectCard(message.card)) return { ...message.card, outcome: pluginReconnectOutcomeOf(message) }
   if (isRoutineChangeCard(message.card)) return { type: 'routine_change', change: message.card.change, routineId: message.card.routineId, name: message.card.name }
   return null
 }
@@ -150,7 +151,7 @@ export function toPluginInfo(plugin: Plugin, accounts: PluginAccountSummary[], g
     version: plugin.version,
     description: plugin.description,
     icon: plugin.icon && pluginIconPath(plugin.name),
-    status: own.length ? 'connected' : 'not_connected',
+    status: own.some((account) => account.needsReconnect) ? 'needs_reconnect' : own.length ? 'connected' : 'not_connected',
     servers: plugin.servers,
     skills: plugin.skills.map(({ name, description }) => ({ name, description })),
     accounts: own,
@@ -160,5 +161,11 @@ export function toPluginInfo(plugin: Plugin, accounts: PluginAccountSummary[], g
 
 /** What the owner sees of a plugin account: never its tokens. */
 export function toPluginAccountInfo(account: PluginAccountSummary): PluginAccountInfo {
-  return { slug: account.slug, displayName: account.displayName, connectedAt: account.connectedAt.getTime(), grantedTo: account.grantedTo }
+  return {
+    slug: account.slug,
+    displayName: account.displayName,
+    connectedAt: account.connectedAt.getTime(),
+    needsReconnect: account.needsReconnectAt !== null,
+    grantedTo: account.grantedTo,
+  }
 }

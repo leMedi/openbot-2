@@ -16,6 +16,7 @@ export {
   type CatalogEntry,
   type ConnectablePlugin,
   disconnectedNote,
+  reconnectedNote,
   InvalidAccountNameError,
   InvalidRedirectError,
   PluginAccountNotFoundError,

@@ -53,17 +53,24 @@ export const privateOrigin = 'http://192.168.1.25:3000'
 /**
  * Connects an account of `name` as the owner would from the page at `origin`, signing in on the fake as `user`: the
  * browser returns to the callback route, which goes back to the plugin, or the owner pastes the URL it ends on.
- * Returns every step. With `requestId`, it connects from that bot's plugin request card, granting the bot the account.
+ * Returns every step. With `requestId`, it connects from that bot's plugin request card, granting the bot the account;
+ * with `account`, it signs in to that account again.
  */
 export async function connectAccount(
   server: TestServer,
   fake: FakeMcpServer,
-  { name = 'notes', origin = privateOrigin, user = 'owner', requestId }: { name?: string; origin?: string; user?: string; requestId?: string } = {},
+  {
+    name = 'notes',
+    origin = privateOrigin,
+    user = 'owner',
+    requestId,
+    account,
+  }: { name?: string; origin?: string; user?: string; requestId?: string; account?: string } = {},
 ) {
   const steps: SignInStep[] = []
   let signInId = ''
   let endsOn = ''
-  for await (const step of await server.client.plugins.connect({ name, origin, ...(requestId && { requestId }) })) {
+  for await (const step of await server.client.plugins.connect({ name, origin, ...(requestId && { requestId }), ...(account && { account }) })) {
     steps.push(step)
     if (step.type === 'started') signInId = step.signInId
     if (step.type === 'auth_url') {

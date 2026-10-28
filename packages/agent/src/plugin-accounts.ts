@@ -1,7 +1,7 @@
 import { type JsonObject, Type } from '@earendil-works/pi-ai'
 import { defineTool } from '@earendil-works/pi-durable'
 import { type Tool, toLlmContent } from '@earendil-works/pi-mcp'
-import { authorizeMcp, McpOAuthProvider, MemoryOAuthStateStore } from '@earendil-works/pi-mcp/oauth'
+import { authorizeMcp, McpOAuthAuthorizationRequiredError, McpOAuthProvider, MemoryOAuthStateStore } from '@earendil-works/pi-mcp/oauth'
 import type { SecretBox } from '@openbot/core'
 import { type Db, type PluginAccount, pluginAccounts, pluginGrants } from '@openbot/db'
 import { and, asc, count, eq, isNull } from 'drizzle-orm'
@@ -9,8 +9,18 @@ import { AccountCredentials, type AccountServer, PluginConnections, serverName }
 import type { BotTool } from './runtime.ts'
 import { SignInNotFoundError, type SignInStep, stepQueue } from './sign-in.ts'
 
-/** A connected account of a plugin, as Settings → Plugins lists it, with the bots granted it. Never carries its tokens. */
-export type PluginAccountSummary = { plugin: string; slug: string; displayName: string; connectedAt: Date; grantedTo: string[] }
+/**
+ * A connected account of a plugin, as Settings → Plugins lists it, with the bots granted it, and since when it needs
+ * reconnecting (null while its sign-in works). Never carries its tokens.
+ */
+export type PluginAccountSummary = {
+  plugin: string
+  slug: string
+  displayName: string
+  connectedAt: Date
+  needsReconnectAt: Date | null
+  grantedTo: string[]
+}
 
 /** The plugin to connect: its catalog name and display name, and the hosted MCP server an account signs in to. */
 export type ConnectablePlugin = { name: string; displayName: string; serverUrl: string }
@@ -34,11 +44,12 @@ const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]'])
 /** The instance's callback when the catalog's servers accept it: over https, or on this machine's loopback. */
 const reachable = (callbackUrl: URL) => callbackUrl.protocol === 'https:' || (callbackUrl.protocol === 'http:' && loopbackHosts.has(callbackUrl.hostname))
 
-const toSummary = ({ plugin, slug, displayName, connectedAt }: PluginAccount, grantedTo: string[]): PluginAccountSummary => ({
+const toSummary = ({ plugin, slug, displayName, connectedAt, needsReconnectAt }: PluginAccount, grantedTo: string[]): PluginAccountSummary => ({
   plugin,
   slug,
   displayName,
   connectedAt,
+  needsReconnectAt,
   grantedTo,
 })
 
@@ -50,6 +61,23 @@ const toolName = (plugin: string, slug: string, tool: string) => `${toolPrefix(p
 
 /** How bots and notes name an account: its plugin's display name, then its own, e.g. "Notion (Work)". */
 const accountLabel = (plugin: { displayName: string }, displayName: string) => `${plugin.displayName} (${displayName})`
+
+/** What a call of an account that needs reconnecting answers the bot. */
+const needsReconnectAnswer = (label: string) => ({
+  output: [
+    {
+      type: 'text' as const,
+      text:
+        `${label}'s sign-in expired and couldn't be renewed, so the owner must reconnect it: a Reconnect card is in your DM ` +
+        'with them, or they can reconnect it in Settings → Plugins. Its tools fail until then.',
+    },
+  ],
+  isError: true,
+})
+
+/** What each bot granted an account reads in its history once the owner reconnects it. */
+export const reconnectedNote = (plugin: { displayName: string }, account: { plugin: string; slug: string; displayName: string }) =>
+  `[${accountLabel(plugin, account.displayName)} was reconnected by the owner: its tools (${toolPrefix(account.plugin, account.slug)}…) work again.]`
 
 /** What each bot granted a disconnected account reads in its history, e.g. "Notion (Work) was disconnected". */
 export const disconnectedNote = (plugin: { displayName: string }, account: { plugin: string; slug: string; displayName: string }) =>
@@ -63,8 +91,8 @@ export type PluginListing = Omit<CatalogEntry, 'skillsOnly'> &
   (
     | {
         skillsOnly: false
-        /** Its connected accounts, oldest first, each granted to the bot or not. */
-        accounts: { slug: string; displayName: string; granted: boolean }[]
+        /** Its connected accounts, oldest first, each granted to the bot or not, and whether it needs reconnecting. */
+        accounts: { slug: string; displayName: string; granted: boolean; needsReconnect: boolean }[]
       }
     | { skillsOnly: true; granted: boolean }
   )
@@ -78,7 +106,9 @@ function describeListing(listing: PluginListing): string {
   const lines = [head]
   if (!listing.accounts.length) lines.push('  Not connected')
   if (granted.length) {
-    lines.push(`  Granted to you: ${granted.map((account) => `${account.displayName} (tools ${toolPrefix(listing.name, account.slug)}…)`).join(', ')}`)
+    const describe = (account: (typeof granted)[number]) =>
+      `${account.displayName} (${account.needsReconnect ? 'needs reconnecting by the owner' : `tools ${toolPrefix(listing.name, account.slug)}…`})`
+    lines.push(`  Granted to you: ${granted.map(describe).join(', ')}`)
   }
   if (others.length) lines.push(`  Connected, not granted to you: ${others.map((account) => account.displayName).join(', ')}`)
   return lines.join('\n')
@@ -107,8 +137,16 @@ export function describePluginSearch(listings: readonly PluginListing[], query?:
   ].join('\n')
 }
 
-/** An account's tool as a bot calls it: `mcp__<plugin>_<accountN>__<tool>`, under the `mcp` surface. */
-function pluginTool(connections: PluginConnections, account: AccountServer, label: string, tool: Tool): BotTool {
+/** How a bot's call of an account's tool is answered: the server's result, or why it couldn't be made. */
+type CallAnswer = { output: ReturnType<typeof toLlmContent>; isError: boolean }
+
+/** An account's tool as a bot calls it, through `call`: `mcp__<plugin>_<accountN>__<tool>`, under the `mcp` surface. */
+function pluginTool(
+  account: AccountServer,
+  label: string,
+  tool: Tool,
+  call: (args: Record<string, unknown>, signal?: AbortSignal) => Promise<CallAnswer>,
+): BotTool {
   return {
     surface: 'mcp',
     server: serverName(account.plugin, account.slug),
@@ -117,11 +155,7 @@ function pluginTool(connections: PluginConnections, account: AccountServer, labe
       description: `${label}: ${tool.description ?? tool.title ?? tool.name}`,
       // Providers require an object schema, and some reject one without `properties`.
       parameters: Type.Unsafe<JsonObject>({ ...tool.inputSchema, type: 'object', properties: tool.inputSchema.properties ?? {} }),
-      execute: async (args, _api, context) => {
-        const result = await connections.call(account, tool.name, args, context.abortSignal)
-        // MCP reports a tool's failure in its result, not as an error.
-        return { output: toLlmContent(result), isError: result.isError === true }
-      },
+      execute: (args, _api, context) => call(args, context.abortSignal),
     }),
   }
 }
@@ -140,13 +174,29 @@ export class PluginAccounts {
   /** The catalog's plugins bots can call, by name. */
   readonly #plugins: Map<string, ConnectablePlugin>
   readonly #connections: PluginConnections
+  readonly #onNeedsReconnect?: (account: PluginAccountSummary) => Promise<void>
   readonly #signIns = new Map<string, PendingSignIn>()
   /** New accounts are saved one at a time, so two sign-ins finishing together get different slugs. */
   #saving: Promise<unknown> = Promise.resolve()
 
-  constructor({ db, box, plugins = [] }: { db: Db; box: SecretBox; plugins?: readonly ConnectablePlugin[] }) {
+  /**
+   * `onNeedsReconnect` gets an account once its sign-in expired and couldn't be refreshed, the first time a call finds
+   * out, with the bots granted it.
+   */
+  constructor({
+    db,
+    box,
+    plugins = [],
+    onNeedsReconnect,
+  }: {
+    db: Db
+    box: SecretBox
+    plugins?: readonly ConnectablePlugin[]
+    onNeedsReconnect?: (account: PluginAccountSummary) => Promise<void>
+  }) {
     this.#db = db
     this.#box = box
+    this.#onNeedsReconnect = onNeedsReconnect
     this.#plugins = new Map(plugins.map((plugin) => [plugin.name, plugin]))
     this.#connections = new PluginConnections({ db, box })
   }
@@ -223,7 +273,12 @@ export class PluginAccounts {
             skillsOnly,
             accounts: accounts
               .filter((account) => account.plugin === plugin.name)
-              .map((account) => ({ slug: account.slug, displayName: account.displayName, granted: account.grantedTo.includes(botId) })),
+              .map((account) => ({
+                slug: account.slug,
+                displayName: account.displayName,
+                granted: account.grantedTo.includes(botId),
+                needsReconnect: account.needsReconnectAt !== null,
+              })),
           },
     )
   }
@@ -240,28 +295,65 @@ export class PluginAccounts {
    */
   async botTools(botId: string): Promise<BotTool[]> {
     const granted = await this.#db
-      .select({ plugin: pluginAccounts.plugin, slug: pluginAccounts.slug, displayName: pluginAccounts.displayName })
+      .select({ plugin: pluginAccounts.plugin, slug: pluginAccounts.slug, displayName: pluginAccounts.displayName, needsReconnectAt: pluginAccounts.needsReconnectAt })
       .from(pluginGrants)
       .innerJoin(pluginAccounts, and(eq(pluginAccounts.plugin, pluginGrants.plugin), eq(pluginAccounts.slug, pluginGrants.account)))
       .where(and(eq(pluginGrants.botId, botId), isNull(pluginAccounts.disconnectedAt)))
       .orderBy(asc(pluginGrants.id))
     const tools = await Promise.all(
-      granted.map(async ({ plugin: name, slug, displayName }) => {
+      granted.map(async ({ plugin: name, slug, displayName, needsReconnectAt }) => {
         const plugin = this.#plugins.get(name)
         // A plugin gone from the catalog with a release.
         if (!plugin) return []
         const account = { plugin: name, slug, serverUrl: plugin.serverUrl }
         const label = accountLabel(plugin, displayName)
+        const call = (tool: Tool) => (args: Record<string, unknown>, signal?: AbortSignal) => this.#call(account, label, tool.name, args, signal)
         try {
-          return (await this.#connections.tools(account)).map((tool) => pluginTool(this.#connections, account, label, tool))
+          // An account that needs reconnecting can't connect: its tools, if listed before, answer that it must be reconnected.
+          const tools = needsReconnectAt ? this.#connections.listed(account) : await this.#connections.tools(account)
+          return tools.map((tool) => pluginTool(account, label, tool, call(tool)))
         } catch (error) {
-          console.error(`[plugins] Couldn't list the tools of ${label}:`, error)
+          if (error instanceof McpOAuthAuthorizationRequiredError) await this.#needsReconnect(account)
+          else console.error(`[plugins] Couldn't list the tools of ${label}:`, error)
           return []
         }
       }),
     )
     const names = new Set<string>()
     return tools.flat().filter(({ tool }) => !names.has(tool.name) && names.add(tool.name))
+  }
+
+  /** Calls the account's tool, unless its sign-in expired and couldn't be refreshed: then the bot is told to wait for the owner. */
+  async #call(account: AccountServer, label: string, tool: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<CallAnswer> {
+    const [row] = await this.#db
+      .select({ needsReconnectAt: pluginAccounts.needsReconnectAt })
+      .from(pluginAccounts)
+      .where(and(eq(pluginAccounts.plugin, account.plugin), eq(pluginAccounts.slug, account.slug)))
+    if (row?.needsReconnectAt) return needsReconnectAnswer(label)
+    try {
+      const result = await this.#connections.call(account, tool, args, signal)
+      // MCP reports a tool's failure in its result, not as an error.
+      return { output: toLlmContent(result), isError: result.isError === true }
+    } catch (error) {
+      if (!(error instanceof McpOAuthAuthorizationRequiredError)) throw error
+      await this.#needsReconnect(account)
+      return needsReconnectAnswer(label)
+    }
+  }
+
+  /**
+   * Marks the account Needs reconnect, its sign-in expired and its refresh refused, and tells `onNeedsReconnect` the
+   * first time; a call finding out again changes nothing.
+   */
+  async #needsReconnect({ plugin, slug }: AccountServer): Promise<void> {
+    const [marked] = await this.#db
+      .update(pluginAccounts)
+      .set({ needsReconnectAt: new Date() })
+      .where(and(eq(pluginAccounts.plugin, plugin), eq(pluginAccounts.slug, slug), isNull(pluginAccounts.disconnectedAt), isNull(pluginAccounts.needsReconnectAt)))
+      .returning()
+    if (!marked || !this.#onNeedsReconnect) return
+    const account = await this.#summary(plugin, slug)
+    await this.#onNeedsReconnect(account).catch((error) => console.error(`[plugins] Couldn't tell the owner ${plugin} ${slug} needs reconnecting:`, error))
   }
 
   /** Closes every account's connection; when the server stops. */
@@ -285,17 +377,17 @@ export class PluginAccounts {
   }
 
   /**
-   * Connects a new account of `plugin`, yielding each step for the wizard. The sign-in returns to `callbackUrl` (the
+   * Connects a new account of `plugin`, or signs in to its connected account `account` again (keeping its slug and
+   * grants, and clearing Needs reconnect), yielding each step for the wizard. The sign-in returns to `callbackUrl` (the
    * instance's callback route, as the owner's browser reaches it) when it is https or loopback; otherwise to a loopback
    * URL, and a `manual_code` prompt asks for the URL the browser ends on. Ending the iteration early (or aborting
-   * `signal`) cancels the sign-in. `onConnected` gets the new account before the sign-in is `connected`; when it throws,
+   * `signal`) cancels the sign-in. `onConnected` gets the account before the sign-in is `connected`; when it throws,
    * the account stays connected and the sign-in ends `failed` with why.
    */
   async *connect(
     plugin: ConnectablePlugin,
     callbackUrl: URL,
-    signal?: AbortSignal,
-    onConnected?: (account: PluginAccountSummary) => Promise<void>,
+    { signal, onConnected, account }: { signal?: AbortSignal; onConnected?: (account: PluginAccountSummary) => Promise<void>; account?: string } = {},
   ): AsyncGenerator<SignInStep> {
     const signInId = crypto.randomUUID()
     const steps = stepQueue()
@@ -304,12 +396,12 @@ export class PluginAccounts {
     signal?.addEventListener('abort', onAbort)
 
     steps.push({ type: 'started', signInId })
-    this.#signIn(signInId, plugin, reachable(callbackUrl) ? callbackUrl.href : loopbackRedirect, steps.push, cancel.signal).then(
+    this.#signIn(signInId, plugin, reachable(callbackUrl) ? callbackUrl.href : loopbackRedirect, steps.push, cancel.signal, account).then(
       async (slug) => {
         if (onConnected) {
-          const account = await this.#summary(plugin.name, slug)
-          await onConnected(account).catch((error: unknown) => {
-            throw new Error(`${accountLabel(plugin, account.displayName)} is connected, but ${error instanceof Error ? error.message : String(error)}`)
+          const connected = await this.#summary(plugin.name, slug)
+          await onConnected(connected).catch((error: unknown) => {
+            throw new Error(`${accountLabel(plugin, connected.displayName)} is connected, but ${error instanceof Error ? error.message : String(error)}`)
           })
         }
         steps.push({ type: 'connected' })
@@ -390,8 +482,19 @@ export class PluginAccounts {
     })
   }
 
-  /** Signs in to `plugin`'s server through `redirectUrl`, then saves the new account with its tokens; returns its slug. */
-  async #signIn(signInId: string, plugin: ConnectablePlugin, redirectUrl: string, push: (step: SignInStep) => void, signal: AbortSignal): Promise<string> {
+  /**
+   * Signs in to `plugin`'s server through `redirectUrl`, then saves the new account with its tokens, or the new tokens of
+   * account `reconnect`; returns its slug.
+   */
+  async #signIn(
+    signInId: string,
+    plugin: ConnectablePlugin,
+    redirectUrl: string,
+    push: (step: SignInStep) => void,
+    signal: AbortSignal,
+    reconnect?: string,
+  ): Promise<string> {
+    if (reconnect) await this.#mustBeConnected(plugin.name, reconnect)
     const store = new MemoryOAuthStateStore()
     let authorizationUrl: URL | undefined
     const provider = new McpOAuthProvider({
@@ -437,6 +540,17 @@ export class PluginAccounts {
     const { codeVerifier: _, oauthState: __, ...kept } = store.load()!
     const save = this.#saving.then(() =>
       this.#db.transaction(async (tx) => {
+        if (reconnect) {
+          const [account] = await tx
+            .update(pluginAccounts)
+            .set({ needsReconnectAt: null })
+            .where(and(eq(pluginAccounts.plugin, plugin.name), eq(pluginAccounts.slug, reconnect), isNull(pluginAccounts.disconnectedAt)))
+            .returning()
+          // Disconnected meanwhile.
+          if (!account) throw new PluginAccountNotFoundError(`No ${plugin.name} account ${reconnect}`)
+          await new AccountCredentials(tx, this.#box, plugin.name, reconnect).save(kept)
+          return reconnect
+        }
         // Every account ever connected, disconnected ones included: their rows stay so their slugs aren't given again.
         const [{ taken }] = (await tx.select({ taken: count() }).from(pluginAccounts).where(eq(pluginAccounts.plugin, plugin.name))) as [{ taken: number }]
         const number = taken + 1
@@ -447,6 +561,9 @@ export class PluginAccounts {
       }),
     )
     this.#saving = save.catch(() => {})
-    return save
+    const slug = await save
+    // Its connection signed in with the expired tokens: the next call connects with the new ones.
+    if (reconnect) await this.#connections.close(plugin.name, slug)
+    return slug
   }
 }

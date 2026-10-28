@@ -149,8 +149,25 @@ export const pluginRequestCard = z.object({
 })
 export type PluginRequestCardInfo = z.infer<typeof pluginRequestCard>
 
+/**
+ * A plugin account the bot is granted needs reconnecting (design §5.5): its sign-in expired and couldn't be refreshed.
+ * The owner signs in again from it (as from Settings → Plugins), keeping the account's slug and grants.
+ */
+export const pluginReconnectCard = z.object({
+  type: z.literal('plugin_reconnect'),
+  /** The plugin's catalog name. */
+  plugin: z.string(),
+  /** Its display name when the sign-in expired, e.g. Notion. */
+  displayName: z.string(),
+  /** The account, named as it was when its sign-in expired. */
+  account: z.object({ slug: z.string(), displayName: z.string() }),
+  /** Null while it waits; then whether the account was reconnected (from this card or Settings) or disconnected instead. */
+  outcome: z.enum(['reconnected', 'disconnected']).nullable(),
+})
+export type PluginReconnectCardInfo = z.infer<typeof pluginReconnectCard>
+
 /** An item in a chat that isn't a plain message: a card that asks the owner for something, or a timeline row. */
-export const card = z.discriminatedUnion('type', [questionCard, takeOverCard, pluginRequestCard, routineChangeCard])
+export const card = z.discriminatedUnion('type', [questionCard, takeOverCard, pluginRequestCard, pluginReconnectCard, routineChangeCard])
 export type CardInfo = z.infer<typeof card>
 
 /** At most this many files go with one message (Grok's composer limit); the server enforces the same. */
@@ -572,6 +589,8 @@ export const pluginAccount = z.object({
   /** `Account N` until the owner renames it. */
   displayName: z.string(),
   connectedAt: z.number(),
+  /** Its sign-in expired and couldn't be refreshed: its tools fail until the owner reconnects it. */
+  needsReconnect: z.boolean(),
   /** The ids of the bots granted it, oldest grant first: they call its tools. */
   grantedTo: z.array(z.string()),
 })
@@ -875,7 +894,8 @@ export const contract = {
           'Connect a new account with OAuth, streaming the sign-in\'s steps; closing the stream cancels it. The sign-in returns ' +
           'to this API\'s OAuth callback when `origin` (the page\'s) is on localhost or https, and otherwise asks for the URL ' +
           'the browser ends on. From a bot\'s plugin request card (`requestId`), the new account is granted to the bot and the ' +
-          'bot is woken',
+          'bot is woken. With `account`, it signs in to that account again, e.g. once it needs reconnecting, keeping its ' +
+          'slug and grants',
       })
       .input(
         z.object({
@@ -883,6 +903,8 @@ export const contract = {
           origin: z.url(),
           /** A bot's plugin request card for this plugin, still waiting: the new account is granted to the bot, which is woken. */
           requestId: z.string().optional(),
+          /** A connected account to sign in to again instead of a new one, keeping its slug and grants. */
+          account: z.string().optional(),
         }),
       )
       .output(eventIterator(signInStep)),

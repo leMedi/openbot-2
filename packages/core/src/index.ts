@@ -87,6 +87,14 @@ export {
   waitingPluginRequest,
 } from './plugin-requests.ts'
 export {
+  closePluginReconnects,
+  describePluginReconnect,
+  isPluginReconnectCard,
+  type PluginReconnectCard,
+  type PluginReconnectOutcome,
+  pluginReconnectOutcomeOf,
+} from './plugin-reconnects.ts'
+export {
   describeHandBack,
   findWaitingTakeOver,
   handBack,

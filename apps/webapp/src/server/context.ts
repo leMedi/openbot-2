@@ -7,7 +7,9 @@ import {
   AttachmentStore,
   type BotWithChat,
   type ChatSummary,
+  describePluginReconnect,
   describePluginRequest,
+  type PluginReconnectCard,
   describeRoutineChange,
   type Clock,
   instantAt,
@@ -174,7 +176,20 @@ export async function createServerContext({
   const attachments = new AttachmentStore(attachmentsDir)
   const box = new SecretBox(secretKey)
   const providers = new Providers({ db, box, providers: modelProviders })
-  const pluginAccounts = new PluginAccounts({ db, box, plugins: connectable(plugins) })
+  const pluginAccounts = new PluginAccounts({
+    db,
+    box,
+    plugins: connectable(plugins),
+    // One Reconnect card in the DM of each bot granted the account, whose sign-in expired.
+    async onNeedsReconnect({ plugin: name, slug, displayName, needsReconnectAt, grantedTo }) {
+      const plugin = plugins.find((entry) => entry.name === name)
+      const card: PluginReconnectCard = { type: 'plugin_reconnect', plugin: name, displayName: plugin?.displayName ?? name, account: { slug, displayName } }
+      for (const botId of grantedTo) {
+        const bot = await getBot(db, botId)
+        if (bot) await postCard(bot, card, describePluginReconnect(card), `plugin-reconnect:${name}:${slug}:${needsReconnectAt?.getTime()}:${botId}`)
+      }
+    },
+  })
   // Made before the runtime, whose resumed runs may post to groups as it opens; turns wait for it to be open.
   let opened!: (runtime: BotRuntime) => void
   const runtimeOpen = new Promise<BotRuntime>((resolve) => (opened = resolve))
@@ -239,7 +254,7 @@ export async function createServerContext({
     await publish(chatId)
     return posted.message
   }
-  /** Posts a bot's card (a question, a take-over, a plugin request, a routine change) to its DM, once per idempotency key. */
+  /** Posts a bot's card (a question, a take-over, a plugin request or reconnect, a routine change) to its DM, once per idempotency key. */
   async function postCard(bot: BotWithChat, card: object, text: string, idempotencyKey: string) {
     const { message, created } = await postMessage(db, { chatId: bot.chatId, author: 'bot', authorBotId: bot.id, authorName: bot.name, text, card, idempotencyKey })
     if (!created) return

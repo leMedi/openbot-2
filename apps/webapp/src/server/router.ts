@@ -1,6 +1,15 @@
 import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
-import { disconnectedNote, InvalidAccountNameError, InvalidRedirectError, PluginAccountNotFoundError, SignInNotFoundError, toolPrefix } from '@openbot/agent'
+import {
+  disconnectedNote,
+  InvalidAccountNameError,
+  InvalidRedirectError,
+  PluginAccountNotFoundError,
+  type PluginAccountSummary,
+  reconnectedNote,
+  SignInNotFoundError,
+  toolPrefix,
+} from '@openbot/agent'
 import type { Plugin } from '@openbot/plugins'
 import { contract, type MessageInfo, type PluginRequestChoice } from '@openbot/api-contract'
 import { ScreenDaemonError } from '@openbot/computer'
@@ -19,6 +28,7 @@ import {
   markChatRead,
   setPinnedChats,
   createBot,
+  closePluginReconnects,
   decidePluginRequest,
   describeAnswer,
   describePluginDecision,
@@ -179,6 +189,14 @@ async function decideRequest(
     context.runtime.wake(bot.id, { lane: 'owner', text: describePluginDecision(card, decided, tools), id: `plugin-request:${message.id}` }),
   )
   return info
+}
+
+/** Once an account is reconnected: closes its Reconnect cards, and tells each bot granted it that its tools work again. */
+async function onReconnected(context: ServerContext, plugin: Plugin, account: PluginAccountSummary) {
+  for (const message of await closePluginReconnects(context.db, account.plugin, account.slug, 'reconnected')) await publishCard(context, message)
+  for (const botId of account.grantedTo) {
+    await context.runtime.note(botId, reconnectedNote(plugin, account)).catch((error) => console.error(`[plugins] Couldn't tell bot ${botId} an account was reconnected:`, error))
+  }
 }
 
 /** Tells every tab a card's message changed (answered, decided, reopened…) and how its chat now looks; returns it. */
@@ -667,11 +685,20 @@ export const router = os.router({
       if (!server) throw new ORPCError('BAD_REQUEST', { message: `${plugin.displayName} brings skills only: it has no account to connect` })
       if (more.length) throw new ORPCError('BAD_REQUEST', { message: `${plugin.displayName} has several servers, which OpenBot can't sign in to yet` })
       const connectable = { name: plugin.name, displayName: plugin.displayName, serverUrl: server.url }
+      const callbackUrl = new URL(pluginCallbackPath, input.origin)
+      if (input.account !== undefined) {
+        if (input.requestId) throw new ORPCError('BAD_REQUEST', { message: 'A request is answered with a new account, not a reconnected one' })
+        if (!(await context.pluginAccounts.list(plugin.name)).some((account) => account.slug === input.account)) {
+          throw new ORPCError('NOT_FOUND', { message: `No ${plugin.name} account ${input.account}` })
+        }
+        const onConnected = (account: PluginAccountSummary) => onReconnected(context, plugin, account)
+        return yield* context.pluginAccounts.connect(connectable, callbackUrl, { signal, account: input.account, onConnected })
+      }
       // From a bot's request card: checked before the sign-in, and the new account granted to the bot once connected.
       const request = input.requestId ? await waitingRequest(context, input.requestId) : undefined
       if (request && request.card.plugin !== plugin.name) throw new ORPCError('BAD_REQUEST', { message: `That request is for ${request.card.displayName}` })
       const grant = request && (async (account: { slug: string }) => void (await decideRequest(context, request.message.id, { outcome: 'granted', account: account.slug })))
-      yield* context.pluginAccounts.connect(connectable, new URL(pluginCallbackPath, input.origin), signal, grant)
+      yield* context.pluginAccounts.connect(connectable, callbackUrl, { signal, onConnected: grant })
     }),
 
     answer: os.plugins.answer.handler(({ context, input }) =>
@@ -696,6 +723,7 @@ export const router = os.router({
     disconnectAccount: os.plugins.disconnectAccount.handler(async ({ context, input }) => {
       const plugin = pluginMustExist(context, input.name)
       const account = await accountMustExist(context.pluginAccounts.disconnect(input.name, input.account))
+      for (const message of await closePluginReconnects(context.db, account.plugin, account.slug, 'disconnected')) await publishCard(context, message)
       // Each bot it was granted to learns why its tools are gone, from its next run.
       for (const botId of account.grantedTo) {
         await context.runtime.note(botId, disconnectedNote(plugin, account)).catch((error) => console.error(`[plugins] Couldn't tell bot ${botId} an account was disconnected:`, error))

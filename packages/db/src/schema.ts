@@ -404,6 +404,8 @@ export const pluginAccounts = sqliteTable(
       .default(sql`(unixepoch('subsec') * 1000)`),
     /** When the owner disconnected it; null while connected. */
     disconnectedAt: integer('disconnected_at', { mode: 'timestamp_ms' }),
+    /** When its sign-in expired and couldn't be refreshed, so the owner must reconnect it; null while it works. */
+    needsReconnectAt: integer('needs_reconnect_at', { mode: 'timestamp_ms' }),
   },
   (table) => [uniqueIndex('plugin_accounts_slug_idx').on(table.plugin, table.slug)],
 )

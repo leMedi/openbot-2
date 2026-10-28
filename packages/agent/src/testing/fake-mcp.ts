@@ -27,6 +27,10 @@ export type FakeMcpServer = {
   calls: FakeMcpCall[]
   /** Forgets every session, as a restarted server does: requests in one are answered 404 until the client starts anew. */
   dropSessions(): void
+  /** Expires every access token issued so far: calls with one are answered 401 until the client refreshes it. */
+  expireAccessTokens(): void
+  /** Expires every sign-in so far, access and refresh tokens alike: the client can't refresh, and must sign in again. */
+  expireSignIns(): void
   /**
    * Plays the owner's browser on the authorization URL: signs in as `user` (the account) and approves, or denies with
    * `deny`; returns the URL the browser ends on, the client's redirect URI with the code (or error) and state.
@@ -186,6 +190,11 @@ export async function startFakeMcpServer({ tools = [] }: { tools?: FakeMcpTool[]
     issuedTokens,
     calls,
     dropSessions: () => sessions.clear(),
+    expireAccessTokens: () => accessTokens.clear(),
+    expireSignIns: () => {
+      accessTokens.clear()
+      refreshTokens.clear()
+    },
     async authorize(authorizationUrl, { user = 'owner', deny = false } = {}) {
       const url = new URL(authorizationUrl)
       url.searchParams.set('user', user)

@@ -5,6 +5,7 @@ import { api, errorMessage } from '../lib/api.ts'
 import { useLive } from '../lib/live.tsx'
 import { Attachments, FileIcon, formatSize } from './attachments.tsx'
 import { Markdown } from './markdown.tsx'
+import { PluginReconnectCard } from './plugin-reconnect-card.tsx'
 import { PluginRequestCard } from './plugin-request-card.tsx'
 import { QuestionCard } from './question-card.tsx'
 import { TakeOverCard } from './take-over-card.tsx'
@@ -349,6 +350,13 @@ function MessageList({
           return (
             <CardRow key={row.key} row={row} continuesNext={continuesNext}>
               <PluginRequestCard message={row.message!} card={card} botName={row.authorName} onDecided={onAnswered} />
+            </CardRow>
+          )
+        }
+        if (card?.type === 'plugin_reconnect') {
+          return (
+            <CardRow key={row.key} row={row} continuesNext={continuesNext}>
+              <PluginReconnectCard card={card} botName={row.authorName} />
             </CardRow>
           )
         }
