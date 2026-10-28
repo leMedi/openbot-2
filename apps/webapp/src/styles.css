@@ -52,3 +52,37 @@
     }
   }
 }
+
+@layer components {
+  /*
+   * Onboarding steps: each part slides in a beat after the one above it, from the side the step comes from (forward
+   * from the right, Back from the left). Seen once per install, so it may take a little longer than everyday UI.
+   */
+  .onboarding-step > * {
+    animation: onboarding-step-in 360ms --theme(--ease-out-quint) both;
+  }
+  .onboarding-step > :nth-child(2) {
+    animation-delay: 40ms;
+  }
+  .onboarding-step > :nth-child(3) {
+    animation-delay: 80ms;
+  }
+  .onboarding-step > :nth-child(n + 4) {
+    animation-delay: 120ms;
+  }
+  [data-direction='back'] {
+    --step-from: -16px;
+  }
+  @keyframes onboarding-step-in {
+    from {
+      opacity: 0;
+      transform: translateX(var(--step-from, 16px));
+      filter: blur(3px);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .onboarding-step > * {
+      animation: --theme(--animate-fade-in);
+    }
+  }
+}

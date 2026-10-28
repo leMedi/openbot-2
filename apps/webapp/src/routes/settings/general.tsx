@@ -1,14 +1,16 @@
-import type { GeneralSettings } from '@openbot/api-contract'
+import { type GeneralSettings, maxOwnerAboutLength, maxOwnerNameLength } from '@openbot/api-contract'
 import { cn } from '@openbot/ui/lib/utils'
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { Field, inputClass } from '../../components/bot-fields.tsx'
+import { offsetOf, TimeZonePicker } from '../../components/time-zone-picker.tsx'
 import { api, errorMessage } from '../../lib/api.ts'
 
 export const Route = createFileRoute('/settings/general')({
   component: General,
 })
 
-/** Settings → General: the owner's time zone. */
+/** Settings → General: who the owner is to their bots, and their time zone. */
 function General() {
   const [settings, setSettings] = useState<GeneralSettings>()
   const [error, setError] = useState<string>()
@@ -34,77 +36,76 @@ function General() {
 
       {error && <p className="text-destructive-foreground">{error}</p>}
 
-      {settings && <TimeZoneField value={settings.timeZone} onChange={chooseTimeZone} />}
+      {settings && <ProfileForm settings={settings} onSaved={setSettings} />}
+
+      {settings && (
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="time-zone-search" className="text-lg font-medium">
+            Time zone
+          </label>
+          <p className="text-sm text-muted-foreground">
+            Routines and memory consolidation follow it. Currently{' '}
+            <span className="font-medium text-foreground">
+              {settings.timeZone ? `${settings.timeZone} (${offsetOf(settings.timeZone)})` : 'not set (UTC)'}
+            </span>
+            .
+          </p>
+          <TimeZonePicker id="time-zone-search" value={settings.timeZone} onChange={chooseTimeZone} />
+        </div>
+      )}
     </section>
   )
 }
 
-/** Every IANA time zone this browser knows, with its current UTC offset, e.g. `GMT+9`. */
-function knownTimeZones(): { timeZone: string; offset: string }[] {
-  const zones = new Set(Intl.supportedValuesOf('timeZone'))
-  zones.add('UTC')
-  return [...zones].sort().map((timeZone) => ({ timeZone, offset: offsetOf(timeZone) }))
-}
+/** The owner's name and description of themselves, which every bot reads; saved together. */
+function ProfileForm({ settings, onSaved }: { settings: GeneralSettings; onSaved: (settings: GeneralSettings) => void }) {
+  const [name, setName] = useState(settings.name ?? '')
+  const [about, setAbout] = useState(settings.about)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string>()
+  const changed = name.trim() !== (settings.name ?? '') || about.trim() !== settings.about
 
-/** `timeZone`'s UTC offset now, e.g. `GMT+9`; empty if this browser doesn't know it. */
-function offsetOf(timeZone: string): string {
-  try {
-    const parts = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'shortOffset' }).formatToParts(new Date())
-    return parts.find((part) => part.type === 'timeZoneName')?.value ?? ''
-  } catch {
-    return ''
+  async function save(event: React.FormEvent) {
+    event.preventDefault()
+    setError(undefined)
+    setSaving(true)
+    try {
+      onSaved(await api().general.updateProfile({ name: name.trim(), about: about.trim() }))
+    } catch (caught) {
+      setError(errorMessage(caught))
+    } finally {
+      setSaving(false)
+    }
   }
-}
-
-/** A searchable list of IANA time zones; choosing one saves it. */
-function TimeZoneField({ value, onChange }: { value: string | null; onChange: (timeZone: string) => void }) {
-  const zones = useMemo(knownTimeZones, [])
-  const [query, setQuery] = useState('')
-  const matches = useMemo(() => {
-    const words = query.toLowerCase().replaceAll('_', ' ').split(/\s+/).filter(Boolean)
-    return zones.filter((zone) => {
-      const text = `${zone.timeZone} ${zone.offset}`.toLowerCase().replaceAll('_', ' ')
-      return words.every((word) => text.includes(word))
-    })
-  }, [zones, query])
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <label htmlFor="time-zone-search" className="text-lg font-medium">
-        Time zone
-      </label>
-      <p className="text-sm text-muted-foreground">
-        Routines and memory consolidation follow it. Currently{' '}
-        <span className="font-medium text-foreground">{value ? `${value} (${offsetOf(value)})` : 'not set (UTC)'}</span>.
-      </p>
-      <input
-        id="time-zone-search"
-        type="search"
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder="Search, e.g. Paris or GMT+9"
-        autoComplete="off"
-        className="rounded-md border border-input bg-input-fill px-2.5 py-1.5 text-base outline-offset-0"
-      />
-      <ul aria-label="Time zones" className="max-h-72 overflow-y-auto rounded-md border border-border-subtle">
-        {matches.map((zone) => (
-          <li key={zone.timeZone}>
-            <button
-              type="button"
-              aria-pressed={zone.timeZone === value}
-              onClick={() => onChange(zone.timeZone)}
-              className={cn(
-                'flex w-full justify-between px-2.5 py-1.5 text-left text-base transition-colors duration-100 hover:bg-secondary-hover active:bg-selected',
-                zone.timeZone === value && 'bg-selected',
-              )}
-            >
-              <span>{zone.timeZone.replaceAll('_', ' ')}</span>
-              <span className="text-muted-foreground">{zone.offset}</span>
-            </button>
-          </li>
-        ))}
-        {matches.length === 0 && <li className="px-2.5 py-1.5 text-muted-foreground">No time zone matches.</li>}
-      </ul>
-    </div>
+    <form onSubmit={save} className="flex flex-col gap-3">
+      <header>
+        <h3 className="text-lg font-medium">About you</h3>
+        <p className="text-sm text-muted-foreground">Every bot reads this before it works for you, from its next run.</p>
+      </header>
+      <Field label="Name" htmlFor="owner-name">
+        <input id="owner-name" required maxLength={maxOwnerNameLength} value={name} onChange={(event) => setName(event.target.value)} className={inputClass} />
+      </Field>
+      <Field label="About" htmlFor="owner-about">
+        <textarea
+          id="owner-about"
+          rows={5}
+          maxLength={maxOwnerAboutLength}
+          placeholder="What you do, where you're based, how you like things done."
+          value={about}
+          onChange={(event) => setAbout(event.target.value)}
+          className={cn(inputClass, 'resize-y')}
+        />
+      </Field>
+      {error && <p className="text-destructive-foreground">{error}</p>}
+      <button
+        type="submit"
+        disabled={!changed || saving || !name.trim()}
+        className="pressable self-end rounded-md bg-primary px-3 py-1.5 text-base text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
+      >
+        Save
+      </button>
+    </form>
   )
 }

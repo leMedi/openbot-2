@@ -11,7 +11,7 @@ This document records the decisions agreed on 2026-10-25 and 2026-10-26. The res
 | Area | P0 (first usable install) | P1 | P2 |
 |---|---|---|---|
 | Deploy | Runtime image, compose sample, `install.sh`, env-configured paths | In-app updater with GitHub Releases, auto-update when idle | |
-| Onboarding | Connect provider → default model → first bot | | |
+| Onboarding | Name and time zone → about you (optional) → connect provider → models → first bot | | |
 | Bots | Create (popup), edit, hard delete, per-bot model override | | Animated avatars |
 | Chat | Multi-bubble SendMessage chat, markdown, reply guarantee, question / take-over cards, attachments | Reactions, threads, ⌘K palette, global search, browser notifications | KaTeX, Mermaid, link previews, file viewers, find-in-chat |
 | Sidebar | Status dots, unread, Draft / Waiting lines, pin, rename, delete | Named sections, multi-select, hidden bots, ⌘B rail | |

@@ -10,6 +10,10 @@ OpenBot gives one person a team of always-on bots that run on a machine they con
 The one person an OpenBot instance belongs to. There are no other users.
 _Avoid_: User, admin, account
 
+**Owner profile**:
+The owner's name and a few words about themselves, given at onboarding and changed in Settings → General. Every bot reads it in its instructions from its next run.
+_Avoid_: Bio, persona
+
 **Bot**:
 A named, long-lived agent with its own instructions, memory, routines and screen, that the owner chats with. Its name is unique, ignoring case, and is how the owner and other bots mention it (`@Rex`).
 _Avoid_: Agent, assistant

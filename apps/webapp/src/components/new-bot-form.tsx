@@ -9,10 +9,12 @@ export function NewBotForm({
   onCreated,
   onCancel,
   submitLabel = 'Create bot',
+  cancelLabel = 'Cancel',
 }: {
   onCreated: (bot: BotInfo) => void
   onCancel?: () => void
   submitLabel?: string
+  cancelLabel?: string
 }) {
   const [name, setName] = useState('')
   const [title, setTitle] = useState('')
@@ -82,7 +84,7 @@ export function NewBotForm({
       <footer className="flex justify-end gap-2">
         {onCancel && (
           <button type="button" onClick={onCancel} className="pressable rounded-md bg-secondary px-3 py-1.5 text-base hover:bg-secondary-hover">
-            Cancel
+            {cancelLabel}
           </button>
         )}
         <button

@@ -99,7 +99,9 @@ import {
   questionOptionStyles,
   queuedInputs,
   type TakeOverCard,
+  type OwnerProfile,
   readModelSettings,
+  readOwnerProfile,
   recordOutcome,
   recordUnreviewed,
   redriveReply,
@@ -287,6 +289,13 @@ const toConversationId = (historyId: string) => Number(historyId) as Conversatio
 function botPrompt(bot: BotWithChat): string {
   const who = `You are ${bot.name}${bot.title ? `, ${bot.title}` : ''}.`
   return bot.instructions.trim() ? `${who}\n\n${bot.instructions.trim()}` : who
+}
+
+/** Who the owner is, as they introduced themselves; empty until they have. */
+function ownerPrompt({ name, about }: OwnerProfile): string {
+  const lines = name ? [`The owner's name is ${name}.`] : []
+  if (about) lines.push(`What the owner wrote about themselves, for all their bots:\n\n${about}`)
+  return lines.join(' ')
 }
 
 /**
@@ -1530,7 +1539,8 @@ export class BotRuntime implements AgentRuntime {
     const routines = await frozenRoutinesBlock(this.#options.db, bot.id, epoch, { timeZone })
     const memory = await frozenMemoryBlock(this.#options.db, bot.id, epoch, { now: this.#clock.now(), timeZone })
     const skills = await frozenSkillsBlock(this.#options.db, bot.id, epoch, async () => (await this.#options.botSkills?.(bot.id)) ?? [])
-    const instructions = [botPrompt(bot), computerPrompt(this.#options.computer, bot, others), teamPrompt(others), groupsPrompt(bot, groups), skills, routines, memory]
+    const owner = ownerPrompt(await readOwnerProfile(this.#options.db))
+    const instructions = [botPrompt(bot), owner, computerPrompt(this.#options.computer, bot, others), teamPrompt(others), groupsPrompt(bot, groups), skills, routines, memory]
       .filter(Boolean)
       .join('\n\n')
     const extensions = await this.#ownTools.install(bot.id)

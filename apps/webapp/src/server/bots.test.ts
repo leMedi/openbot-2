@@ -24,18 +24,61 @@ const rex: NewBot = {
 }
 
 describe('onboarding', () => {
-  it('stays unfinished until a provider, a default model and a bot exist', async () => {
+  it('stays unfinished until the owner gives their name, and a provider, a default model and a bot exist', async () => {
     const server = await start()
-    expect(await server.client.onboarding.status()).toEqual({ provider: false, defaultModel: false, bot: false, done: false })
+    const status = { profile: false, provider: false, defaultModel: false, bot: false, done: false }
+    expect(await server.client.onboarding.status()).toEqual(status)
+
+    await server.client.general.updateProfile({ name: 'Sam' })
+    expect(await server.client.onboarding.status()).toEqual({ ...status, profile: true })
 
     await server.connectProvider()
-    expect(await server.client.onboarding.status()).toEqual({ provider: true, defaultModel: false, bot: false, done: false })
+    expect(await server.client.onboarding.status()).toEqual({ ...status, profile: true, provider: true })
 
     await server.client.models.updateSettings({ defaultModel: 'fake/fake-model' })
-    expect(await server.client.onboarding.status()).toEqual({ provider: true, defaultModel: true, bot: false, done: false })
+    expect(await server.client.onboarding.status()).toEqual({ ...status, profile: true, provider: true, defaultModel: true })
 
     await server.client.bots.create(rex)
-    expect(await server.client.onboarding.status()).toEqual({ provider: true, defaultModel: true, bot: true, done: true })
+    expect(await server.client.onboarding.status()).toEqual({ profile: true, provider: true, defaultModel: true, bot: true, done: true })
+  })
+})
+
+describe("the owner's profile", () => {
+  it('keeps a field left out, and refuses a blank name', async () => {
+    const server = await start()
+    expect(await server.client.general.getSettings()).toMatchObject({ name: null, about: '' })
+
+    await server.client.general.updateProfile({ name: '  Sam ', about: 'I run a bakery in Lyon.' })
+    expect(await server.client.general.updateProfile({ about: 'I run two bakeries in Lyon.' })).toMatchObject({
+      name: 'Sam',
+      about: 'I run two bakeries in Lyon.',
+    })
+
+    await expect(server.client.general.updateProfile({ name: '   ' })).rejects.toMatchObject({ code: 'BAD_REQUEST' })
+    expect(await server.client.general.getSettings()).toMatchObject({ name: 'Sam' })
+  })
+
+  it("is in every bot's instructions from its next run", async () => {
+    const server = await start()
+    await server.connectProvider()
+    await server.client.models.updateSettings({ defaultModel: 'fake/fake-model' })
+    const bot = await server.client.bots.create(rex)
+    const nextPrompt = async () => {
+      server.providers.script(endsSilently())
+      await server.runtime.wake(bot.id, { lane: 'background', text: '[test] look around' })
+      await expect.poll(async () => (await server.client.bots.list()).find((entry) => entry.id === bot.id)?.working).toBe(false)
+      return server.providers.requests
+        .at(-1)!
+        .messages.flatMap((message) => (message.role === 'system' ? [JSON.stringify(message.content), JSON.stringify(message.sections ?? {})] : []))
+        .join('\n')
+    }
+    expect(await nextPrompt()).not.toContain("The owner's name")
+
+    await server.client.general.updateProfile({ name: 'Sam', about: 'I run a bakery in Lyon.' })
+
+    const prompt = await nextPrompt()
+    expect(prompt).toContain("The owner's name is Sam.")
+    expect(prompt).toContain('I run a bakery in Lyon.')
   })
 })
 

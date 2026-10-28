@@ -69,6 +69,7 @@ import {
   readBotOrchestratorModes,
   readModelSettings,
   readOrchestratorModes,
+  readOwnerProfile,
   readTimeZone,
   screenSize,
   startScreen,
@@ -78,6 +79,7 @@ import {
   updateGroup,
   writeModelSettings,
   writeOrchestratorModes,
+  writeOwnerProfile,
   writeTimeZone,
   type TimeZoneWrite,
 } from '@openbot/core'
@@ -338,17 +340,19 @@ export const router = os.router({
 
   onboarding: {
     status: os.onboarding.status.handler(async ({ context }) => {
-      const [providers, settings, bots] = await Promise.all([
+      const [profile, providers, settings, bots] = await Promise.all([
+        readOwnerProfile(context.db),
         context.providers.list(),
         readModelSettings(context.db),
         listBots(context.db),
       ])
       const steps = {
+        profile: profile.name !== null,
         provider: providers.some((provider) => provider.connection),
         defaultModel: settings.defaultModel !== null,
         bot: bots.length > 0,
       }
-      return { ...steps, done: steps.provider && steps.defaultModel && steps.bot }
+      return { ...steps, done: steps.profile && steps.provider && steps.defaultModel && steps.bot }
     }),
   },
 
@@ -790,11 +794,22 @@ export const router = os.router({
   },
 
   general: {
-    getSettings: os.general.getSettings.handler(async ({ context }) => ({ timeZone: await readTimeZone(context.db) })),
+    getSettings: os.general.getSettings.handler(async ({ context }) => ({ timeZone: await readTimeZone(context.db), ...(await readOwnerProfile(context.db)) })),
 
-    updateSettings: os.general.updateSettings.handler(({ context, input }) => setTimeZone(context, () => writeTimeZone(context.db, input.timeZone))),
+    updateSettings: os.general.updateSettings.handler(async ({ context, input }) => ({
+      ...(await setTimeZone(context, () => writeTimeZone(context.db, input.timeZone))),
+      ...(await readOwnerProfile(context.db)),
+    })),
 
-    detectTimeZone: os.general.detectTimeZone.handler(({ context, input }) => setTimeZone(context, () => detectTimeZone(context.db, input.timeZone))),
+    updateProfile: os.general.updateProfile.handler(async ({ context, input }) => ({
+      timeZone: await readTimeZone(context.db),
+      ...(await writeOwnerProfile(context.db, input)),
+    })),
+
+    detectTimeZone: os.general.detectTimeZone.handler(async ({ context, input }) => ({
+      ...(await setTimeZone(context, () => detectTimeZone(context.db, input.timeZone))),
+      ...(await readOwnerProfile(context.db)),
+    })),
   },
 
   screens: {

@@ -103,3 +103,33 @@ export async function detectTimeZone(db: Db, timeZone: string): Promise<TimeZone
   if (inserted.length > 0) return { timeZone: value, changed: true }
   return { timeZone: (await readTimeZone(db))!, changed: false }
 }
+
+/**
+ * The owner as they introduce themselves at onboarding and in Settings → General: the name bots call them by (null
+ * until they give it) and a few words about them, empty when they gave none.
+ */
+export type OwnerProfile = { name: string | null; about: string }
+
+const ownerProfileKeys = { name: 'ownerName', about: 'ownerAbout' } as const satisfies Record<keyof OwnerProfile, string>
+
+export async function readOwnerProfile(db: Db): Promise<OwnerProfile> {
+  const rows = await db.select().from(settings).where(inArray(settings.key, Object.values(ownerProfileKeys)))
+  const stored = new Map(rows.map((row) => [row.key, row.value as string]))
+  return { name: stored.get(ownerProfileKeys.name) ?? null, about: stored.get(ownerProfileKeys.about) ?? '' }
+}
+
+/** Changes the owner's profile; the fields left out stay. Bots see it on their next run. */
+export async function writeOwnerProfile(db: Db, changes: Partial<{ name: string; about: string }>): Promise<OwnerProfile> {
+  await db.transaction(async (tx) => {
+    for (const field of ['name', 'about'] as const) {
+      const value = changes[field]
+      if (value === undefined) continue
+      const key = ownerProfileKeys[field]
+      await tx
+        .insert(settings)
+        .values({ key, value })
+        .onConflictDoUpdate({ target: settings.key, set: { value, updatedAt: new Date() } })
+    }
+  })
+  return readOwnerProfile(db)
+}

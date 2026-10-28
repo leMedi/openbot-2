@@ -19,7 +19,7 @@ describe("the owner's time zone", () => {
   it('is not set on a new instance', async () => {
     const server = await start()
 
-    expect(await server.client.general.getSettings()).toEqual({ timeZone: null })
+    expect(await server.client.general.getSettings()).toMatchObject({ timeZone: null })
   })
 
   it("is set from the browser's on first visit", async () => {
@@ -27,8 +27,8 @@ describe("the owner's time zone", () => {
 
     const settings = await server.client.general.detectTimeZone({ timeZone: 'Europe/Paris' })
 
-    expect(settings).toEqual({ timeZone: 'Europe/Paris' })
-    expect(await server.client.general.getSettings()).toEqual({ timeZone: 'Europe/Paris' })
+    expect(settings).toMatchObject({ timeZone: 'Europe/Paris' })
+    expect(await server.client.general.getSettings()).toMatchObject({ timeZone: 'Europe/Paris' })
   })
 
   it("is never overwritten by a browser's after that", async () => {
@@ -37,8 +37,8 @@ describe("the owner's time zone", () => {
 
     const settings = await server.client.general.detectTimeZone({ timeZone: 'Asia/Tokyo' })
 
-    expect(settings).toEqual({ timeZone: 'Europe/Paris' })
-    expect(await server.client.general.getSettings()).toEqual({ timeZone: 'Europe/Paris' })
+    expect(settings).toMatchObject({ timeZone: 'Europe/Paris' })
+    expect(await server.client.general.getSettings()).toMatchObject({ timeZone: 'Europe/Paris' })
   })
 
   it('is changed by the owner in Settings → General, after it was detected', async () => {
@@ -47,16 +47,16 @@ describe("the owner's time zone", () => {
 
     const settings = await server.client.general.updateSettings({ timeZone: 'Asia/Tokyo' })
 
-    expect(settings).toEqual({ timeZone: 'Asia/Tokyo' })
-    expect(await server.client.general.getSettings()).toEqual({ timeZone: 'Asia/Tokyo' })
+    expect(settings).toMatchObject({ timeZone: 'Asia/Tokyo' })
+    expect(await server.client.general.getSettings()).toMatchObject({ timeZone: 'Asia/Tokyo' })
     await server.client.general.detectTimeZone({ timeZone: 'Europe/Paris' })
-    expect(await server.client.general.getSettings()).toEqual({ timeZone: 'Asia/Tokyo' })
+    expect(await server.client.general.getSettings()).toMatchObject({ timeZone: 'Asia/Tokyo' })
   })
 
   it('is kept spelled as the server knows it', async () => {
     const server = await start()
 
-    expect(await server.client.general.updateSettings({ timeZone: 'utc' })).toEqual({ timeZone: 'UTC' })
+    expect(await server.client.general.updateSettings({ timeZone: 'utc' })).toMatchObject({ timeZone: 'UTC' })
   })
 
   it.each(['Mars/Olympus_Mons', '+01:00', 'Paris'])('refuses %s, which is not an IANA time zone', async (timeZone) => {
@@ -65,14 +65,14 @@ describe("the owner's time zone", () => {
 
     await expect(server.client.general.updateSettings({ timeZone })).rejects.toThrow(/isn't a known IANA time zone/)
     await expect(server.client.general.detectTimeZone({ timeZone })).rejects.toThrow(/isn't a known IANA time zone/)
-    expect(await server.client.general.getSettings()).toEqual({ timeZone: 'Europe/Paris' })
+    expect(await server.client.general.getSettings()).toMatchObject({ timeZone: 'Europe/Paris' })
   })
 
   it('refuses an invalid zone a browser detects, leaving none set', async () => {
     const server = await start()
 
     await expect(server.client.general.detectTimeZone({ timeZone: 'Mars/Olympus_Mons' })).rejects.toThrow(/isn't a known IANA time zone/)
-    expect(await server.client.general.getSettings()).toEqual({ timeZone: null })
+    expect(await server.client.general.getSettings()).toMatchObject({ timeZone: null })
   })
 })
 

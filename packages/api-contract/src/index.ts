@@ -267,6 +267,8 @@ const groupMembers = z.array(z.string()).max(100)
 const groupTitle = z.string().trim().max(120).nullable()
 
 export const onboarding = z.object({
+  /** The owner gave their name. */
+  profile: z.boolean(),
   provider: z.boolean(),
   defaultModel: z.boolean(),
   bot: z.boolean(),
@@ -448,10 +450,23 @@ export const modelSettings = z.object({
 })
 export type ModelSettings = z.infer<typeof modelSettings>
 
+/** The longest name the owner can give themselves... */
+export const maxOwnerNameLength = 60
+/** ...and the longest description of themselves. */
+export const maxOwnerAboutLength = 2000
+
+/** What bots call the owner. */
+const ownerName = z.string().trim().min(1).max(maxOwnerNameLength)
+/** A few words the owner writes about themselves, which every bot reads; empty for none. */
+const ownerAbout = z.string().trim().max(maxOwnerAboutLength)
+
 /** Settings → General. A null time zone is not detected yet; jobs then follow UTC. */
 export const generalSettings = z.object({
   /** The owner's IANA time zone, which routines and memory consolidation follow. */
   timeZone: timeZone.nullable(),
+  /** Null until the owner gives it at onboarding. */
+  name: ownerName.nullable(),
+  about: ownerAbout,
 })
 export type GeneralSettings = z.infer<typeof generalSettings>
 
@@ -988,11 +1003,15 @@ export const contract = {
   },
   general: {
     getSettings: oc
-      .route({ method: 'GET', path: '/settings/general', summary: "The owner's time zone" })
+      .route({ method: 'GET', path: '/settings/general', summary: "The owner's time zone, name and description of themselves" })
       .output(generalSettings),
     updateSettings: oc
       .route({ method: 'PATCH', path: '/settings/general', summary: "Set the owner's time zone; it must be an IANA time zone" })
       .input(z.object({ timeZone }))
+      .output(generalSettings),
+    updateProfile: oc
+      .route({ method: 'PATCH', path: '/settings/general/profile', summary: "Set the owner's name or description of themselves; every bot sees it on its next run" })
+      .input(z.object({ name: ownerName, about: ownerAbout }).partial())
       .output(generalSettings),
     detectTimeZone: oc
       .route({
