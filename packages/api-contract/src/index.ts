@@ -527,6 +527,19 @@ export type ScreenTicket = z.infer<typeof screenTicket>
 /** Whether bots could use a plugin: connected once it has an account; needs reconnect when a sign-in expired. */
 export const pluginStatuses = ['not_connected', 'connected', 'needs_reconnect'] as const
 
+/** The longest display name a plugin account may have. */
+export const pluginAccountNameMax = 60
+
+/** One sign-in to a plugin's service. Its tokens never leave the server. */
+export const pluginAccount = z.object({
+  /** `account1`, `account2`…: fixed when connected and never given again, as it is part of its tools' names. */
+  slug: z.string(),
+  /** `Account N` until the owner renames it. */
+  displayName: z.string(),
+  connectedAt: z.number(),
+})
+export type PluginAccountInfo = z.infer<typeof pluginAccount>
+
 /** A plugin of the catalog bundled with this release, as Settings → Plugins shows it. */
 export const plugin = z.object({
   /** Its id: lowercase kebab-case, part of its tools' names. */
@@ -541,6 +554,8 @@ export const plugin = z.object({
   servers: z.array(z.object({ name: z.string(), url: z.string() })),
   /** The skills it brings, which bots it's granted to read. */
   skills: z.array(z.object({ name: z.string(), description: z.string() })),
+  /** Its connected accounts, oldest first. */
+  accounts: z.array(pluginAccount),
 })
 export type PluginInfo = z.infer<typeof plugin>
 
@@ -798,6 +813,46 @@ export const contract = {
       .route({ method: 'GET', path: '/plugins/{name}/icon', summary: "A plugin's icon, an image file of the plugin", outputStructure: 'detailed' })
       .input(z.object({ name: z.string() }))
       .output(z.object({ headers: z.record(z.string(), z.string()), body: z.file() })),
+    connect: oc
+      .route({
+        method: 'POST',
+        path: '/plugins/{name}/connect',
+        summary:
+          'Connect a new account with OAuth, streaming the sign-in\'s steps; closing the stream cancels it. The sign-in returns ' +
+          'to this API\'s OAuth callback when `origin` (the page\'s) is on localhost or https, and otherwise asks for the URL ' +
+          'the browser ends on',
+      })
+      .input(z.object({ name: z.string(), origin: z.url() }))
+      .output(eventIterator(signInStep)),
+    answer: oc
+      .route({ method: 'POST', path: '/plugins/sign-ins/{signInId}/answer', summary: 'Answer a prompt of a running plugin sign-in' })
+      .input(z.object({ signInId: z.string(), promptId: z.string(), value: z.string() }))
+      .output(z.void()),
+    oauthCallback: oc
+      .route({
+        method: 'GET',
+        path: '/plugins/oauth/callback',
+        summary: "Where a plugin sign-in returns in the owner's browser; completes it and goes back to the plugin",
+        outputStructure: 'detailed',
+      })
+      .input(
+        z.object({
+          code: z.string().optional(),
+          state: z.string().optional(),
+          iss: z.string().optional(),
+          error: z.string().optional(),
+          error_description: z.string().optional(),
+        }),
+      )
+      .output(z.object({ status: z.literal(303), headers: z.object({ location: z.string() }) })),
+    renameAccount: oc
+      .route({ method: 'PATCH', path: '/plugins/{name}/accounts/{account}', summary: "Change an account's display name" })
+      .input(z.object({ name: z.string(), account: z.string(), displayName: z.string().max(pluginAccountNameMax) }))
+      .output(pluginAccount),
+    disconnectAccount: oc
+      .route({ method: 'DELETE', path: '/plugins/{name}/accounts/{account}', summary: "Disconnect an account, deleting its tokens; its slug isn't given again" })
+      .input(z.object({ name: z.string(), account: z.string() }))
+      .output(z.void()),
   },
   models: {
     list: oc

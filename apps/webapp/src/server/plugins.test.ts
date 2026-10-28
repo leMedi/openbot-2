@@ -1,13 +1,18 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { type FakeMcpServer, startFakeMcpServer } from '@openbot/agent/testing'
+import type { SignInStep } from '@openbot/api-contract'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { systemCredentials } from '@openbot/db'
 import { createTestServer, restartTestServer, type TestServer } from './testing/harness.ts'
 
 const servers: TestServer[] = []
 const folders: string[] = []
+const fakes: FakeMcpServer[] = []
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()))
+  await Promise.all(fakes.splice(0).map((fake) => fake.close()))
   await Promise.all(folders.splice(0).map((folder) => rm(folder, { recursive: true, force: true })))
   vi.restoreAllMocks()
 })
@@ -77,6 +82,7 @@ describe('the plugin catalog', () => {
       status: 'not_connected',
       servers: [{ name: 'notes', url: 'https://mcp.notes.test/mcp' }],
       skills: [{ name: 'notes-search', description: 'How to search notes' }],
+      accounts: [],
     })
     await expect(server.client.plugins.get({ name: 'nope' })).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
@@ -207,5 +213,202 @@ describe("plugins' skills", () => {
     expect(await readdir(join(plugins, 'notes', 'skills'))).toEqual(['notes-search', 'notes-write'])
     expect(await readFile(join(plugins, 'notes', 'skills', 'notes-search', 'SKILL.md'), 'utf8')).toContain('Search titles first.')
     expect(await readdir(join(plugins, 'notes', 'skills', 'notes-search'))).toEqual(['SKILL.md'])
+  })
+})
+
+/** A hosted plugin served by a fake MCP server behind its own OAuth authorization server; returns both. */
+async function hostedPlugin(name = 'notes') {
+  const fake = await startFakeMcpServer()
+  fakes.push(fake)
+  const plugin: FixturePlugin = {
+    '.claude-plugin/plugin.json': { name, displayName: 'Notes', description: 'Your notes workspace' },
+    '.mcp.json': { mcpServers: { [name]: { type: 'http', url: fake.url } } },
+  }
+  return { fake, plugin }
+}
+
+/** The instance as the owner opens it on their private network, over plain HTTP: sign-ins end in a pasted URL. */
+const privateOrigin = 'http://192.168.1.25:3000'
+
+/**
+ * Connects an account of `name` as the owner would from the page at `origin`, signing in on the fake as `user`: the
+ * browser returns to the callback route, or the owner pastes the URL it ends on. Returns every step.
+ */
+async function connectAccount(server: TestServer, fake: FakeMcpServer, { name = 'notes', origin = privateOrigin, user = 'owner' } = {}) {
+  const steps: SignInStep[] = []
+  let signInId = ''
+  let endsOn = ''
+  for await (const step of await server.client.plugins.connect({ name, origin })) {
+    steps.push(step)
+    if (step.type === 'started') signInId = step.signInId
+    if (step.type === 'auth_url') {
+      endsOn = await fake.authorize(step.url, { user })
+      if (endsOn.startsWith(origin)) {
+        const back = await server.fetch(endsOn.slice(origin.length), { redirect: 'manual' })
+        expect(back.status).toBe(303)
+        expect(back.headers.get('location')).toBe(`/settings/plugins/${name}`)
+      }
+    }
+    if (step.type === 'prompt') await server.client.plugins.answer({ signInId, promptId: step.promptId, value: endsOn })
+  }
+  return steps
+}
+
+describe('plugin accounts', () => {
+  it('connect through the URL the owner pastes when the instance is on a private network over plain HTTP', async () => {
+    const { fake, plugin } = await hostedPlugin()
+    const server = await start(await writeCatalog({ notes: plugin }))
+
+    const steps = await connectAccount(server, fake)
+
+    expect(steps.map((step) => step.type)).toEqual(['started', 'auth_url', 'prompt', 'connected'])
+    expect(steps[2]).toMatchObject({ kind: 'manual_code' })
+    expect(fake.clients).toEqual([
+      { clientId: 'client-1', redirectUris: [expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/callback$/)], applicationType: 'native', clientName: 'OpenBot' },
+    ])
+    expect(await server.client.plugins.get({ name: 'notes' })).toMatchObject({
+      status: 'connected',
+      accounts: [{ slug: 'account1', displayName: 'Account 1', connectedAt: expect.any(Number) }],
+    })
+  })
+
+  it("connect through the instance's callback route when it is opened on localhost or over https", async () => {
+    const { fake, plugin } = await hostedPlugin()
+    const server = await start(await writeCatalog({ notes: plugin }))
+
+    for (const origin of ['http://localhost:3000', 'https://openbot.example.com']) {
+      const steps = await connectAccount(server, fake, { origin })
+      expect(steps.map((step) => step.type)).toEqual(['started', 'auth_url', 'connected'])
+    }
+
+    expect(fake.clients.map(({ redirectUris, applicationType }) => ({ redirectUris, applicationType }))).toEqual([
+      { redirectUris: ['http://localhost:3000/api/plugins/oauth/callback'], applicationType: 'native' },
+      { redirectUris: ['https://openbot.example.com/api/plugins/oauth/callback'], applicationType: 'web' },
+    ])
+    expect((await server.client.plugins.get({ name: 'notes' })).accounts.map((account) => account.slug)).toEqual(['account1', 'account2'])
+  })
+
+  it('are several per plugin, each with a slug never given again after a disconnect, kept across a restart', async () => {
+    const { fake, plugin } = await hostedPlugin()
+    const catalog = await writeCatalog({ notes: plugin })
+    const server = await start(catalog)
+    await connectAccount(server, fake, { user: 'work' })
+    await connectAccount(server, fake, { user: 'home' })
+
+    await server.client.plugins.disconnectAccount({ name: 'notes', account: 'account2' })
+    await connectAccount(server, fake, { user: 'side' })
+
+    const slugs = async (on: TestServer) => (await on.client.plugins.get({ name: 'notes' })).accounts.map(({ slug, displayName }) => ({ slug, displayName }))
+    const expected = [
+      { slug: 'account1', displayName: 'Account 1' },
+      { slug: 'account3', displayName: 'Account 3' },
+    ]
+    expect(await slugs(server)).toEqual(expected)
+    const restarted = await restartTestServer(servers.pop()!, { catalog })
+    servers.push(restarted)
+    expect(await slugs(restarted)).toEqual(expected)
+    expect((await restarted.client.plugins.list()).find((entry) => entry.name === 'notes')).toMatchObject({ status: 'connected', accounts: expected.map((account) => expect.objectContaining(account)) })
+  })
+
+  it('get different slugs when two sign-ins finish together', async () => {
+    const { fake, plugin } = await hostedPlugin()
+    const server = await start(await writeCatalog({ notes: plugin }))
+
+    await Promise.all([connectAccount(server, fake, { user: 'work' }), connectAccount(server, fake, { user: 'home' })])
+
+    expect((await server.client.plugins.get({ name: 'notes' })).accounts.map((account) => account.slug).sort()).toEqual(['account1', 'account2'])
+  })
+
+  it('can be renamed, and a blank name or an unknown account is refused', async () => {
+    const { fake, plugin } = await hostedPlugin()
+    const server = await start(await writeCatalog({ notes: plugin }))
+    await connectAccount(server, fake)
+
+    expect(await server.client.plugins.renameAccount({ name: 'notes', account: 'account1', displayName: '  Work  ' })).toMatchObject({ slug: 'account1', displayName: 'Work' })
+    expect((await server.client.plugins.get({ name: 'notes' })).accounts).toMatchObject([{ slug: 'account1', displayName: 'Work' }])
+    await expect(server.client.plugins.renameAccount({ name: 'notes', account: 'account1', displayName: ' ' })).rejects.toMatchObject({ code: 'BAD_REQUEST' })
+    await expect(server.client.plugins.renameAccount({ name: 'notes', account: 'account9', displayName: 'Home' })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(server.client.plugins.renameAccount({ name: 'nope', account: 'account1', displayName: 'Home' })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+
+  it('keep their tokens encrypted until disconnected, which deletes them and leaves the plugin not connected', async () => {
+    const { fake, plugin } = await hostedPlugin()
+    const server = await start(await writeCatalog({ notes: plugin }))
+    await connectAccount(server, fake)
+
+    const rows = await server.db.select().from(systemCredentials)
+    expect(rows.map((row) => row.key)).toEqual(['plugin:notes:account1'])
+    expect(fake.issuedTokens).toHaveLength(2)
+    for (const token of fake.issuedTokens) expect(JSON.stringify(rows)).not.toContain(token)
+
+    await server.client.plugins.disconnectAccount({ name: 'notes', account: 'account1' })
+
+    expect(await server.db.select().from(systemCredentials)).toEqual([])
+    expect(await server.client.plugins.get({ name: 'notes' })).toMatchObject({ status: 'not_connected', accounts: [] })
+    await expect(server.client.plugins.disconnectAccount({ name: 'notes', account: 'account1' })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+
+  it("aren't connected when the owner denies the sign-in", async () => {
+    const { fake, plugin } = await hostedPlugin()
+    const server = await start(await writeCatalog({ notes: plugin }))
+
+    const steps: SignInStep[] = []
+    for await (const step of await server.client.plugins.connect({ name: 'notes', origin: 'http://localhost:3000' })) {
+      steps.push(step)
+      if (step.type === 'auth_url') {
+        const endsOn = new URL(await fake.authorize(step.url, { deny: true }))
+        expect((await server.fetch(`${endsOn.pathname}${endsOn.search}`, { redirect: 'manual' })).status).toBe(303)
+      }
+    }
+
+    expect(steps.at(-1)).toEqual({ type: 'failed', message: expect.stringContaining("Notes didn't allow the sign-in: access_denied") })
+    expect((await server.client.plugins.get({ name: 'notes' })).status).toBe('not_connected')
+  })
+
+  it("refuse a pasted URL that isn't where the sign-in ended, and still take the right one", async () => {
+    const { fake, plugin } = await hostedPlugin()
+    const server = await start(await writeCatalog({ notes: plugin }))
+
+    const steps: SignInStep[] = []
+    let signInId = ''
+    let endsOn = ''
+    for await (const step of await server.client.plugins.connect({ name: 'notes', origin: privateOrigin })) {
+      steps.push(step)
+      if (step.type === 'started') signInId = step.signInId
+      if (step.type === 'auth_url') endsOn = await fake.authorize(step.url)
+      if (step.type !== 'prompt') continue
+      const answer = (value: string) => server.client.plugins.answer({ signInId, promptId: step.promptId, value })
+      const forged = new URL(endsOn)
+      forged.searchParams.set('state', 'another-sign-in')
+      await expect(answer(forged.href)).rejects.toMatchObject({ code: 'BAD_REQUEST' })
+      await expect(answer('not a url')).rejects.toMatchObject({ code: 'BAD_REQUEST' })
+      await answer(endsOn)
+    }
+
+    expect(steps.at(-1)).toEqual({ type: 'connected' })
+  })
+
+  it('are not connected by a sign-in the owner cancelled, whose callback goes back to the catalog', async () => {
+    const { fake, plugin } = await hostedPlugin()
+    const server = await start(await writeCatalog({ notes: plugin }))
+
+    let endsOn: URL | undefined
+    for await (const step of await server.client.plugins.connect({ name: 'notes', origin: 'http://localhost:3000' })) {
+      if (step.type !== 'auth_url') continue
+      endsOn = new URL(await fake.authorize(step.url))
+      break
+    }
+    const back = await server.fetch(`${endsOn!.pathname}${endsOn!.search}`, { redirect: 'manual' })
+
+    expect(back.headers.get('location')).toBe('/settings/plugins')
+    expect((await server.client.plugins.get({ name: 'notes' })).status).toBe('not_connected')
+  })
+
+  it('are refused for a plugin of skills only', async () => {
+    const guide: FixturePlugin = { '.claude-plugin/plugin.json': { name: 'guide', description: 'Just advice' } }
+    const server = await start(await writeCatalog({ guide }))
+
+    const steps = await server.client.plugins.connect({ name: 'guide', origin: privateOrigin })
+    await expect(steps.next()).rejects.toMatchObject({ code: 'BAD_REQUEST' })
   })
 })

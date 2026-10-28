@@ -123,8 +123,10 @@ export function ProviderList({ onChange }: { onChange?: (providers: ProviderInfo
 
       {signIn && (
         <SignInWizard
-          provider={signIn.provider}
-          method={signIn.method}
+          title={`Connect ${signIn.provider.name}`}
+          subtitle={signIn.method.label}
+          start={(signal) => api().providers.connect({ providerId: signIn.provider.id, method: signIn.method.method }, { signal })}
+          answer={(signInId, promptId, value) => api().providers.answer({ signInId, promptId, value })}
           onClose={(connected) => {
             setSignIn(undefined)
             if (connected) load()

@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
-import { SignInNotFoundError } from '@openbot/agent'
+import { InvalidAccountNameError, InvalidRedirectError, PluginAccountNotFoundError, SignInNotFoundError } from '@openbot/agent'
 import { contract } from '@openbot/api-contract'
 import { ScreenDaemonError } from '@openbot/computer'
 import {
@@ -68,7 +68,7 @@ import { implement, ORPCError } from '@orpc/server'
 import { generateContentDisposition } from '@orpc/standard-server'
 import { chatInfoOf, publishChat, type ServerContext } from './context.ts'
 import { screenStreamUrl } from './screen-stream.ts'
-import { toAuditEntryInfo, toBotInfo, toFactInfo, toMessageInfo, toPluginInfo, toRoutineInfo, toRoutineRunInfo } from './views.ts'
+import { toAuditEntryInfo, toBotInfo, toFactInfo, toMessageInfo, toPluginAccountInfo, toPluginInfo, toRoutineInfo, toRoutineRunInfo } from './views.ts'
 
 const os = implement(contract).$context<ServerContext>()
 
@@ -77,6 +77,20 @@ function pluginMustExist(context: ServerContext, name: string) {
   const plugin = context.plugins.find((entry) => entry.name === name)
   if (!plugin) throw new ORPCError('NOT_FOUND', { message: `No plugin named ${name}` })
   return plugin
+}
+
+/** Where plugin sign-ins return in the owner's browser: `plugins.oauthCallback` under the API's prefix. */
+const pluginCallbackPath = '/api/plugins/oauth/callback'
+
+/** `work`'s result, with a missing plugin account answered as NOT_FOUND and a refused name as BAD_REQUEST. */
+async function accountMustExist<T>(work: Promise<T>): Promise<T> {
+  try {
+    return await work
+  } catch (error) {
+    if (error instanceof PluginAccountNotFoundError) throw new ORPCError('NOT_FOUND', { message: error.message })
+    if (error instanceof InvalidAccountNameError) throw new ORPCError('BAD_REQUEST', { message: error.message })
+    throw error
+  }
 }
 
 /** Writes the owner's time zone with `write`, refusing an invalid one; a change is published for scheduled jobs. */
@@ -589,9 +603,15 @@ export const router = os.router({
   },
 
   plugins: {
-    list: os.plugins.list.handler(({ context }) => context.plugins.map(toPluginInfo)),
+    list: os.plugins.list.handler(async ({ context }) => {
+      const accounts = await context.pluginAccounts.list()
+      return context.plugins.map((plugin) => toPluginInfo(plugin, accounts))
+    }),
 
-    get: os.plugins.get.handler(({ context, input }) => toPluginInfo(pluginMustExist(context, input.name))),
+    get: os.plugins.get.handler(async ({ context, input }) => {
+      const plugin = pluginMustExist(context, input.name)
+      return toPluginInfo(plugin, await context.pluginAccounts.list(plugin.name))
+    }),
 
     icon: os.plugins.icon.handler(async ({ context, input }) => {
       const { icon } = pluginMustExist(context, input.name)
@@ -602,6 +622,42 @@ export const router = os.router({
         headers: { 'content-security-policy': 'sandbox', 'x-content-type-options': 'nosniff' },
         body: new File([bytes], basename(icon!.file), { type: icon!.type }),
       }
+    }),
+
+    connect: os.plugins.connect.handler(async function* ({ context, input, signal }) {
+      const plugin = pluginMustExist(context, input.name)
+      const [server, ...more] = plugin.servers
+      if (!server) throw new ORPCError('BAD_REQUEST', { message: `${plugin.displayName} brings skills only: it has no account to connect` })
+      if (more.length) throw new ORPCError('BAD_REQUEST', { message: `${plugin.displayName} has several servers, which OpenBot can't sign in to yet` })
+      const connectable = { name: plugin.name, displayName: plugin.displayName, serverUrl: server.url }
+      yield* context.pluginAccounts.connect(connectable, new URL(pluginCallbackPath, input.origin), signal)
+    }),
+
+    answer: os.plugins.answer.handler(({ context, input }) => {
+      try {
+        context.pluginAccounts.answer(input.signInId, input.promptId, input.value)
+      } catch (error) {
+        if (error instanceof SignInNotFoundError) throw new ORPCError('NOT_FOUND', { message: error.message })
+        if (error instanceof InvalidRedirectError) throw new ORPCError('BAD_REQUEST', { message: error.message })
+        throw error
+      }
+    }),
+
+    oauthCallback: os.plugins.oauthCallback.handler(({ context, input }) => {
+      const response = new URLSearchParams(Object.entries(input).filter((entry): entry is [string, string] => entry[1] !== undefined))
+      const plugin = context.pluginAccounts.callback(response)
+      // The wizard in the owner's other tab says how the sign-in went; this one goes back to the plugin.
+      return { status: 303 as const, headers: { location: plugin ? `/settings/plugins/${plugin}` : '/settings/plugins' } }
+    }),
+
+    renameAccount: os.plugins.renameAccount.handler(async ({ context, input }) => {
+      pluginMustExist(context, input.name)
+      return toPluginAccountInfo(await accountMustExist(context.pluginAccounts.rename(input.name, input.account, input.displayName)))
+    }),
+
+    disconnectAccount: os.plugins.disconnectAccount.handler(async ({ context, input }) => {
+      pluginMustExist(context, input.name)
+      await accountMustExist(context.pluginAccounts.disconnect(input.name, input.account))
     }),
   },
 

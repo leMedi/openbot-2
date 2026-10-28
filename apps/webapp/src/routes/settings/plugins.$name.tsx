@@ -1,24 +1,34 @@
-import type { PluginInfo } from '@openbot/api-contract'
+import { type PluginAccountInfo, type PluginInfo, pluginAccountNameMax } from '@openbot/api-contract'
 import { Link, createFileRoute } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { Dialog } from '../../components/dialog.tsx'
 import { PluginIcon, PluginStatus } from '../../components/plugins.tsx'
+import { SignInWizard } from '../../components/sign-in-wizard.tsx'
 import { api, errorMessage } from '../../lib/api.ts'
 
 export const Route = createFileRoute('/settings/plugins/$name')({
   component: PluginDetail,
 })
 
-/** A plugin's detail view in Settings → Plugins: what it is, its status, and the servers and skills it brings. */
+/**
+ * A plugin's detail view in Settings → Plugins: what it is, its status, its accounts (connect, rename, disconnect), and
+ * the servers and skills it brings.
+ */
 function PluginDetail() {
   const { name } = Route.useParams()
   const [plugin, setPlugin] = useState<PluginInfo>()
   const [error, setError] = useState<string>()
+  const [connecting, setConnecting] = useState(false)
+
+  const load = useCallback(() => {
+    api().plugins.get({ name }).then(setPlugin, (caught) => setError(errorMessage(caught)))
+  }, [name])
 
   useEffect(() => {
     setPlugin(undefined)
     setError(undefined)
-    api().plugins.get({ name }).then(setPlugin, (caught) => setError(errorMessage(caught)))
-  }, [name])
+    load()
+  }, [load])
 
   return (
     <section className="flex flex-col gap-6">
@@ -47,11 +57,29 @@ function PluginDetail() {
           </header>
 
           <div className="flex flex-col gap-2">
-            <h3 className="font-semibold">Accounts</h3>
-            {plugin.status === 'not_connected' && (
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="font-semibold">Accounts</h3>
+              {plugin.servers.length > 0 && (
+                <button
+                  type="button"
+                  className="pressable rounded-md bg-secondary px-3 py-1.5 text-base hover:bg-secondary-hover"
+                  onClick={() => setConnecting(true)}
+                >
+                  {plugin.accounts.length ? 'Connect another account' : 'Connect'}
+                </button>
+              )}
+            </div>
+            {plugin.accounts.length === 0 && (
               <p className="text-muted-foreground">
                 {plugin.servers.length ? `No ${plugin.displayName} account is connected yet.` : `${plugin.displayName} needs no account: it brings skills only.`}
               </p>
+            )}
+            {plugin.accounts.length > 0 && (
+              <ul className="flex flex-col divide-y divide-border-subtle rounded-lg border border-border">
+                {plugin.accounts.map((account) => (
+                  <AccountRow key={account.slug} plugin={plugin} account={account} onChanged={load} />
+                ))}
+              </ul>
             )}
           </div>
 
@@ -83,6 +111,129 @@ function PluginDetail() {
           )}
         </>
       )}
+
+      {plugin && connecting && (
+        <SignInWizard
+          title={`Connect ${plugin.displayName}`}
+          subtitle={plugin.accounts.length ? 'Another account' : undefined}
+          start={(signal) => api().plugins.connect({ name: plugin.name, origin: window.location.origin }, { signal })}
+          answer={(signInId, promptId, value) => api().plugins.answer({ signInId, promptId, value })}
+          onClose={(connected) => {
+            setConnecting(false)
+            if (connected) load()
+          }}
+        />
+      )}
     </section>
+  )
+}
+
+/** One connected account: its name, which the owner can change, its slug, and Disconnect. */
+function AccountRow({ plugin, account, onChanged }: { plugin: PluginInfo; account: PluginAccountInfo; onChanged: () => void }) {
+  const [renaming, setRenaming] = useState(false)
+  const [displayName, setDisplayName] = useState(account.displayName)
+  const [disconnecting, setDisconnecting] = useState(false)
+  const [error, setError] = useState<string>()
+
+  async function rename(event: React.FormEvent) {
+    event.preventDefault()
+    setError(undefined)
+    try {
+      await api().plugins.renameAccount({ name: plugin.name, account: account.slug, displayName })
+      setRenaming(false)
+      onChanged()
+    } catch (caught) {
+      setError(errorMessage(caught))
+    }
+  }
+
+  async function disconnect() {
+    try {
+      await api().plugins.disconnectAccount({ name: plugin.name, account: account.slug })
+      onChanged()
+    } catch (caught) {
+      setError(errorMessage(caught))
+    }
+  }
+
+  return (
+    <li className="flex flex-col gap-1 px-4 py-3">
+      {renaming ? (
+        <form onSubmit={rename} className="flex items-center gap-2">
+          <input
+            aria-label="Account name"
+            autoFocus
+            maxLength={pluginAccountNameMax}
+            value={displayName}
+            onChange={(event) => setDisplayName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape') return
+              setDisplayName(account.displayName)
+              setRenaming(false)
+            }}
+            className="min-w-0 flex-1 rounded-md border border-input bg-input-fill px-2.5 py-1.5 text-base outline-offset-0"
+          />
+          <button
+            type="submit"
+            disabled={!displayName.trim()}
+            className="pressable rounded-md bg-primary px-3 py-1.5 text-base text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
+          >
+            Save
+          </button>
+        </form>
+      ) : (
+        <div className="flex items-center gap-2">
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate font-medium">{account.displayName}</span>
+            <span className="text-sm text-muted-foreground">
+              <span className="font-mono">{account.slug}</span> · connected {new Date(account.connectedAt).toLocaleDateString()}
+            </span>
+          </span>
+          <button type="button" className="pressable rounded-md px-3 py-1.5 text-base hover:bg-secondary-hover" onClick={() => setRenaming(true)}>
+            Rename
+          </button>
+          <button
+            type="button"
+            className="pressable rounded-md bg-secondary px-3 py-1.5 text-base hover:bg-secondary-hover"
+            onClick={() => setDisconnecting(true)}
+          >
+            Disconnect
+          </button>
+        </div>
+      )}
+      {error && <p className="text-sm text-destructive-foreground">{error}</p>}
+
+      {disconnecting && (
+        <Dialog label={`Disconnect ${account.displayName}`} onClose={() => setDisconnecting(false)}>
+          {(close) => (
+            <>
+              <header className="flex flex-col gap-1">
+                <h2 className="text-lg font-semibold">
+                  Disconnect {plugin.displayName} ({account.displayName})?
+                </h2>
+                <p className="text-muted-foreground">
+                  OpenBot forgets this account's sign-in. Connecting it again gives it a new slug, so bots see it as a new account.
+                </p>
+              </header>
+              <footer className="flex justify-end gap-2">
+                <button type="button" data-autofocus onClick={close} className="pressable rounded-md bg-secondary px-3 py-1.5 text-base hover:bg-secondary-hover">
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    close()
+                    void disconnect()
+                  }}
+                  className="pressable rounded-md bg-destructive px-3 py-1.5 text-base text-on-color hover:bg-destructive/90"
+                >
+                  Disconnect
+                </button>
+              </footer>
+            </>
+          )}
+        </Dialog>
+      )}
+    </li>
   )
 }

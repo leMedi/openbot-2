@@ -1,5 +1,5 @@
-import { type AuditEntryInfo, type BotInfo, type CardInfo, type ChatInfo, type FactInfo, deletedAuthorName, type MessageInfo, type PluginInfo, pluginIconPath, type RoutineInfo, type RoutineRunInfo } from '@openbot/api-contract'
-import type { BotStatus } from '@openbot/agent'
+import { type AuditEntryInfo, type BotInfo, type CardInfo, type ChatInfo, type FactInfo, deletedAuthorName, type MessageInfo, type PluginAccountInfo, type PluginInfo, pluginIconPath, type RoutineInfo, type RoutineRunInfo } from '@openbot/api-contract'
+import type { BotStatus, PluginAccountSummary } from '@openbot/agent'
 import { type BotWithChat, type ChatSummary, type RoutineState, factSourceName, handBackOutcomeOf, isQuestionCard, isRoutineChangeCard, isTakeOverCard, questionAnswerOf, questionDismissedOf } from '@openbot/core'
 import type { AuditEntry, Fact, Message, RoutineRun } from '@openbot/db'
 import type { Plugin } from '@openbot/plugins'
@@ -135,16 +135,23 @@ export function toRoutineRunInfo(run: RoutineRun, chatId: string): RoutineRunInf
   }
 }
 
-/** What the owner sees of a catalog plugin. No accounts can be connected yet, so none is connected. */
-export function toPluginInfo(plugin: Plugin): PluginInfo {
+/** What the owner sees of a catalog plugin, with its accounts (any plugin's may be passed): connected once it has one. */
+export function toPluginInfo(plugin: Plugin, accounts: PluginAccountSummary[]): PluginInfo {
+  const own = accounts.filter((account) => account.plugin === plugin.name).map(toPluginAccountInfo)
   return {
     name: plugin.name,
     displayName: plugin.displayName,
     version: plugin.version,
     description: plugin.description,
     icon: plugin.icon && pluginIconPath(plugin.name),
-    status: 'not_connected',
+    status: own.length ? 'connected' : 'not_connected',
     servers: plugin.servers,
     skills: plugin.skills.map(({ name, description }) => ({ name, description })),
+    accounts: own,
   }
+}
+
+/** What the owner sees of a plugin account: never its tokens. */
+export function toPluginAccountInfo(account: PluginAccountSummary): PluginAccountInfo {
+  return { slug: account.slug, displayName: account.displayName, connectedAt: account.connectedAt.getTime() }
 }

@@ -373,6 +373,29 @@ export const routineRuns = sqliteTable(
   (table) => [index('routine_runs_routine_idx').on(table.routineId, table.id)],
 )
 
+/**
+ * The owner's sign-ins to plugins' services (design §5.5), several per plugin. A disconnected account keeps its row,
+ * so its slug, part of tool names in bots' histories, is never given again; its tokens are deleted.
+ */
+export const pluginAccounts = sqliteTable(
+  'plugin_accounts',
+  {
+    id: id(),
+    /** The catalog plugin's name. */
+    plugin: text('plugin').notNull(),
+    /** `account1`, `account2`…, fixed when connected. */
+    slug: text('slug').notNull(),
+    /** `Account N` until the owner renames it. */
+    displayName: text('display_name').notNull(),
+    connectedAt: integer('connected_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch('subsec') * 1000)`),
+    /** When the owner disconnected it; null while connected. */
+    disconnectedAt: integer('disconnected_at', { mode: 'timestamp_ms' }),
+  },
+  (table) => [uniqueIndex('plugin_accounts_slug_idx').on(table.plugin, table.slug)],
+)
+
 export type Setting = typeof settings.$inferSelect
 export type SystemCredential = typeof systemCredentials.$inferSelect
 export type Bot = typeof bots.$inferSelect
@@ -386,3 +409,4 @@ export type NewAuditEntry = typeof auditLog.$inferInsert
 export type Fact = typeof memories.$inferSelect
 export type Routine = typeof routines.$inferSelect
 export type RoutineRun = typeof routineRuns.$inferSelect
+export type PluginAccount = typeof pluginAccounts.$inferSelect

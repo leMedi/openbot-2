@@ -1,13 +1,48 @@
-import { callsTools, endsSilently, recordingTool } from '@openbot/agent/testing'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { callsTools, endsSilently, type FakeMcpServer, recordingTool, startFakeMcpServer } from '@openbot/agent/testing'
 import { contract } from '@openbot/api-contract'
 import { systemCredentials } from '@openbot/db'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createTestServer, type TestServer } from './testing/harness.ts'
 
 const servers: TestServer[] = []
+const cleanups: (() => Promise<void>)[] = []
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()))
+  await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()))
 })
+
+/** A catalog of one plugin, `notes`, hosted by `fake`. */
+async function notesCatalog(fake: FakeMcpServer): Promise<string> {
+  const catalog = await mkdtemp(join(tmpdir(), 'openbot-catalog-'))
+  cleanups.push(() => rm(catalog, { recursive: true, force: true }))
+  const root = join(catalog, 'notes')
+  await mkdir(join(root, '.claude-plugin'), { recursive: true })
+  await writeFile(join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'notes', description: 'Notes', icon: './logo.svg' }))
+  await writeFile(join(root, '.mcp.json'), JSON.stringify({ mcpServers: { notes: { type: 'http', url: fake.url } } }))
+  await writeFile(join(root, 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
+  return catalog
+}
+
+/** Every step of connecting a `notes` account from the page at `origin`, signing in on `fake`. */
+async function connectSteps(server: TestServer, fake: FakeMcpServer, origin: string) {
+  const seen: unknown[] = []
+  let signInId = ''
+  let endsOn = ''
+  for await (const step of await server.client.plugins.connect({ name: 'notes', origin })) {
+    seen.push(step)
+    if (step.type === 'started') signInId = step.signInId
+    if (step.type === 'auth_url') {
+      endsOn = await fake.authorize(step.url)
+      if (endsOn.startsWith(origin)) seen.push(await server.fetch(endsOn.slice(origin.length), { redirect: 'manual' }).then((response) => [...response.headers]))
+    }
+    if (step.type === 'prompt') await server.client.plugins.answer({ signInId, promptId: step.promptId, value: endsOn })
+    if (step.type === 'failed') throw new Error(step.message)
+  }
+  return seen
+}
 
 const apiKey = 'sk-fake-do-not-leak-0123456789'
 const answer = (value: string | (() => string)) => (typeof value === 'function' ? value() : value)
@@ -36,8 +71,11 @@ function procedurePaths(node: object, prefix = ''): string[] {
 
 describe('system credentials', () => {
   it('are never returned by any procedure', async () => {
-    const server = await createTestServer({ tools: [recordingTool('runShell', 'shell').tool] })
+    const fake = await startFakeMcpServer()
+    cleanups.push(() => fake.close())
+    const server = await createTestServer({ tools: [recordingTool('runShell', 'shell').tool], catalog: await notesCatalog(fake) })
     servers.push(server)
+    const pluginSteps = [...(await connectSteps(server, fake, 'http://192.168.1.25:3000')), ...(await connectSteps(server, fake, 'http://localhost:3000'))]
 
     // The subscription sign-in mints `access-1` / `refresh-1`, then the API key replaces it.
     const steps = [
@@ -98,8 +136,13 @@ describe('system credentials', () => {
       'providers.answer': null,
       'providers.disconnect': null,
       'plugins.list': await server.client.plugins.list(),
-      'plugins.get': await server.client.plugins.get({ name: 'notion' }),
-      'plugins.icon': await (await server.client.plugins.icon({ name: 'notion' })).body.text(),
+      'plugins.get': await server.client.plugins.get({ name: 'notes' }),
+      'plugins.icon': await (await server.client.plugins.icon({ name: 'notes' })).body.text(),
+      'plugins.connect': pluginSteps,
+      'plugins.answer': null,
+      'plugins.oauthCallback': null,
+      'plugins.renameAccount': await server.client.plugins.renameAccount({ name: 'notes', account: 'account1', displayName: 'Work' }),
+      'plugins.disconnectAccount': null,
       'models.list': await server.client.models.list(),
       'models.getSettings': await server.client.models.getSettings(),
       'models.updateSettings': settings,
@@ -152,7 +195,8 @@ describe('system credentials', () => {
     expect(Object.keys(responses).filter((path) => path !== 'openapi').sort()).toEqual(procedurePaths(contract).sort())
 
     const everything = JSON.stringify(responses)
-    for (const secret of [apiKey, 'access-1', 'refresh-1', 'device-access', 'device-refresh']) {
+    expect(fake.issuedTokens).toHaveLength(4)
+    for (const secret of [apiKey, 'access-1', 'refresh-1', 'device-access', 'device-refresh', ...fake.issuedTokens]) {
       expect(everything).not.toContain(secret)
     }
   })

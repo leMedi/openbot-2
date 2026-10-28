@@ -12,3 +12,11 @@ export {
 export { BotRuntime, type BotStatus, type BotTool, type ToolSurface, interruptedNote, NoModelError, outdatedAnswer, owedReplyNote, replyReminder, supersededNote, type BotRuntimeOptions } from './runtime.ts'
 export { type InputOutcome, type Watchdog } from './run-scheduler.ts'
 export { BotComputer, botUser, ComputerUnavailableError, openBotComputer, userExists } from './computer.ts'
+export {
+  type ConnectablePlugin,
+  InvalidAccountNameError,
+  InvalidRedirectError,
+  PluginAccountNotFoundError,
+  PluginAccounts,
+  type PluginAccountSummary,
+} from './plugin-accounts.ts'

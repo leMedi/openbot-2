@@ -1,22 +1,29 @@
-import type { ProviderInfo, SignInStep } from '@openbot/api-contract'
+import type { SignInStep } from '@openbot/api-contract'
 import { useEffect, useState } from 'react'
-import { api, errorMessage } from '../lib/api.ts'
+import { errorMessage } from '../lib/api.ts'
 import { Dialog } from './dialog.tsx'
 
 type Prompt = Extract<SignInStep, { type: 'prompt' }>
-type Method = ProviderInfo['methods'][number]
+
+/** Answers an open prompt of the running sign-in. */
+type Answer = (signInId: string, promptId: string, value: string) => Promise<void>
 
 /**
- * Runs a provider sign-in on the server and shows each step: links to open, device codes, prompts to answer.
- * Closing the wizard ends the stream, which cancels the sign-in.
+ * Runs a sign-in on the server (a provider's or a plugin account's) and shows each step: links to open, device codes,
+ * prompts to answer. Closing the wizard ends the stream, which cancels the sign-in.
  */
 export function SignInWizard({
-  provider,
-  method,
+  title,
+  subtitle,
+  start,
+  answer,
   onClose,
 }: {
-  provider: ProviderInfo
-  method: Method
+  title: string
+  subtitle?: string
+  /** Starts the sign-in, streaming its steps; called once. */
+  start: (signal: AbortSignal) => Promise<AsyncIterable<SignInStep>>
+  answer: Answer
   /** `connected` is true when the sign-in succeeded. */
   onClose: (connected: boolean) => void
 }) {
@@ -28,10 +35,7 @@ export function SignInWizard({
     const controller = new AbortController()
     ;(async () => {
       try {
-        const stream = await api().providers.connect(
-          { providerId: provider.id, method: method.method },
-          { signal: controller.signal },
-        )
+        const stream = await start(controller.signal)
         for await (const step of stream) {
           if (step.type === 'started') setSignInId(step.signInId)
           setSteps((previous) => [...previous, step])
@@ -41,7 +45,8 @@ export function SignInWizard({
       }
     })()
     return () => controller.abort()
-  }, [provider.id, method.method])
+    // The sign-in starts once, when the wizard opens.
+  }, [])
 
   const closed = new Set(steps.flatMap((step) => (step.type === 'prompt_closed' ? [step.promptId] : [])))
   const connected = steps.some((step) => step.type === 'connected')
@@ -49,12 +54,12 @@ export function SignInWizard({
   const openPrompt = steps.filter((step): step is Prompt => step.type === 'prompt' && !closed.has(step.promptId)).at(-1)
 
   return (
-    <Dialog label={`Connect ${provider.name}`} onClose={() => onClose(connected)}>
+    <Dialog label={title} onClose={() => onClose(connected)}>
       {(close) => (
         <>
           <header>
-            <h2 className="text-lg font-semibold">Connect {provider.name}</h2>
-            <p className="text-sm text-muted-foreground">{method.label}</p>
+            <h2 className="text-lg font-semibold">{title}</h2>
+            {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
           </header>
 
           <ol className="flex flex-col gap-3 text-base">
@@ -64,7 +69,7 @@ export function SignInWizard({
           </ol>
 
           {openPrompt && signInId && !connected && !failed && (
-            <PromptForm key={openPrompt.promptId} prompt={openPrompt} signInId={signInId} onError={setError} />
+            <PromptForm key={openPrompt.promptId} prompt={openPrompt} signInId={signInId} answer={answer} onError={setError} />
           )}
 
           {connected && <p className="text-green-foreground">Connected.</p>}
@@ -128,7 +133,17 @@ function StepView({ step }: { step: SignInStep }) {
   }
 }
 
-function PromptForm({ prompt, signInId, onError }: { prompt: Prompt; signInId: string; onError: (error: string) => void }) {
+function PromptForm({
+  prompt,
+  signInId,
+  answer,
+  onError,
+}: {
+  prompt: Prompt
+  signInId: string
+  answer: Answer
+  onError: (error: string) => void
+}) {
   const [value, setValue] = useState(prompt.options?.[0]?.id ?? '')
   const [sending, setSending] = useState(false)
 
@@ -136,7 +151,7 @@ function PromptForm({ prompt, signInId, onError }: { prompt: Prompt; signInId: s
     event.preventDefault()
     setSending(true)
     try {
-      await api().providers.answer({ signInId, promptId: prompt.promptId, value })
+      await answer(signInId, prompt.promptId, value)
     } catch (caught) {
       onError(errorMessage(caught))
       setSending(false)

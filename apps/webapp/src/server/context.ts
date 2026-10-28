@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { type BotComputer, BotRuntime, type BotRuntimeOptions, type BotTool, type ModelProvider, Providers, type Watchdog } from '@openbot/agent'
+import { type BotComputer, BotRuntime, type BotRuntimeOptions, type BotTool, type ModelProvider, PluginAccounts, Providers, type Watchdog } from '@openbot/agent'
 import type { ChatInfo, LiveEvent } from '@openbot/api-contract'
 import {
   AllowAllOrchestrator,
@@ -73,6 +73,8 @@ export type ServerContext = {
   routines: Routines
   /** The plugin catalog, read once on boot, by name. */
   plugins: Plugin[]
+  /** The owner's plugin accounts and their sign-ins. */
+  pluginAccounts: PluginAccounts
 }
 
 /** The owner's time zone (`settings.timeZone`), as scheduled jobs read it. */
@@ -165,7 +167,9 @@ export async function createServerContext({
   const bus = new EventBus<LiveEvent>()
   const plugins = await openCatalog(catalog, home)
   const attachments = new AttachmentStore(attachmentsDir)
-  const providers = new Providers({ db, box: new SecretBox(secretKey), providers: modelProviders })
+  const box = new SecretBox(secretKey)
+  const providers = new Providers({ db, box, providers: modelProviders })
+  const pluginAccounts = new PluginAccounts({ db, box })
   // Made before the runtime, whose resumed runs may post to groups as it opens; turns wait for it to be open.
   let opened!: (runtime: BotRuntime) => void
   const runtimeOpen = new Promise<BotRuntime>((resolve) => (opened = resolve))
@@ -373,6 +377,7 @@ export async function createServerContext({
     extraction,
     routines,
     plugins,
+    pluginAccounts,
   }
 }
 
