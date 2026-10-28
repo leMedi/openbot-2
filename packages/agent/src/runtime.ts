@@ -795,10 +795,10 @@ export class BotRuntime implements AgentRuntime {
           }
           if (args.id === undefined) throw new Error(`Say which fact to ${args.action} by its id.`)
           if (args.action === 'edit') {
-            const fact = await editFact(options.db, bot.id, args.id, { text: args.text, tier: args.tier, importance: args.importance }, now, args.scope)
+            const fact = await editFact(options.db, { botId: bot.id, scope: args.scope }, args.id, { text: args.text, tier: args.tier, importance: args.importance }, now)
             return answer(`Updated [${fact.id}].`)
           }
-          await forgetFact(options.db, bot.id, args.id, args.scope)
+          await forgetFact(options.db, { botId: bot.id, scope: args.scope }, args.id)
           return answer(`Forgot [${args.id}].`)
         },
       }),

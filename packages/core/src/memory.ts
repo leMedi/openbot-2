@@ -1,5 +1,6 @@
 import { bots, type Db, type Fact, type FactTier, factTiers, memories, type MemoryScope } from '@openbot/db'
-import { and, asc, eq, or } from 'drizzle-orm'
+import { and, asc, eq, isNull, or, sql } from 'drizzle-orm'
+import { uuidv7 } from 'uuidv7'
 
 export { factTiers }
 export type { Fact, FactTier, MemoryScope }
@@ -59,14 +60,22 @@ function checkedImportance(importance: number): number {
   return importance
 }
 
+/** What changes of a fact: any of its text, tier and importance. */
+export type FactChanges = { text?: string; tier?: FactTier; importance?: number }
+
 /**
- * What a bot can reach: its own bot memory and shared memory, never another bot's bot memory; only `scope` when given.
- * The ownership check every way of reaching a fact by id goes through.
+ * Who reaches for a fact by id, and so which facts they can reach. A bot, or the owner in the bot's Memory pane
+ * (`{ botId }`), reaches its bot memory and shared memory, never another bot's bot memory; only `scope` when given. The
+ * owner in Settings → Shared memory (`{ scope: 'shared' }`) reaches shared memory only.
  */
-const reachableFact = (botId: string, id: number, scope?: MemoryScope) => {
-  const own = and(eq(memories.scope, 'bot'), eq(memories.botId, botId))
+export type FactReach = { botId: string; scope?: MemoryScope } | { botId?: undefined; scope: 'shared' }
+
+/** The ownership check every way of reaching a fact by id goes through: fact `id`, if `reach` reaches it. */
+const reachableFact = (reach: FactReach, id: number) => {
   const shared = eq(memories.scope, 'shared')
-  return and(eq(memories.id, id), scope === 'bot' ? own : scope === 'shared' ? shared : or(own, shared))
+  if (reach.botId === undefined) return and(eq(memories.id, id), shared)
+  const own = and(eq(memories.scope, 'bot'), eq(memories.botId, reach.botId))
+  return and(eq(memories.id, id), reach.scope === 'bot' ? own : reach.scope === 'shared' ? shared : or(own, shared))
 }
 
 /** The bot's bot memory, oldest first. */
@@ -88,7 +97,7 @@ export async function listSharedFacts(db: Db): Promise<Fact[]> {
  * reviews an edit or forget of it under.
  */
 export async function reachableFactScope(db: Db, botId: string, id: number): Promise<MemoryScope | undefined> {
-  const [fact] = await db.select({ scope: memories.scope }).from(memories).where(reachableFact(botId, id))
+  const [fact] = await db.select({ scope: memories.scope }).from(memories).where(reachableFact({ botId }, id))
   return fact?.scope
 }
 
@@ -121,17 +130,16 @@ export async function writeFact(
 }
 
 /**
- * Changes a fact the bot can reach (its bot memory or shared memory, whoever wrote it) in place, keeping its id, scope,
- * source and when it was learned; only a fact of `scope` when given, e.g. the scope the orchestrator reviewed. Throws
- * `NoSuchFactError` unless the bot can reach it, and `InvalidFactError` for nothing to change or a bad text or importance.
+ * Changes a fact `reach` reaches (for a bot, its bot memory or shared memory, whoever wrote it; only a fact of the scope
+ * the orchestrator reviewed, when given) in place, keeping its id, scope, source and when it was learned. Throws
+ * `NoSuchFactError` unless `reach` reaches it, and `InvalidFactError` for nothing to change or a bad text or importance.
  */
 export async function editFact(
   db: Db,
-  botId: string,
+  reach: FactReach,
   id: number,
-  changes: { text?: string; tier?: FactTier; importance?: number },
+  changes: FactChanges,
   now: number,
-  scope?: MemoryScope,
 ): Promise<Fact> {
   const values = {
     ...(changes.text !== undefined && { content: checkedContent(changes.text) }),
@@ -142,19 +150,76 @@ export async function editFact(
   const [fact] = await db
     .update(memories)
     .set({ ...values, updatedAt: new Date(now) })
-    .where(reachableFact(botId, id, scope))
+    .where(reachableFact(reach, id))
     .returning()
   if (!fact) throw new NoSuchFactError(id)
   return fact
 }
 
+/** Deletes a fact `reach` reaches for good, and answers it. Throws `NoSuchFactError` unless `reach` reaches it. */
+export async function forgetFact(db: Db, reach: FactReach, id: number): Promise<Fact> {
+  const [fact] = await db.delete(memories).where(reachableFact(reach, id)).returning()
+  if (!fact) throw new NoSuchFactError(id)
+  return fact
+}
+
 /**
- * Deletes a fact the bot can reach for good; only a fact of `scope` when given. Throws `NoSuchFactError` unless the bot
- * can reach it.
+ * Breaks the freeze of every bot that sees `fact` (its bot for bot memory, every bot for shared memory): each renders
+ * its memory block anew on its next run, without waiting for a compaction. What the owner changes takes effect at once;
+ * bots' own changes don't need it, being in their history already, but a re-render shows them too. The block left is
+ * stale, under an epoch no history has, and new each time, so a render that read the facts before this change can tell
+ * it came too late (see `frozenMemoryBlock`).
  */
-export async function forgetFact(db: Db, botId: string, id: number, scope?: MemoryScope): Promise<void> {
-  const deleted = await db.delete(memories).where(reachableFact(botId, id, scope)).returning({ id: memories.id })
-  if (!deleted.length) throw new NoSuchFactError(id)
+async function thawMemoryBlocks(db: Db, fact: Pick<Fact, 'scope' | 'botId'>): Promise<void> {
+  await db
+    .update(bots)
+    .set({ memoryBlock: { epoch: `thawed-${uuidv7()}`, text: '' } })
+    .where(fact.scope === 'bot' ? eq(bots.id, fact.botId!) : undefined)
+}
+
+/**
+ * Saves a fact the owner adds, learned `now`, sourced to the owner: to bot `botId`'s bot memory, or to shared memory
+ * without one. The bots that see it see it on their next run. Throws `InvalidFactError` for an empty or too long text
+ * or an importance out of range.
+ */
+export async function addOwnerFact(
+  db: Db,
+  { botId, tier, text, importance = defaultImportance }: { botId?: string; tier: FactTier; text: string; importance?: number },
+  now: number,
+): Promise<Fact> {
+  const [fact] = await db
+    .insert(memories)
+    .values({
+      scope: botId === undefined ? 'shared' : 'bot',
+      botId: botId ?? null,
+      tier,
+      content: checkedContent(text),
+      importance: checkedImportance(importance),
+      source: 'owner',
+      createdAt: new Date(now),
+      updatedAt: new Date(now),
+    })
+    .returning()
+  await thawMemoryBlocks(db, fact!)
+  return fact!
+}
+
+/** `editFact` for the owner: the bots that see the fact see the change on their next run. */
+export async function editOwnerFact(
+  db: Db,
+  reach: FactReach,
+  id: number,
+  changes: FactChanges,
+  now: number,
+): Promise<Fact> {
+  const fact = await editFact(db, reach, id, changes, now)
+  await thawMemoryBlocks(db, fact)
+  return fact
+}
+
+/** `forgetFact` for the owner: the fact is gone from the prompts of the bots that saw it on their next run. */
+export async function deleteOwnerFact(db: Db, reach: FactReach, id: number): Promise<void> {
+  await thawMemoryBlocks(db, await forgetFact(db, reach, id))
 }
 
 /** Who a shared fact is from, as its tag shows: `the owner`, `Rex`, or `Rex (deleted)` once Rex is gone. */
@@ -227,6 +292,7 @@ export function renderMemoryBlock(facts: readonly Fact[], { now, timeZone }: { n
  * The bot's memory block for its compaction epoch `epoch` (see `AgentRuntime`): rendered from its facts as they are
  * `now` the first time the epoch is asked for, then the same until the epoch changes, so the prompt stays cached. Facts
  * the bot writes meanwhile are in its history already; shared facts other bots write meanwhile wait for its next epoch.
+ * The owner's changes don't wait: they thaw the frozen block (see `thawMemoryBlocks`).
  */
 export async function frozenMemoryBlock(
   db: Db,
@@ -237,6 +303,11 @@ export async function frozenMemoryBlock(
   const [row] = await db.select({ memoryBlock: bots.memoryBlock }).from(bots).where(eq(bots.id, botId))
   if (row?.memoryBlock && row.memoryBlock.epoch === epoch) return row.memoryBlock.text
   const text = renderMemoryBlock([...(await listBotFacts(db, botId)), ...(await listSharedFacts(db))], { now, timeZone })
-  await db.update(bots).set({ memoryBlock: { epoch, text } }).where(eq(bots.id, botId))
+  // Kept only if the block is still the one read: an owner change meanwhile thawed it, and the next run renders anew.
+  const unchanged = row?.memoryBlock ? sql`${bots.memoryBlock} = ${JSON.stringify(row.memoryBlock)}` : isNull(bots.memoryBlock)
+  await db
+    .update(bots)
+    .set({ memoryBlock: { epoch, text } })
+    .where(and(eq(bots.id, botId), unchanged))
   return text
 }

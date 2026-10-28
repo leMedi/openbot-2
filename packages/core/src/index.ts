@@ -129,20 +129,27 @@ export {
 } from './ports/computer.ts'
 export type { Orchestrator, OrchestratorMode, ProposedAction, ReviewContext, Surface, Verdict } from './ports/orchestrator.ts'
 export {
+  addOwnerFact,
   defaultImportance,
+  deleteOwnerFact,
   editFact,
+  editOwnerFact,
   type Fact,
+  type FactChanges,
+  type FactReach,
   factSourceName,
   factTiers,
   type FactTier,
   forgetFact,
   frozenMemoryBlock,
+  InvalidFactError,
   listBotFacts,
   listSharedFacts,
   maxFactLength,
   maxImportance,
   type MemoryScope,
   minImportance,
+  NoSuchFactError,
   reachableFactScope,
   writeFact,
 } from './memory.ts'

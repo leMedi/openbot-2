@@ -69,6 +69,27 @@ async function nextPrompt(server: TestServer, bot: BotInfo) {
     .join('\n')
 }
 
+/**
+ * The bot's prompt as its next run has it: its system messages replayed in order, later ones replacing sections by name
+ * (as pi-ai providers do), so a section changed since reads only as it is now.
+ */
+async function currentPrompt(server: TestServer, bot: BotInfo) {
+  server.providers.script(endsSilently())
+  await server.runtime.wake(bot.id, { lane: 'background', text: '[test] look around' })
+  await untilIdle(server, bot)
+  const content: string[] = []
+  const sections = new Map<string, string>()
+  for (const message of server.providers.requests.at(-1)!.messages) {
+    if (message.role !== 'system') continue
+    content.push(typeof message.content === 'string' ? message.content : message.content.map((part) => part.text).join(''))
+    for (const [name, text] of Object.entries(message.sections ?? {})) {
+      if (text === null) sections.delete(name)
+      else sections.set(name, text)
+    }
+  }
+  return [...content, ...sections.values()].join('\n')
+}
+
 describe('bot memory', () => {
   it('reaches the prompt with its next compaction, and survives it', async () => {
     const { server, bot } = await startWithRex()
@@ -408,5 +429,150 @@ describe('shared memory', () => {
     expect(prompt).toContain('- [1] (learned 2026-10-28) Rex keeps the deploy key in the vault.')
     expect(prompt).toContain('- [2] (learned 2026-10-28) [via Rex] The owner is called Samuel.')
     expect(prompt).not.toContain('Mondays')
+  })
+})
+
+describe('the owner editing memory', () => {
+  it("takes a deleted fact out of the bot's prompt on its very next run, without a compaction", async () => {
+    const { server, bot } = await startWithRex()
+    await updateState(server, bot, { action: 'write', scope: 'bot', tier: 'profile', text: 'The owner likes tabs.' })
+    await updateState(server, bot, { action: 'write', scope: 'bot', tier: 'profile', text: 'Rex builds with pnpm.' })
+    await compact(server, bot)
+    expect(await nextPrompt(server, bot)).toContain('The owner likes tabs.')
+
+    await server.client.bots.deleteFact({ botId: bot.id, factId: 1 })
+
+    const prompt = await currentPrompt(server, bot)
+    expect(prompt).not.toContain('The owner likes tabs.')
+    expect(prompt).toContain('- [2] (learned 2026-10-28) Rex builds with pnpm.')
+    expect((await server.client.bots.memory({ botId: bot.id })).map((fact) => fact.content)).toEqual(['Rex builds with pnpm.'])
+  })
+
+  it("adds a fact to the bot's bot memory, sourced to the owner, in its prompt on its next run", async () => {
+    const { server, bot } = await startWithRex()
+    await compact(server, bot)
+    await nextPrompt(server, bot)
+    await server.clock.advance(day)
+
+    const added = await server.client.bots.addFact({ botId: bot.id, tier: 'profile', text: '  The owner is on call this week.  ' })
+
+    expect(added).toEqual({
+      id: 1,
+      tier: 'profile',
+      content: 'The owner is on call this week.',
+      importance: 3,
+      source: 'owner',
+      sourceBotName: null,
+      createdAt: Date.parse('2026-10-29T12:00:00Z'),
+      updatedAt: Date.parse('2026-10-29T12:00:00Z'),
+    })
+    expect(await server.client.bots.memory({ botId: bot.id })).toEqual([added])
+    expect(await currentPrompt(server, bot)).toContain('- [1] (learned 2026-10-29) The owner is on call this week.')
+  })
+
+  it('edits a fact in place, keeping its id, source and date, in the prompt on the next run', async () => {
+    const { server, bot } = await startWithRex()
+    await updateState(server, bot, { action: 'write', scope: 'bot', tier: 'note', text: 'The build is red.' })
+    await compact(server, bot)
+    expect(await nextPrompt(server, bot)).toContain('The build is red.')
+    await server.clock.advance(day)
+
+    const edited = await server.client.bots.editFact({ botId: bot.id, factId: 1, text: 'The build is green again.', tier: 'profile', importance: 5 })
+
+    expect(edited).toMatchObject({
+      id: 1,
+      tier: 'profile',
+      content: 'The build is green again.',
+      importance: 5,
+      source: 'bot',
+      sourceBotName: 'Rex',
+      createdAt: Date.parse('2026-10-28T12:00:00Z'),
+      updatedAt: Date.parse('2026-10-29T12:00:00Z'),
+    })
+    const prompt = await currentPrompt(server, bot)
+    expect(prompt).toContain('Profile:\n- [1] (learned 2026-10-28) The build is green again.')
+    expect(prompt).not.toContain('The build is red.')
+  })
+
+  it("leaves other bots' prompts as they are after a change to one bot's memory", async () => {
+    const { server, bot } = await startWithRex()
+    const ana = await server.client.bots.create({ ...rex, name: 'Ana', instructions: 'Ana reviews code.' })
+    await updateState(server, ana, { action: 'write', scope: 'shared', tier: 'profile', text: 'The owner is called Sam.' })
+    expect(await nextPrompt(server, ana)).not.toContain('Sam')
+
+    await server.client.bots.addFact({ botId: bot.id, tier: 'profile', text: 'The owner likes tabs.' })
+
+    // Ana's memory block is still frozen: the shared fact she wrote waits for her next compaction.
+    expect(await currentPrompt(server, ana)).not.toContain('Sam')
+    expect(await currentPrompt(server, bot)).toContain('[via Ana] The owner is called Sam.')
+  })
+
+  it("adds, edits and deletes shared facts in Settings, in every bot's prompt on its next run, tagged as from the owner", async () => {
+    const { server, bot } = await startWithRex()
+    const ana = await server.client.bots.create({ ...rex, name: 'Ana', instructions: 'Ana reviews code.' })
+    for (const target of [bot, ana]) await nextPrompt(server, target)
+
+    const added = await server.client.sharedMemory.add({ tier: 'log', text: 'The owner moved to Lisbon.', importance: 4 })
+    expect(added).toMatchObject({ id: 1, tier: 'log', importance: 4, source: 'owner', sourceBotName: null })
+    for (const target of [bot, ana]) {
+      expect(await currentPrompt(server, target)).toContain('- [1] (learned 2026-10-28) [via the owner] The owner moved to Lisbon.')
+    }
+
+    await server.client.sharedMemory.edit({ factId: 1, text: 'The owner moved to Porto.' })
+    for (const target of [bot, ana]) {
+      const prompt = await currentPrompt(server, target)
+      expect(prompt).toContain('[via the owner] The owner moved to Porto.')
+      expect(prompt).not.toContain('Lisbon')
+    }
+    expect(await server.client.sharedMemory.list()).toMatchObject([{ id: 1, content: 'The owner moved to Porto.' }])
+
+    await server.client.sharedMemory.delete({ factId: 1 })
+    for (const target of [bot, ana]) expect(await currentPrompt(server, target)).not.toContain('Porto')
+    expect(await server.client.sharedMemory.list()).toEqual([])
+  })
+
+  it("lets a bot's pane reach its bot memory and shared memory, never another bot's: those answer as unknown ids do", async () => {
+    const { server, bot } = await startWithRex()
+    const ana = await server.client.bots.create({ ...rex, name: 'Ana', instructions: 'Ana reviews code.' })
+    const anas = await server.client.bots.addFact({ botId: ana.id, tier: 'profile', text: 'Ana reviews on Mondays.' })
+    const shared = await server.client.sharedMemory.add({ tier: 'profile', text: 'The owner is called Sam.' })
+    const gone = await server.client.bots.addFact({ botId: bot.id, tier: 'note', text: 'Short-lived.' })
+    await server.client.bots.deleteFact({ botId: bot.id, factId: gone.id })
+
+    const failures = []
+    for (const factId of [anas.id, gone.id, 99]) {
+      failures.push(server.client.bots.editFact({ botId: bot.id, factId, text: 'Changed.' }).catch((error) => error))
+      failures.push(server.client.bots.deleteFact({ botId: bot.id, factId }).catch((error) => error))
+    }
+    for (const failure of await Promise.all(failures)) expect(failure).toMatchObject({ code: 'NOT_FOUND', message: 'No such fact' })
+
+    expect(await server.client.bots.editFact({ botId: bot.id, factId: shared.id, importance: 5 })).toMatchObject({ id: shared.id, importance: 5 })
+    expect(await server.client.bots.memory({ botId: ana.id })).toMatchObject([{ id: anas.id, content: 'Ana reviews on Mondays.' }])
+    await server.client.bots.deleteFact({ botId: bot.id, factId: shared.id })
+    expect(await server.client.sharedMemory.list()).toEqual([])
+  })
+
+  it("keeps Settings → Shared memory to shared facts: a bot's fact answers as an unknown id does", async () => {
+    const { server, bot } = await startWithRex()
+    const rexs = await server.client.bots.addFact({ botId: bot.id, tier: 'profile', text: 'Rex builds with pnpm.' })
+
+    await expect(server.client.sharedMemory.edit({ factId: rexs.id, text: 'Changed.' })).rejects.toMatchObject({ code: 'NOT_FOUND', message: 'No such fact' })
+    await expect(server.client.sharedMemory.delete({ factId: rexs.id })).rejects.toMatchObject({ code: 'NOT_FOUND', message: 'No such fact' })
+    expect(await server.client.bots.memory({ botId: bot.id })).toMatchObject([{ content: 'Rex builds with pnpm.' }])
+  })
+
+  it("refuses an empty or too long text, a bad importance, nothing to change and a bot that doesn't exist", async () => {
+    const { server, bot } = await startWithRex()
+    const fact = await server.client.bots.addFact({ botId: bot.id, tier: 'profile', text: 'The owner likes tabs.' })
+
+    await expect(server.client.bots.addFact({ botId: bot.id, tier: 'profile', text: '   ' })).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'A fact needs some text.' })
+    await expect(server.client.sharedMemory.add({ tier: 'profile', text: 'x'.repeat(501) })).rejects.toMatchObject({ code: 'BAD_REQUEST' })
+    await expect(server.client.bots.editFact({ botId: bot.id, factId: fact.id, importance: 6 })).rejects.toMatchObject({ code: 'BAD_REQUEST' })
+    await expect(server.client.bots.editFact({ botId: bot.id, factId: fact.id })).rejects.toMatchObject({ code: 'BAD_REQUEST' })
+    await expect(server.client.bots.addFact({ botId: 'nope', tier: 'profile', text: 'Hello.' })).rejects.toMatchObject({ code: 'NOT_FOUND', message: 'No such bot' })
+    const shared = await server.client.sharedMemory.add({ tier: 'profile', text: 'The owner is called Sam.' })
+    await expect(server.client.bots.deleteFact({ botId: 'nope', factId: shared.id })).rejects.toMatchObject({ code: 'NOT_FOUND', message: 'No such bot' })
+    expect(await server.client.bots.memory({ botId: bot.id })).toEqual([fact])
+    expect(await server.client.sharedMemory.list()).toEqual([shared])
   })
 })

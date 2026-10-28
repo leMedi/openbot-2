@@ -405,6 +405,20 @@ export const fact = z.object({
 })
 export type FactInfo = z.infer<typeof fact>
 
+/** A fact the owner adds; importance 3 unless given. */
+export const newFact = z.object({
+  tier: z.enum(factTiers),
+  /** Trimmed; not empty, at most 500 characters. */
+  text: z.string(),
+  /** 1 to 5. */
+  importance: z.number().int().optional(),
+})
+export type NewFact = z.infer<typeof newFact>
+
+/** What the owner changes of a fact: any of its text, tier and importance, at least one. */
+export const factChanges = newFact.partial()
+export type FactChanges = z.infer<typeof factChanges>
+
 export const screenStates = ['stopped', 'starting', 'running', 'crashed'] as const
 
 /** A bot's screen on the computer. */
@@ -481,6 +495,26 @@ export const contract = {
       .route({ method: 'GET', path: '/bots/{botId}/memory', summary: "The bot's bot memory, every fact, oldest first, including those its prompt leaves out" })
       .input(z.object({ botId: z.string() }))
       .output(z.array(fact)),
+    addFact: oc
+      .route({ method: 'POST', path: '/bots/{botId}/memory', summary: "Add a fact to the bot's bot memory, from the owner; the bot sees it on its next run" })
+      .input(newFact.extend({ botId: z.string() }))
+      .output(fact),
+    editFact: oc
+      .route({
+        method: 'PATCH',
+        path: '/bots/{botId}/memory/{factId}',
+        summary: "Change a fact of the bot's bot memory or of shared memory in place; every bot that sees it sees the change on its next run",
+      })
+      .input(factChanges.extend({ botId: z.string(), factId: z.coerce.number().int() }))
+      .output(fact),
+    deleteFact: oc
+      .route({
+        method: 'DELETE',
+        path: '/bots/{botId}/memory/{factId}',
+        summary: "Delete a fact of the bot's bot memory or of shared memory for good; it is gone from prompts on their next run",
+      })
+      .input(z.object({ botId: z.string(), factId: z.coerce.number().int() }))
+      .output(z.void()),
   },
   chats: {
     list: oc
@@ -648,6 +682,18 @@ export const contract = {
     list: oc
       .route({ method: 'GET', path: '/settings/shared-memory', summary: 'Shared memory, every fact, oldest first, including those prompts leave out' })
       .output(z.array(fact)),
+    add: oc
+      .route({ method: 'POST', path: '/settings/shared-memory', summary: 'Add a fact to shared memory, from the owner; every bot sees it on its next run' })
+      .input(newFact)
+      .output(fact),
+    edit: oc
+      .route({ method: 'PATCH', path: '/settings/shared-memory/{factId}', summary: 'Change a shared fact in place; every bot sees the change on its next run' })
+      .input(factChanges.extend({ factId: z.coerce.number().int() }))
+      .output(fact),
+    delete: oc
+      .route({ method: 'DELETE', path: '/settings/shared-memory/{factId}', summary: "Delete a shared fact for good; it is gone from every bot's prompt on its next run" })
+      .input(z.object({ factId: z.coerce.number().int() }))
+      .output(z.void()),
   },
   screens: {
     status: oc

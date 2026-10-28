@@ -32,7 +32,12 @@ import {
   mimeTypeOf,
   NameTakenError,
   listAuditEntries,
+  addOwnerFact,
+  deleteOwnerFact,
+  editOwnerFact,
+  InvalidFactError,
   listBotFacts,
+  NoSuchFactError,
   listSharedFacts,
   listBots,
   listMessages,
@@ -102,6 +107,20 @@ async function membersMustFit<T>(work: Promise<T>): Promise<T> {
     return await work
   } catch (error) {
     if (error instanceof GroupMembersError) throw new ORPCError('BAD_REQUEST', { message: error.message })
+    throw error
+  }
+}
+
+/**
+ * `work`'s result, with a fact the owner can't reach there answered as NOT_FOUND, alike whether it never existed, is
+ * gone or is another bot's, and a bad text or importance as BAD_REQUEST.
+ */
+async function factMustFit<T>(work: Promise<T>): Promise<T> {
+  try {
+    return await work
+  } catch (error) {
+    if (error instanceof NoSuchFactError) throw new ORPCError('NOT_FOUND', { message: 'No such fact' })
+    if (error instanceof InvalidFactError) throw new ORPCError('BAD_REQUEST', { message: error.message })
     throw error
   }
 }
@@ -275,6 +294,22 @@ export const router = os.router({
     memory: os.bots.memory.handler(async ({ context, input }) => {
       if (!(await getBot(context.db, input.botId))) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
       return (await listBotFacts(context.db, input.botId)).map(toFactInfo)
+    }),
+
+    addFact: os.bots.addFact.handler(async ({ context, input: { botId, ...fact } }) => {
+      await botMustExist(context, botId)
+      return toFactInfo(await factMustFit(addOwnerFact(context.db, { botId, ...fact }, context.clock.now())))
+    }),
+
+    // Through a bot's pane, the owner reaches what the bot does: its bot memory and shared memory.
+    editFact: os.bots.editFact.handler(async ({ context, input: { botId, factId, ...changes } }) => {
+      await botMustExist(context, botId)
+      return toFactInfo(await factMustFit(editOwnerFact(context.db, { botId }, factId, changes, context.clock.now())))
+    }),
+
+    deleteFact: os.bots.deleteFact.handler(async ({ context, input }) => {
+      await botMustExist(context, input.botId)
+      await factMustFit(deleteOwnerFact(context.db, { botId: input.botId }, input.factId))
     }),
   },
 
@@ -507,6 +542,16 @@ export const router = os.router({
 
   sharedMemory: {
     list: os.sharedMemory.list.handler(async ({ context }) => (await listSharedFacts(context.db)).map(toFactInfo)),
+
+    add: os.sharedMemory.add.handler(async ({ context, input }) => toFactInfo(await factMustFit(addOwnerFact(context.db, input, context.clock.now())))),
+
+    edit: os.sharedMemory.edit.handler(async ({ context, input: { factId, ...changes } }) =>
+      toFactInfo(await factMustFit(editOwnerFact(context.db, { scope: 'shared' }, factId, changes, context.clock.now()))),
+    ),
+
+    delete: os.sharedMemory.delete.handler(async ({ context, input }) => {
+      await factMustFit(deleteOwnerFact(context.db, { scope: 'shared' }, input.factId))
+    }),
   },
 
   general: {
