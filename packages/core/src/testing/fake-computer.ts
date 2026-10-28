@@ -351,6 +351,10 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
       async status(bot) {
         return status(bot.id)
       },
+      // Its browser is always open while its screen runs.
+      async openBrowser(bot) {
+        if (!screens.has(bot.id)) throw new Error(`${bot.name}'s screen isn't running`)
+      },
       async list() {
         return [...screens.keys()].map((botId) => ({ botId, ...status(botId) }))
       },

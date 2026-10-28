@@ -96,10 +96,11 @@ export function renderAxTree(nodes: AxNode[], ref: (backendNodeId: number) => st
 }
 
 /**
- * Each bot's own browser over the Chrome DevTools Protocol: the Chromium on its screen, whose DevTools listen on
- * `127.0.0.1:9222+display`. Clicks and typing are real input events, so the owner watching the screen sees them.
+ * Each bot's own browser over the Chrome DevTools Protocol: the Chrome on its screen, whose DevTools listen on
+ * `127.0.0.1:9222+display`, opened when a tool first needs it and again after the bot closed it. Clicks and typing are
+ * real input events, so the owner watching the screen sees them.
  */
-export function connectBrowser({ screens }: { screens: Pick<Screens, 'status'> }): Browser {
+export function connectBrowser({ screens }: { screens: Pick<Screens, 'status' | 'openBrowser'> }): Browser {
   const browsers = new Map<string, BotBrowser>()
 
   const connecting = new Map<string, Promise<BotBrowser>>()
@@ -125,6 +126,7 @@ export function connectBrowser({ screens }: { screens: Pick<Screens, 'status'> }
     browsers.get(bot.id)?.cdp.close()
     let cdp: Cdp
     try {
+      await screens.openBrowser(bot)
       cdp = await Cdp.connect(port)
     } catch (error) {
       throw new BrowserUnavailableError(`${bot.name}'s browser can't be reached: ${(error as Error).message}`)

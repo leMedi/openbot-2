@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { chmod, rm } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { Health, StartScreenRequest } from '@openbot/computer'
-import type { ScreenManager } from './screen-manager.ts'
+import { type ScreenManager, ScreenNotRunningError } from './screen-manager.ts'
 
 // Duplicated from @openbot/computer's protocol: the daemon imports nothing at runtime, so it starts before installs.
 const botIdPattern = /^[A-Za-z0-9_-]{1,128}$/
@@ -24,11 +24,21 @@ async function route(manager: ScreenManager, bootId: string, req: IncomingMessag
   const url = new URL(req.url ?? '/', 'http://desktopd')
   if (url.pathname === '/health' && req.method === 'GET') return send(res, 200, { ok: true, bootId } satisfies Health)
   if (url.pathname === '/screens' && req.method === 'GET') return send(res, 200, manager.list())
-  const match = /^\/screens\/([^/]+)(\/pids)?$/.exec(url.pathname)
+  const match = /^\/screens\/([^/]+)(\/pids|\/browser)?$/.exec(url.pathname)
   if (!match) return send(res, 404, { error: 'Not found' })
   const botId = decodeURIComponent(match[1]!)
   if (!botIdPattern.test(botId)) return send(res, 400, { error: `Invalid bot id ${botId}` })
-  if (match[2]) return req.method === 'GET' ? send(res, 200, manager.pids(botId)) : send(res, 405, { error: 'Method not allowed' })
+  if (match[2] === '/pids') return req.method === 'GET' ? send(res, 200, manager.pids(botId)) : send(res, 405, { error: 'Method not allowed' })
+  if (match[2] === '/browser') {
+    if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' })
+    try {
+      await manager.openBrowser(botId)
+    } catch (error) {
+      if (error instanceof ScreenNotRunningError) return send(res, 409, { error: error.message })
+      throw error
+    }
+    return send(res, 204)
+  }
   switch (req.method) {
     case 'GET':
       return send(res, 200, manager.status(botId))

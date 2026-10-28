@@ -1,0 +1,15 @@
+# Google Chrome as a bot opens it, from the dock or a link: the bot's own profile, its DevTools on for the browser
+# tools (openbot-browser). Installed under both of Chrome's desktop file names, ahead of the package's own.
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Google Chrome
+GenericName=Web Browser
+Comment=Access the Internet
+Exec=openbot-browser %U
+Icon=google-chrome
+Terminal=false
+StartupNotify=true
+StartupWMClass=Google-chrome
+Categories=Network;WebBrowser;
+MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;

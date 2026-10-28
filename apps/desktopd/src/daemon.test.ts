@@ -1,5 +1,6 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { connectScreens } from '@openbot/computer'
@@ -9,19 +10,36 @@ import { describeComputerContract } from '@openbot/core/testing'
 import { afterEach, describe, expect, it } from 'vitest'
 import { serve } from './http.ts'
 import { listening } from './programs.ts'
-import { type Program, ScreenManager, type ScreenSpec } from './screen-manager.ts'
+import { type App, type Program, ScreenManager, type ScreenSpec } from './screen-manager.ts'
 
-// The daemon with stand-in programs, on any machine: a process that idles as the display server, and one that greets
-// like a VNC server as the stream. The real programs run in the runtime image (computer.image.test.ts in the webapp).
+// The daemon with stand-in programs, on any machine: a process that idles as the display server, one that greets like
+// a VNC server as the stream, and one listening as the browser's DevTools. The real programs run in the runtime image
+// (computer.image.test.ts in the webapp).
 
 const streamPort = (display: number) => 41_000 + display
+const browserPort = (display: number) => 42_000 + display
 const idle = 'setInterval(() => {}, 1 << 30)'
+
+const until = async (check: () => Promise<boolean>) => {
+  while (!(await check())) await new Promise((resolve) => setTimeout(resolve, 20))
+}
+
+function browser({ display }: ScreenSpec): App {
+  const port = browserPort(display)
+  return {
+    name: 'browser',
+    command: process.execPath,
+    args: ['-e', `require('node:net').createServer((s) => s.end()).listen(${port}, '127.0.0.1')`],
+    ready: () => until(() => listening(port)),
+    open: () => listening(port),
+  }
+}
 
 function programs({ display }: ScreenSpec): Program[] {
   const port = streamPort(display)
   return [
     { name: 'display', command: process.execPath, args: ['-e', idle] },
-    { name: 'browser', command: process.execPath, args: ['-e', idle] },
+    { name: 'desktop', command: process.execPath, args: ['-e', idle] },
     {
       name: 'stream',
       command: process.execPath,
@@ -38,6 +56,7 @@ type Daemon = { dir: string; manager: ScreenManager; socketPath: string; close()
 async function startDaemon(dir: string): Promise<Daemon> {
   const manager = new ScreenManager({
     programs,
+    browser,
     streamPort,
     profile: (botId) => join(dir, 'bots', botId, 'chromium'),
     stateFile: join(dir, 'screens.json'),
@@ -111,12 +130,60 @@ describe('the screen daemon', () => {
     const before = { ...manager.status('rex') }
     const pids = manager.pids('rex')
 
-    kill(pids, ['browser'])
+    kill(pids, ['desktop'])
 
-    await expect.poll(() => manager.pids('rex').browser).not.toBe(pids.browser)
+    await expect.poll(() => manager.pids('rex').desktop).not.toBe(pids.desktop)
     await expect.poll(() => manager.status('rex').state).toBe('running')
     expect(manager.status('rex').startedAt).toBe(before.startedAt)
     expect(manager.pids('rex').display).toBe(pids.display)
+  })
+
+  it('opens the browser when asked, once, and again after it closed, without restarting the screen', async () => {
+    const daemon = await newDaemon()
+    const screens = connectScreens({ socketPath: daemon.socketPath })
+    const bot = { id: 'rex', name: 'Rex' }
+    await screens.start({ ...bot, display: 7 })
+    await expect.poll(async () => (await screens.status(bot)).state).toBe('running')
+    const startedAt = (await screens.status(bot)).startedAt
+    expect(daemon.manager.pids('rex').browser).toBeUndefined()
+
+    await Promise.all([screens.openBrowser(bot), screens.openBrowser(bot)])
+    const first = daemon.manager.pids('rex').browser
+    expect(first).toBeDefined()
+    expect(await listening(browserPort(7))).toBe(true)
+    await screens.openBrowser(bot)
+    expect(daemon.manager.pids('rex').browser).toBe(first)
+
+    kill(daemon.manager.pids('rex'), ['browser'])
+    await expect.poll(() => daemon.manager.pids('rex').browser).toBeUndefined()
+    expect(await screens.status(bot)).toMatchObject({ state: 'running', startedAt })
+
+    await screens.openBrowser(bot)
+    expect(daemon.manager.pids('rex').browser).not.toBe(first)
+    await screens.stop(bot)
+    expect(await listening(browserPort(7))).toBe(false)
+  })
+
+  it('leaves a browser opened another way, e.g. from the dock, as it is', async () => {
+    const daemon = await newDaemon()
+    const screens = connectScreens({ socketPath: daemon.socketPath })
+    const bot = { id: 'rex', name: 'Rex' }
+    await screens.start({ ...bot, display: 7 })
+    await expect.poll(async () => (await screens.status(bot)).state).toBe('running')
+    const opened = createServer((socket) => socket.end()).listen(browserPort(7), '127.0.0.1')
+    await until(() => listening(browserPort(7)))
+
+    await screens.openBrowser(bot)
+
+    expect(daemon.manager.pids('rex').browser).toBeUndefined()
+    opened.close()
+  })
+
+  it("can't open a browser on a screen that isn't running", async () => {
+    const daemon = await newDaemon()
+    const screens = connectScreens({ socketPath: daemon.socketPath })
+
+    await expect(screens.openBrowser({ id: 'rex', name: 'Rex' })).rejects.toThrow("The screen isn't running (stopped)")
   })
 
   it('brings its screens back when it starts again', async () => {

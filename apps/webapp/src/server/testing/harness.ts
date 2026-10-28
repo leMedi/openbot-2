@@ -30,6 +30,7 @@ function testScreens(screens: Screens): Screens {
     start: async (bot) => fromTest(await screens.start({ ...bot, display: bot.display + testDisplayOffset })),
     stop: (bot) => screens.stop(bot),
     status: async (bot) => fromTest(await screens.status(bot)),
+    openBrowser: (bot) => screens.openBrowser(bot),
     list: async () => (await screens.list()).filter((screen) => (screen.display ?? 0) > testDisplayOffset).map(fromTest),
     onRestart: (listener) => screens.onRestart(listener),
   }

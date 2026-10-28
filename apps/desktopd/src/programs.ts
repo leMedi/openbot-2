@@ -3,7 +3,7 @@ import { access, readFile, rm } from 'node:fs/promises'
 import { connect } from 'node:net'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
-import type { Program, ScreenSpec } from './screen-manager.ts'
+import type { App, Program, ScreenSpec } from './screen-manager.ts'
 
 // Grok's screen size; @openbot/core's `screenSize`.
 const width = 1280
@@ -57,16 +57,32 @@ const freshSocket = (socket: string, command: string[]) => ({
  */
 export const userNamespacesAllowed = () => new Promise<boolean>((resolve) => execFile('unshare', ['--user', 'true'], (error) => resolve(!error)))
 
+/** The bots' wallpaper, bundled in the image (docker/desktop/wallpaper.png): blue mountains, scaled to cover the screen. */
+const wallpaper = '/usr/share/openbot/wallpaper.png'
+
+/** What every program of the bot's screen runs in, and what it starts: its display, session bus and browser. */
+function screenEnv(home: string, { botId, display }: ScreenSpec, { sandbox }: { sandbox: boolean }): Record<string, string> {
+  return {
+    DISPLAY: `:${display}`,
+    HOME: home,
+    DBUS_SESSION_BUS_ADDRESS: `unix:path=${sessionBusSocket(display)}`,
+    // For openbot-browser, however Chrome is opened on the screen (docker/openbot-browser.sh).
+    OPENBOT_BROWSER_PROFILE: profileFolder(home, botId),
+    OPENBOT_BROWSER_SANDBOX: sandbox ? '1' : '0',
+  }
+}
+
 /**
- * A bot's screen: Xvfb at 1280×800, its own D-Bus session with an accessibility bus, Openbox, Google Chrome with the
- * bot's own profile in its folder, x11vnc serving the stream on localhost, and cua-driver for the desktop tools. Chrome
- * runs in its sandbox unless `sandbox` is false.
+ * A bot's screen: Xvfb at 1280×800, its own D-Bus session with an accessibility bus, Openbox, the desktop (a wallpaper
+ * under tint2's dock), x11vnc serving the stream on localhost, and cua-driver for the desktop tools. Its browser starts
+ * when it's needed (`screenBrowser`), or when the bot opens it.
  */
-export function screenPrograms(home: string, { sandbox }: { sandbox: boolean }): (screen: ScreenSpec) => Program[] {
-  return ({ botId, display }) => {
+export function screenPrograms(home: string, options: { sandbox: boolean }): (screen: ScreenSpec) => Program[] {
+  return (screen) => {
+    const { display } = screen
     const bus = sessionBusSocket(display)
     // Every program after the bus is in the screen's session, so apps on it (and Chrome) show up on its AT-SPI bus.
-    const env = { DISPLAY: `:${display}`, HOME: home, DBUS_SESSION_BUS_ADDRESS: `unix:path=${bus}` }
+    const env = screenEnv(home, screen, options)
     const driver = desktopDriverSocket(display)
     return [
       {
@@ -84,29 +100,8 @@ export function screenPrograms(home: string, { sandbox }: { sandbox: boolean }):
       // Starts the accessibility bus now and publishes it on the display (AT_SPI_BUS), where apps and cua-driver find it.
       { name: 'at-spi', command: '/usr/libexec/at-spi-bus-launcher', args: ['--launch-immediately'], env },
       { name: 'openbox', command: 'openbox', args: [], env },
-      {
-        name: 'chrome',
-        command: 'google-chrome',
-        args: [
-          `--user-data-dir=${profileFolder(home, botId)}`,
-          '--no-first-run',
-          '--no-default-browser-check',
-          '--password-store=basic',
-          '--disable-dev-shm-usage',
-          // Without user namespaces the container is the only boundary (ADR 0002); --test-type hides the warning bar.
-          ...(sandbox ? [] : ['--no-sandbox', '--test-type']),
-          // Restarted after a crash, it opens as it was, without asking to restore.
-          '--hide-crash-restore-bubble',
-          '--remote-debugging-address=127.0.0.1',
-          `--remote-debugging-port=${browserDebugPort(display)}`,
-          '--window-position=0,0',
-          `--window-size=${width},${height}`,
-          '--start-maximized',
-          'about:blank',
-        ],
-        env,
-        ready: () => until(() => listening(browserDebugPort(display)), 'the browser', 30_000),
-      },
+      // Sets the wallpaper, then shows the dock over it (docker/desktop/tint2rc), which maximized windows stay above.
+      { name: 'dock', command: 'sh', args: ['-c', 'hsetroot -cover "$1" && exec tint2 -c /etc/openbot/dock.tint2rc', 'dock', wallpaper], env },
       {
         name: 'x11vnc',
         command: 'x11vnc',
@@ -123,6 +118,25 @@ export function screenPrograms(home: string, { sandbox }: { sandbox: boolean }):
         ready: () => until(() => exists(driver), 'the desktop driver'),
       },
     ]
+  }
+}
+
+/**
+ * The bot's Google Chrome, opened on its screen when the browser tools need it (docker/openbot-browser.sh): its own
+ * profile, DevTools on 127.0.0.1:9222+N, in Chrome's sandbox unless `sandbox` is false. Already open when its DevTools
+ * answer, however it was opened.
+ */
+export function screenBrowser(home: string, options: { sandbox: boolean }): (screen: ScreenSpec) => App {
+  return (screen) => {
+    const port = browserDebugPort(screen.display)
+    return {
+      name: 'chrome',
+      command: 'openbot-browser',
+      args: ['about:blank'],
+      env: screenEnv(home, screen, options),
+      ready: () => until(() => listening(port), 'the browser', 30_000),
+      open: () => listening(port),
+    }
   }
 }
 

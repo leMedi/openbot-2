@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 # OpenBot's one container (ADR 0002): the server, every bot's screen and the bots' shell on one computer.
-#   runtime  what users run: Debian, Node, Google Chrome, Xvfb, Openbox, x11vnc + websockify, AT-SPI, cua-driver, supervisord,
+#   runtime  what users run: Debian, Node, Google Chrome, Xvfb, Openbox, tint2, Thunar, x11vnc + websockify, AT-SPI, cua-driver,
+#            supervisord,
 #            and the release it was built with (design §2.4)
 #   dev      the same system plus the toolchain, without a release; docker/compose.dev.yml runs the bind-mounted repo
 #            with hot reload
@@ -90,6 +91,7 @@ RUN apt-get update \
       xvfb openbox x11vnc websockify xdotool x11-utils dbus-x11 \
       fonts-liberation fonts-noto-color-emoji \
       at-spi2-core mousepad \
+      hsetroot tint2 thunar \
       google-chrome-stable \
  && google-chrome --version \
  && rm -rf /var/lib/apt/lists/*
@@ -104,6 +106,17 @@ RUN cua-driver --version
 # session?": it never restores one.
 RUN printf "[org.xfce.mousepad.preferences.file]\nsession-restore='never'\n" > /usr/share/glib-2.0/schemas/90_openbot.gschema.override \
  && "$(find /usr/lib -type f -name glib-compile-schemas | head -n 1)" /usr/share/glib-2.0/schemas
+
+# Bots' desktop (design §4): a wallpaper (blue mountains) and tint2's dock with Files (Thunar), Chrome and Mousepad. The dock draws over a
+# copy of the wallpaper: Xvfb shows no compositor's work in its framebuffer, so a dock needing one (Plank) shows black.
+# Chrome, however it's opened (the browser tools, the dock, a link), runs through openbot-browser with the bot's profile
+# and DevTools, under both of its desktop file names; links open in it and folders in Thunar.
+COPY desktop/tint2rc /etc/openbot/dock.tint2rc
+COPY desktop/wallpaper.png /usr/share/openbot/wallpaper.png
+COPY desktop/google-chrome.desktop /usr/local/share/applications/google-chrome.desktop
+COPY desktop/google-chrome.desktop /usr/local/share/applications/com.google.Chrome.desktop
+COPY desktop/mimeapps.list /etc/xdg/mimeapps.list
+COPY openbot-browser.sh /usr/local/bin/openbot-browser
 
 # Node from nodejs.org, checked against its published SHA-256.
 RUN case "${TARGETARCH}" in amd64) arch=x64 ;; arm64) arch=arm64 ;; *) echo "unsupported arch ${TARGETARCH}" >&2; exit 1 ;; esac \

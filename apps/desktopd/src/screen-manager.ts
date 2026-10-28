@@ -13,11 +13,25 @@ export type Program = {
   ready?(): Promise<void>
 }
 
+/**
+ * A program a screen opens when it's needed rather than keeps running, e.g. its browser: it may close, or have been
+ * opened another way (by the bot, from the dock), without the screen restarting.
+ */
+export type App = Program & {
+  /** Whether it is open, however it was opened. */
+  open(): Promise<boolean>
+}
+
 export type ScreenSpec = { botId: string; display: number }
+
+/** The bot's screen isn't running, so nothing can be opened on it. */
+export class ScreenNotRunningError extends Error {}
 
 export type ScreenManagerOptions = {
   /** The processes of a screen, display server first: when it dies, the whole screen restarts. */
   programs(screen: ScreenSpec): Program[]
+  /** The screen's browser, opened by `openBrowser`. */
+  browser?(screen: ScreenSpec): App
   /** The local port of the screen's stream. */
   streamPort(display: number): number
   /** The bot's browser profile folder, made before its screen starts; deleted when the screen is stopped for good. */
@@ -34,13 +48,17 @@ const restartDelaysMs = [250, 500, 1_000, 2_000, 5_000, 10_000]
 const stableAfterMs = 60_000
 const stopGraceMs = 3_000
 
-type Running = { program: Program; child: ChildProcess; exited: Promise<void>; done: boolean; killed: boolean }
+type Running = { program: Program; child: ChildProcess; exited: Promise<void>; done: boolean; killed: boolean; supervised: boolean }
 
 class Screen {
   state: ScreenState = 'starting'
   startedAt = Date.now()
   readonly #options: ScreenManagerOptions
   #processes: Running[] = []
+  /** The apps it opened, which close without the screen restarting. */
+  #apps: Running[] = []
+  /** The browser being opened, which a second call waits for. */
+  #openingBrowser: Promise<void> | undefined
   #stopping = false
   #crashes = 0
   #lastCrash = 0
@@ -67,7 +85,23 @@ class Screen {
 
   /** The processes' ids, for diagnostics and tests. */
   pids(): Record<string, number | undefined> {
-    return Object.fromEntries(this.#processes.filter((entry) => !entry.done).map((entry) => [entry.program.name, entry.child.pid]))
+    const alive = [...this.#processes, ...this.#apps].filter((entry) => !entry.done)
+    return Object.fromEntries(alive.map((entry) => [entry.program.name, entry.child.pid]))
+  }
+
+  /** Opens the screen's browser unless it is open; resolves once it is up. */
+  openBrowser(): Promise<void> {
+    this.#openingBrowser ??= this.#openBrowser().finally(() => (this.#openingBrowser = undefined))
+    return this.#openingBrowser
+  }
+
+  async #openBrowser(): Promise<void> {
+    if (this.state !== 'running') throw new ScreenNotRunningError(`The screen isn't running (${this.state})`)
+    const browser = this.#options.browser?.(this.spec)
+    if (!browser) throw new Error('This screen has no browser')
+    if (await browser.open()) return
+    this.#apps = this.#apps.filter((entry) => !entry.done)
+    await this.#launch(browser, { supervised: false })
   }
 
   /** Starts every program in order, waiting for each to be ready. */
@@ -88,28 +122,29 @@ class Screen {
     }
   }
 
-  async #launch(program: Program): Promise<void> {
+  /** Starts `program`; a supervised one that exits is a crash, after which it restarts. */
+  async #launch(program: Program, { supervised = true } = {}): Promise<void> {
     const child = spawn(program.command, program.args, {
       env: { ...process.env, ...program.env },
       // Its own process group, so stopping it also stops what it started (Chrome's many processes).
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
-    const entry: Running = { program, child, done: false, killed: false, exited: Promise.resolve() }
+    const entry: Running = { program, child, done: false, killed: false, supervised, exited: Promise.resolve() }
     entry.exited = new Promise((resolve) => {
       child.once('exit', (code, signal) => {
         entry.done = true
         resolve()
         if (this.#stopping || entry.killed) return
         this.#log(`${program.name} exited (${signal ?? code})`)
-        this.#crashed()
+        if (supervised) this.#crashed()
       })
       child.once('error', (error) => {
         this.#log(`${program.name} failed: ${error.message}`)
         if (child.pid === undefined) {
           entry.done = true
           resolve()
-          if (!this.#stopping) this.#crashed()
+          if (!this.#stopping && supervised) this.#crashed()
         }
       })
     })
@@ -119,7 +154,8 @@ class Screen {
     }
     child.stdout?.on('data', relay)
     child.stderr?.on('data', relay)
-    this.#processes.push(entry)
+    if (supervised) this.#processes.push(entry)
+    else this.#apps.push(entry)
     if (program.ready) {
       await Promise.race([
         program.ready(),
@@ -164,6 +200,7 @@ class Screen {
       this.#log('restarting the screen')
       await this.#killAll()
       this.#processes = []
+      this.#apps = []
       await this.boot()
       return
     }
@@ -182,7 +219,7 @@ class Screen {
   }
 
   async #killAll(): Promise<void> {
-    const alive = this.#processes.filter((entry) => !entry.done)
+    const alive = [...this.#processes, ...this.#apps].filter((entry) => !entry.done)
     for (const entry of alive) {
       entry.killed = true
       signal(entry.child, 'SIGTERM')
@@ -252,6 +289,13 @@ export class ScreenManager {
 
   pids(botId: string): Record<string, number | undefined> {
     return this.#screens.get(botId)?.pids() ?? {}
+  }
+
+  /** Opens the bot's browser on its screen unless it is open; a `ScreenNotRunningError` when the screen isn't running. */
+  openBrowser(botId: string): Promise<void> {
+    const screen = this.#screens.get(botId)
+    if (!screen) return Promise.reject(new ScreenNotRunningError("The screen isn't running (stopped)"))
+    return screen.openBrowser()
   }
 
   /** Starts the bot's screen at `display` without waiting for it to be up, or keeps it if it already runs there. */

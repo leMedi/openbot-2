@@ -2,6 +2,9 @@ import { request } from 'node:http'
 import type { ComputerBot, ScreenBot, ScreenListing, Screens, ScreenStatus } from '@openbot/core'
 import { bootHeader, type DaemonError, type Health, type StartScreenRequest } from './protocol.ts'
 
+/** How long the daemon may take to open a bot's browser: its own wait for Chrome, and some. */
+const browserOpenTimeout = 40_000
+
 /** The screen daemon couldn't be reached or refused a request. */
 export class ScreenDaemonError extends Error {}
 
@@ -19,7 +22,7 @@ export function connectScreens({
   timeout?: number
   checkEvery?: number
 }): Screens {
-  function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  function call<T>(method: string, path: string, body?: unknown, { wait = timeout }: { wait?: number } = {}): Promise<T> {
     return new Promise((resolve, reject) => {
       const payload = body === undefined ? undefined : JSON.stringify(body)
       const req = request(
@@ -27,7 +30,7 @@ export function connectScreens({
           socketPath,
           method,
           path,
-          timeout,
+          timeout: wait,
           headers: payload ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) } : {},
         },
         (res) => {
@@ -102,6 +105,10 @@ export function connectScreens({
       await call<void>('DELETE', path(bot))
     },
     status: (bot) => call<ScreenStatus>('GET', path(bot)),
+    openBrowser: async (bot) => {
+      // Chrome can take a while to start, more than other calls are given.
+      await call<void>('POST', `${path(bot)}/browser`, undefined, { wait: Math.max(timeout, browserOpenTimeout) })
+    },
     list: () => call<ScreenListing[]>('GET', '/screens'),
     onRestart(listener) {
       // Its own entry, so one listener added twice is told twice and removed once.

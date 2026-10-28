@@ -3,7 +3,7 @@
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { serve } from './http.ts'
-import { clearDisplay, profileFolder, screenPrograms, streamPort, userNamespacesAllowed } from './programs.ts'
+import { clearDisplay, profileFolder, screenBrowser, screenPrograms, streamPort, userNamespacesAllowed } from './programs.ts'
 import { ScreenManager } from './screen-manager.ts'
 
 const home = resolve(process.env.OPENBOT_HOME || homedir())
@@ -15,6 +15,7 @@ if (!sandbox) log("this host doesn't allow user namespaces: bots' browsers run w
 
 const manager = new ScreenManager({
   programs: screenPrograms(home, { sandbox }),
+  browser: screenBrowser(home, { sandbox }),
   streamPort,
   profile: (botId) => profileFolder(home, botId),
   cleanup: clearDisplay,

@@ -211,6 +211,8 @@ describe.skipIf(!inRuntimeImage)('bots on the real computer', () => {
     }
     // Displays from the test harness's offset, 500 up: the browser's DevTools port is 9222 + display.
     const [rexDisplay, adaDisplay] = await Promise.all([rex, ada].map(async (bot) => (await connectScreens({ socketPath }).status(bot)).display!))
+    // Screens start without a browser: the browser tools open it.
+    await Promise.all([rex, ada].map((bot) => connectScreens({ socketPath }).openBrowser(bot)))
 
     await devtools(9222 + rexDisplay!, 'Storage.setCookies', {
       cookies: [{ name: 'session', value: 'rex-is-signed-in', domain: 'example.com', path: '/', expires: Date.now() / 1000 + 3600 }],
@@ -229,6 +231,7 @@ describe.skipIf(!inRuntimeImage)('bots on the real computer', () => {
     const rex = await server.client.bots.create(newBot('Rex'))
     await expect.poll(async () => (await server.client.screens.status({ botId: rex.id })).state, { timeout: 60_000 }).toBe('running')
     const display = (await connectScreens({ socketPath }).status(rex)).display!
+    await connectScreens({ socketPath }).openBrowser(rex)
     // The sandbox needs user namespaces, which some hosts' Docker keeps from containers (GitHub's Ubuntu runners do).
     let userNamespaces = true
     try {
@@ -246,6 +249,26 @@ describe.skipIf(!inRuntimeImage)('bots on the real computer', () => {
     } else {
       expect(report).toContain('You are NOT adequately sandboxed.')
     }
+  })
+
+  it('get a desktop with the dock, and their browser only once it is needed, opened again after they close it', { timeout: 120_000 }, async () => {
+    const server = await start()
+    const rex = await server.client.bots.create(newBot('Rex'))
+    await expect.poll(async () => (await server.client.screens.status({ botId: rex.id })).state, { timeout: 60_000 }).toBe('running')
+    const screens = connectScreens({ socketPath })
+    const { display, startedAt } = await screens.status(rex)
+    expect(Object.keys(await screenPids(rex.id))).toEqual(expect.arrayContaining(['dock']))
+    expect(await screenPids(rex.id)).not.toHaveProperty('chrome')
+
+    await screens.openBrowser(rex)
+    const chrome = (await screenPids(rex.id)).chrome!
+    expect(await devtools(9222 + display!, 'Browser.getVersion')).toMatchObject({ product: expect.stringContaining('Chrome') })
+    execFileSync('sudo', ['--non-interactive', `--user=${botUser}`, 'kill', '-KILL', '--', `-${chrome}`])
+    await expect.poll(async () => (await screenPids(rex.id)).chrome).toBeUndefined()
+    expect(await screens.status(rex)).toMatchObject({ state: 'running', startedAt })
+
+    await screens.openBrowser(rex)
+    expect((await screenPids(rex.id)).chrome).not.toBe(chrome)
   })
 
   it('stream their screen on a ticket', { timeout: 120_000 }, async () => {

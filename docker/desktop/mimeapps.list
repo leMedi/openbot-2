@@ -1,0 +1,7 @@
+# What opens links and folders on bots' screens: the bot's Chrome and Thunar.
+[Default Applications]
+text/html=google-chrome.desktop
+application/xhtml+xml=google-chrome.desktop
+x-scheme-handler/http=google-chrome.desktop
+x-scheme-handler/https=google-chrome.desktop
+inode/directory=thunar.desktop

@@ -140,6 +140,11 @@ export interface Screens {
   /** Stops the bot's screen and deletes its browser profile. */
   stop(bot: ComputerBot): Promise<void>
   status(bot: ComputerBot): Promise<ScreenStatus>
+  /**
+   * Opens the bot's browser on its running screen unless it is open (screens start without one), resolving once it can
+   * be driven; throws when the screen isn't running.
+   */
+  openBrowser(bot: ComputerBot): Promise<void>
   /** Every screen being kept running. */
   list(): Promise<ScreenListing[]>
   /**
