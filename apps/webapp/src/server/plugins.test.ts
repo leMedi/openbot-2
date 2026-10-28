@@ -1,39 +1,17 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { type FakeMcpServer, startFakeMcpServer } from '@openbot/agent/testing'
+import { readFile, readdir, stat } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { SignInStep } from '@openbot/api-contract'
-import { afterEach, describe, expect, it, vi } from 'vitest'
 import { systemCredentials } from '@openbot/db'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createTestServer, restartTestServer, type TestServer } from './testing/harness.ts'
+import { closePluginFixtures, connectAccount, type FixturePlugin, hostedPlugin, privateOrigin, writeCatalog } from './testing/plugins.ts'
 
 const servers: TestServer[] = []
-const folders: string[] = []
-const fakes: FakeMcpServer[] = []
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()))
-  await Promise.all(fakes.splice(0).map((fake) => fake.close()))
-  await Promise.all(folders.splice(0).map((folder) => rm(folder, { recursive: true, force: true })))
+  await closePluginFixtures()
   vi.restoreAllMocks()
 })
-
-/** A plugin folder's files, by path from its root; objects are written as JSON. */
-type FixturePlugin = Record<string, string | object>
-
-/** Writes a catalog of `plugins`, by folder name, into a temporary folder; returns it. */
-async function writeCatalog(plugins: Record<string, FixturePlugin>, into?: string): Promise<string> {
-  const catalog = into ?? (await mkdtemp(join(tmpdir(), 'openbot-catalog-')))
-  if (!into) folders.push(catalog)
-  await rm(catalog, { recursive: true, force: true })
-  for (const [folder, files] of Object.entries(plugins)) {
-    for (const [path, content] of Object.entries(files)) {
-      const file = join(catalog, folder, path)
-      await mkdir(dirname(file), { recursive: true })
-      await writeFile(file, typeof content === 'string' ? content : JSON.stringify(content))
-    }
-  }
-  return catalog
-}
 
 const skill = (name: string, description: string, body = 'Use it well.') => `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}\n`
 
@@ -215,44 +193,6 @@ describe("plugins' skills", () => {
     expect(await readdir(join(plugins, 'notes', 'skills', 'notes-search'))).toEqual(['SKILL.md'])
   })
 })
-
-/** A hosted plugin served by a fake MCP server behind its own OAuth authorization server; returns both. */
-async function hostedPlugin(name = 'notes') {
-  const fake = await startFakeMcpServer()
-  fakes.push(fake)
-  const plugin: FixturePlugin = {
-    '.claude-plugin/plugin.json': { name, displayName: 'Notes', description: 'Your notes workspace' },
-    '.mcp.json': { mcpServers: { [name]: { type: 'http', url: fake.url } } },
-  }
-  return { fake, plugin }
-}
-
-/** The instance as the owner opens it on their private network, over plain HTTP: sign-ins end in a pasted URL. */
-const privateOrigin = 'http://192.168.1.25:3000'
-
-/**
- * Connects an account of `name` as the owner would from the page at `origin`, signing in on the fake as `user`: the
- * browser returns to the callback route, or the owner pastes the URL it ends on. Returns every step.
- */
-async function connectAccount(server: TestServer, fake: FakeMcpServer, { name = 'notes', origin = privateOrigin, user = 'owner' } = {}) {
-  const steps: SignInStep[] = []
-  let signInId = ''
-  let endsOn = ''
-  for await (const step of await server.client.plugins.connect({ name, origin })) {
-    steps.push(step)
-    if (step.type === 'started') signInId = step.signInId
-    if (step.type === 'auth_url') {
-      endsOn = await fake.authorize(step.url, { user })
-      if (endsOn.startsWith(origin)) {
-        const back = await server.fetch(endsOn.slice(origin.length), { redirect: 'manual' })
-        expect(back.status).toBe(303)
-        expect(back.headers.get('location')).toBe(`/settings/plugins/${name}`)
-      }
-    }
-    if (step.type === 'prompt') await server.client.plugins.answer({ signInId, promptId: step.promptId, value: endsOn })
-  }
-  return steps
-}
 
 describe('plugin accounts', () => {
   it('connect through the URL the owner pastes when the instance is on a private network over plain HTTP', async () => {

@@ -72,6 +72,25 @@ import { toAuditEntryInfo, toBotInfo, toFactInfo, toMessageInfo, toPluginAccount
 
 const os = implement(contract).$context<ServerContext>()
 
+/** An error a domain function throws, answered as an API error by `answering`. */
+type ErrorClass = abstract new (...args: never[]) => Error
+
+type ErrorCode = ConstructorParameters<typeof ORPCError>[0]
+
+/**
+ * `work`'s result, with an error of a class in `answers` thrown as an API error with its code, and with its own message
+ * unless the answer gives one (e.g. one alike for a fact that never existed and another bot's).
+ */
+async function answering<T>(work: () => T | Promise<T>, answers: [ErrorClass, ErrorCode, message?: string][]): Promise<T> {
+  try {
+    return await work()
+  } catch (error) {
+    const answer = answers.find(([kind]) => error instanceof kind)
+    if (answer) throw new ORPCError(answer[1], { message: answer[2] ?? (error as Error).message })
+    throw error
+  }
+}
+
 /** The catalog's plugin named `name`, or NOT_FOUND. */
 function pluginMustExist(context: ServerContext, name: string) {
   const plugin = context.plugins.find((entry) => entry.name === name)
@@ -83,26 +102,17 @@ function pluginMustExist(context: ServerContext, name: string) {
 const pluginCallbackPath = '/api/plugins/oauth/callback'
 
 /** `work`'s result, with a missing plugin account answered as NOT_FOUND and a refused name as BAD_REQUEST. */
-async function accountMustExist<T>(work: Promise<T>): Promise<T> {
-  try {
-    return await work
-  } catch (error) {
-    if (error instanceof PluginAccountNotFoundError) throw new ORPCError('NOT_FOUND', { message: error.message })
-    if (error instanceof InvalidAccountNameError) throw new ORPCError('BAD_REQUEST', { message: error.message })
-    throw error
-  }
-}
+const accountMustExist = <T>(work: Promise<T>) =>
+  answering(() => work, [
+    [PluginAccountNotFoundError, 'NOT_FOUND'],
+    [InvalidAccountNameError, 'BAD_REQUEST'],
+  ])
 
 /** Writes the owner's time zone with `write`, refusing an invalid one; a change is published for scheduled jobs. */
 async function setTimeZone(context: ServerContext, write: () => Promise<TimeZoneWrite>) {
-  try {
-    const { timeZone, changed } = await write()
-    if (changed) context.bus.publish({ type: 'timeZone.updated', timeZone })
-    return { timeZone }
-  } catch (error) {
-    if (error instanceof InvalidTimeZoneError) throw new ORPCError('BAD_REQUEST', { message: error.message })
-    throw error
-  }
+  const { timeZone, changed } = await answering(write, [[InvalidTimeZoneError, 'BAD_REQUEST']])
+  if (changed) context.bus.publish({ type: 'timeZone.updated', timeZone })
+  return { timeZone }
 }
 
 /** Throws unless the bot's model can run, so the owner's input is never left without a bot to answer it. */
@@ -116,52 +126,30 @@ async function assertCanRun(context: ServerContext, bot: BotWithChat) {
 }
 
 /** `work`'s result, with a missing chat answered as NOT_FOUND. */
-async function chatMustExist<T>(work: Promise<T>): Promise<T> {
-  try {
-    return await work
-  } catch (error) {
-    if (error instanceof ChatNotFoundError) throw new ORPCError('NOT_FOUND', { message: error.message })
-    throw error
-  }
-}
+const chatMustExist = <T>(work: Promise<T>) => answering(() => work, [[ChatNotFoundError, 'NOT_FOUND']])
 
 /** `work`'s result, with members a group chat can't have answered as BAD_REQUEST. */
-async function membersMustFit<T>(work: Promise<T>): Promise<T> {
-  try {
-    return await work
-  } catch (error) {
-    if (error instanceof GroupMembersError) throw new ORPCError('BAD_REQUEST', { message: error.message })
-    throw error
-  }
-}
+const membersMustFit = <T>(work: Promise<T>) => answering(() => work, [[GroupMembersError, 'BAD_REQUEST']])
 
 /**
  * `work`'s result, with a fact the owner can't reach there answered as NOT_FOUND, alike whether it never existed, is
  * gone or is another bot's, and a bad text or importance as BAD_REQUEST.
  */
-async function factMustFit<T>(work: Promise<T>): Promise<T> {
-  try {
-    return await work
-  } catch (error) {
-    if (error instanceof NoSuchFactError) throw new ORPCError('NOT_FOUND', { message: 'No such fact' })
-    if (error instanceof InvalidFactError) throw new ORPCError('BAD_REQUEST', { message: error.message })
-    throw error
-  }
-}
+const factMustFit = <T>(work: Promise<T>) =>
+  answering(() => work, [
+    [NoSuchFactError, 'NOT_FOUND', 'No such fact'],
+    [InvalidFactError, 'BAD_REQUEST'],
+  ])
 
 /**
  * `work`'s result, with a routine the owner can't reach through this bot answered as NOT_FOUND, alike whether it never
  * existed, is gone or is another bot's, and a bad name, instruction or schedule, or one routine too many, as BAD_REQUEST.
  */
-async function routineMustFit<T>(work: Promise<T>): Promise<T> {
-  try {
-    return await work
-  } catch (error) {
-    if (error instanceof NoSuchRoutineError) throw new ORPCError('NOT_FOUND', { message: 'No such routine' })
-    if (error instanceof InvalidRoutineError) throw new ORPCError('BAD_REQUEST', { message: error.message })
-    throw error
-  }
-}
+const routineMustFit = <T>(work: Promise<T>) =>
+  answering(() => work, [
+    [NoSuchRoutineError, 'NOT_FOUND', 'No such routine'],
+    [InvalidRoutineError, 'BAD_REQUEST'],
+  ])
 
 /** Tells every tab how the group chats `botId` is in look now, e.g. named after it as it was renamed. */
 async function publishGroupsOf(context: ServerContext, botId: string) {
@@ -264,38 +252,28 @@ export const router = os.router({
       if (input.model !== null && !(await context.providers.findModel(input.model))) {
         throw new ORPCError('BAD_REQUEST', { message: `${input.model} is not a model of a connected provider` })
       }
-      try {
-        const created = await createBot(context.db, input)
-        // The bot exists whether or not the computer can be reached; its screen starts with the server otherwise.
-        await startScreen(context.db, context.screens, created).catch((error) =>
-          console.error(`[screens] Couldn't start ${created.name}'s screen:`, error),
-        )
-        const bot = toBotInfo(created, { working: false, error: null })
-        context.bus.publish({ type: 'bot.created', bot })
-        await publishChat(context, bot.chatId)
-        return bot
-      } catch (error) {
-        if (error instanceof NameTakenError) throw new ORPCError('CONFLICT', { message: error.message })
-        throw error
-      }
+      const created = await answering(() => createBot(context.db, input), [[NameTakenError, 'CONFLICT']])
+      // The bot exists whether or not the computer can be reached; its screen starts with the server otherwise.
+      await startScreen(context.db, context.screens, created).catch((error) =>
+        console.error(`[screens] Couldn't start ${created.name}'s screen:`, error),
+      )
+      const bot = toBotInfo(created, { working: false, error: null })
+      context.bus.publish({ type: 'bot.created', bot })
+      await publishChat(context, bot.chatId)
+      return bot
     }),
 
     update: os.bots.update.handler(async ({ context, input: { botId, ...changes } }) => {
       if (changes.model != null && !(await context.providers.findModel(changes.model))) {
         throw new ORPCError('BAD_REQUEST', { message: `${changes.model} is not a model of a connected provider` })
       }
-      try {
-        const updated = await updateBot(context.db, botId, changes)
-        if (!updated) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
-        const bot = toBotInfo(updated, context.runtime.status(botId))
-        context.bus.publish({ type: 'bot.updated', bot })
-        // Groups not renamed by the owner are named after their members.
-        if (changes.name !== undefined) await publishGroupsOf(context, botId)
-        return bot
-      } catch (error) {
-        if (error instanceof NameTakenError) throw new ORPCError('CONFLICT', { message: error.message })
-        throw error
-      }
+      const updated = await answering(() => updateBot(context.db, botId, changes), [[NameTakenError, 'CONFLICT']])
+      if (!updated) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
+      const bot = toBotInfo(updated, context.runtime.status(botId))
+      context.bus.publish({ type: 'bot.updated', bot })
+      // Groups not renamed by the owner are named after their members.
+      if (changes.name !== undefined) await publishGroupsOf(context, botId)
+      return bot
     }),
 
     delete: os.bots.delete.handler(async ({ context, input }) => {
@@ -473,16 +451,11 @@ export const router = os.router({
       const bot = asked?.authorBotId ? await getBot(context.db, asked.authorBotId) : undefined
       if (!asked?.card || !bot) throw new ORPCError('NOT_FOUND', { message: 'No such question' })
       await assertCanRun(context, bot)
-      let answered
-      try {
-        answered = await answerQuestion(context.db, input.messageId, input.answer)
-      } catch (error) {
-        if (error instanceof QuestionNotFoundError) throw new ORPCError('NOT_FOUND', { message: error.message })
-        if (error instanceof QuestionAnsweredError) throw new ORPCError('CONFLICT', { message: error.message })
-        if (error instanceof InvalidAnswerError) throw new ORPCError('BAD_REQUEST', { message: error.message })
-        throw error
-      }
-      const { message, card, answer } = answered
+      const { message, card, answer } = await answering(() => answerQuestion(context.db, input.messageId, input.answer), [
+        [QuestionNotFoundError, 'NOT_FOUND'],
+        [QuestionAnsweredError, 'CONFLICT'],
+        [InvalidAnswerError, 'BAD_REQUEST'],
+      ])
       const info = toMessageInfo(message)
       context.bus.publish({ type: 'message.updated', message: info })
       await publishChat(context, message.chatId)
@@ -502,14 +475,10 @@ export const router = os.router({
     }),
 
     dismiss: os.chats.dismiss.handler(async ({ context, input }) => {
-      let dismissed
-      try {
-        dismissed = await dismissQuestion(context.db, input.messageId)
-      } catch (error) {
-        if (error instanceof QuestionNotFoundError) throw new ORPCError('NOT_FOUND', { message: error.message })
-        if (error instanceof QuestionAnsweredError) throw new ORPCError('CONFLICT', { message: error.message })
-        throw error
-      }
+      const dismissed = await answering(() => dismissQuestion(context.db, input.messageId), [
+        [QuestionNotFoundError, 'NOT_FOUND'],
+        [QuestionAnsweredError, 'CONFLICT'],
+      ])
       // The bot isn't woken: its next run lists the question as unanswered.
       const info = toMessageInfo(dismissed)
       context.bus.publish({ type: 'message.updated', message: info })
@@ -522,15 +491,10 @@ export const router = os.router({
       const bot = asked?.authorBotId ? await getBot(context.db, asked.authorBotId) : undefined
       if (!asked?.card || !bot) throw new ORPCError('NOT_FOUND', { message: 'No such take-over' })
       await assertCanRun(context, bot)
-      let handed
-      try {
-        handed = await handBack(context.db, input.messageId, input.outcome)
-      } catch (error) {
-        if (error instanceof TakeOverNotFoundError) throw new ORPCError('NOT_FOUND', { message: error.message })
-        if (error instanceof HandedBackError) throw new ORPCError('CONFLICT', { message: error.message })
-        throw error
-      }
-      const { message, card } = handed
+      const { message, card } = await answering(() => handBack(context.db, input.messageId, input.outcome), [
+        [TakeOverNotFoundError, 'NOT_FOUND'],
+        [HandedBackError, 'CONFLICT'],
+      ])
       const info = toMessageInfo(message)
       context.bus.publish({ type: 'message.updated', message: info })
       await publishChat(context, message.chatId)
@@ -590,14 +554,9 @@ export const router = os.router({
       yield* context.providers.signIn(input.providerId, input.method, signal)
     }),
 
-    answer: os.providers.answer.handler(({ context, input }) => {
-      try {
-        context.providers.answer(input.signInId, input.promptId, input.value)
-      } catch (error) {
-        if (error instanceof SignInNotFoundError) throw new ORPCError('NOT_FOUND', { message: error.message })
-        throw error
-      }
-    }),
+    answer: os.providers.answer.handler(({ context, input }) =>
+      answering(() => context.providers.answer(input.signInId, input.promptId, input.value), [[SignInNotFoundError, 'NOT_FOUND']]),
+    ),
 
     disconnect: os.providers.disconnect.handler(({ context, input }) => context.providers.disconnect(input.providerId)),
   },
@@ -633,15 +592,12 @@ export const router = os.router({
       yield* context.pluginAccounts.connect(connectable, new URL(pluginCallbackPath, input.origin), signal)
     }),
 
-    answer: os.plugins.answer.handler(({ context, input }) => {
-      try {
-        context.pluginAccounts.answer(input.signInId, input.promptId, input.value)
-      } catch (error) {
-        if (error instanceof SignInNotFoundError) throw new ORPCError('NOT_FOUND', { message: error.message })
-        if (error instanceof InvalidRedirectError) throw new ORPCError('BAD_REQUEST', { message: error.message })
-        throw error
-      }
-    }),
+    answer: os.plugins.answer.handler(({ context, input }) =>
+      answering(() => context.pluginAccounts.answer(input.signInId, input.promptId, input.value), [
+        [SignInNotFoundError, 'NOT_FOUND'],
+        [InvalidRedirectError, 'BAD_REQUEST'],
+      ]),
+    ),
 
     oauthCallback: os.plugins.oauthCallback.handler(({ context, input }) => {
       const response = new URLSearchParams(Object.entries(input).filter((entry): entry is [string, string] => entry[1] !== undefined))

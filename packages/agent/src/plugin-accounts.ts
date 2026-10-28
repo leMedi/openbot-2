@@ -1,7 +1,8 @@
 import { authorizeMcp, McpOAuthProvider, type McpOAuthState, type McpOAuthStateStore, MemoryOAuthStateStore } from '@earendil-works/pi-mcp/oauth'
 import type { SecretBox } from '@openbot/core'
-import { type Db, type PluginAccount, pluginAccounts, systemCredentials } from '@openbot/db'
+import { type Db, type PluginAccount, pluginAccounts } from '@openbot/db'
 import { and, asc, count, eq, isNull } from 'drizzle-orm'
+import { SealedCredentials } from './credential-store.ts'
 import { SignInNotFoundError, type SignInStep, stepQueue } from './sign-in.ts'
 
 /** A connected account of a plugin, as Settings → Plugins lists it. Never carries its tokens. */
@@ -30,39 +31,27 @@ const toSummary = ({ plugin, slug, displayName, connectedAt }: PluginAccount): P
 
 const credentialKey = (plugin: string, slug: string) => `plugin:${plugin}:${slug}`
 
-/** An account's OAuth state (client, tokens, discovery) in the encrypted `system_credentials` table (ADR 0006). */
+/** An account's OAuth state (client, tokens, discovery), sealed in `system_credentials` (ADR 0006). */
 class AccountCredentials implements McpOAuthStateStore {
-  readonly #db: Pick<Db, 'select' | 'insert' | 'delete'>
-  readonly #box: SecretBox
+  readonly #sealed: SealedCredentials
   readonly #key: string
 
-  constructor(db: Pick<Db, 'select' | 'insert' | 'delete'>, box: SecretBox, plugin: string, slug: string) {
-    this.#db = db
-    this.#box = box
+  /** `db` may be a transaction, e.g. one saving the account's row. */
+  constructor(db: ConstructorParameters<typeof SealedCredentials>[0], box: SecretBox, plugin: string, slug: string) {
+    this.#sealed = new SealedCredentials(db, box)
     this.#key = credentialKey(plugin, slug)
   }
 
-  async load(): Promise<McpOAuthState | undefined> {
-    const [row] = await this.#db.select().from(systemCredentials).where(eq(systemCredentials.key, this.#key))
-    if (!row) return undefined
-    try {
-      return JSON.parse(this.#box.open(row.ciphertext, this.#key)) as McpOAuthState
-    } catch (error) {
-      console.warn(`Ignoring system credential ${this.#key}: it can't be decrypted with the current secret key`, error)
-      return undefined
-    }
+  load(): Promise<McpOAuthState | undefined> {
+    return this.#sealed.read(this.#key)
   }
 
-  async save(state: McpOAuthState): Promise<void> {
-    const ciphertext = this.#box.seal(JSON.stringify(state), this.#key)
-    await this.#db
-      .insert(systemCredentials)
-      .values({ key: this.#key, ciphertext })
-      .onConflictDoUpdate({ target: systemCredentials.key, set: { ciphertext, updatedAt: new Date() } })
+  save(state: McpOAuthState): Promise<void> {
+    return this.#sealed.write(this.#key, state)
   }
 
-  async delete(): Promise<void> {
-    await this.#db.delete(systemCredentials).where(eq(systemCredentials.key, this.#key))
+  delete(): Promise<void> {
+    return this.#sealed.delete(this.#key)
   }
 }
 
