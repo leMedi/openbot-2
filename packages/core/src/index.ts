@@ -21,7 +21,7 @@ export {
   updateGroup,
 } from './groups.ts'
 export { GroupRounds, type GroupRoundsOptions } from './group-rounds.ts'
-export { startScreen, syncScreens } from './screens.ts'
+export { keepScreensInSync, startScreen, syncScreens } from './screens.ts'
 export { createBot, deleteBot, findBotByHistory, findBotByName, getBot, NameTakenError, listBots, setBotHistory, updateBot, withDisplay, type BotProfile, type BotWithChat } from './bots.ts'
 export {
   ChatNotFoundError,

@@ -3,6 +3,8 @@ import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { connectScreens } from '@openbot/computer'
+import { createBot, keepScreensInSync } from '@openbot/core'
+import { openDb } from '@openbot/db'
 import { describeComputerContract } from '@openbot/core/testing'
 import { afterEach, describe, expect, it } from 'vitest'
 import { serve } from './http.ts'
@@ -140,6 +142,42 @@ describe('the screen daemon', () => {
 
     expect(existsSync(join(dir, 'bots', 'rex', 'chromium'))).toBe(false)
     expect(manager.list().map((screen) => screen.botId)).toEqual(['ada'])
+  })
+
+  it('tells its clients it restarted on their next call, between health checks', async () => {
+    const first = await newDaemon()
+    const screens = connectScreens({ socketPath: first.socketPath, checkEvery: 60_000 })
+    let restarts = 0
+    const stopListening = screens.onRestart(() => restarts++)
+    await screens.list()
+
+    await restartDaemon(first)
+    await screens.status({ id: 'rex', name: 'Rex' })
+
+    expect(restarts).toBe(1)
+    stopListening()
+  })
+
+  it("gets every bot's screen back on its display from a server keeping them in sync, when it restarts without its saved screens", async () => {
+    const first = await newDaemon()
+    const db = await openDb(join(first.dir, 'openbot.db'))
+    const profile = { title: null, instructions: '', avatarShape: 'hex', avatarColor: 'blue', model: null } as const
+    const bots = [await createBot(db, { name: 'Rex', ...profile }), await createBot(db, { name: 'Ada', ...profile })]
+    const screens = connectScreens({ socketPath: first.socketPath, checkEvery: 50 })
+    const sync = keepScreensInSync(db, screens)
+    await sync.synced
+    const running = async () => (await screens.list()).filter(({ state }) => state === 'running').map(({ botId, display }) => ({ botId, display }))
+    const expected = bots.map((bot) => ({ botId: bot.id, display: bot.displayNumber }))
+    await expect.poll(running).toEqual(expected)
+
+    await first.close()
+    daemons = daemons.filter((daemon) => daemon !== first)
+    await rm(join(first.dir, 'screens.json'))
+    daemons.push(await startDaemon(first.dir))
+
+    await expect.poll(running, { timeout: 5_000 }).toEqual(expected)
+    sync.stop()
+    db.$client.close()
   })
 
   it('refuses bot ids that are not plain names', async () => {

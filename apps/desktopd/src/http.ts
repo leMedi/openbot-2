@@ -6,6 +6,7 @@ import type { ScreenManager } from './screen-manager.ts'
 
 // Duplicated from @openbot/computer's protocol: the daemon imports nothing at runtime, so it starts before installs.
 const botIdPattern = /^[A-Za-z0-9_-]{1,128}$/
+const bootHeader = 'x-openbot-desktopd-boot'
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = []
@@ -55,6 +56,7 @@ export async function serve(manager: ScreenManager, socketPath: string): Promise
   // New each time the daemon starts, so the server can tell it restarted and bring its screens back.
   const bootId = randomUUID()
   const server = createServer((req, res) => {
+    res.setHeader(bootHeader, bootId)
     route(manager, bootId, req, res).catch((error: Error) => {
       if (!res.headersSent) send(res, error instanceof SyntaxError ? 400 : 500, { error: error.message })
     })

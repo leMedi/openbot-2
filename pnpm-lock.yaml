@@ -178,6 +178,9 @@ importers:
       '@openbot/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@openbot/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@types/node':
         specifier: ^24
         version: 24.19.2

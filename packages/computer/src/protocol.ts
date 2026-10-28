@@ -8,7 +8,10 @@
 //   GET    /screens/:botId/pids  its processes' ids by program, for diagnostics and tests
 //   GET    /health             Health: its bootId changes each time the daemon starts
 //
-// Errors answer { error } with a 4xx or 5xx status.
+// Errors answer { error } with a 4xx or 5xx status. Every answer carries the daemon's boot id in `bootHeader`.
+
+/** The header on every answer naming the daemon's boot, new each time it starts. */
+export const bootHeader = 'x-openbot-desktopd-boot'
 
 /** Where the daemon listens unless `OPENBOT_DESKTOPD_SOCKET` says otherwise. */
 export const defaultDaemonSocket = '/run/openbot/desktopd.sock'

@@ -1,13 +1,14 @@
 import { request } from 'node:http'
 import type { ComputerBot, ScreenBot, ScreenListing, Screens, ScreenStatus } from '@openbot/core'
-import type { DaemonError, Health, StartScreenRequest } from './protocol.ts'
+import { bootHeader, type DaemonError, type Health, type StartScreenRequest } from './protocol.ts'
 
 /** The screen daemon couldn't be reached or refused a request. */
 export class ScreenDaemonError extends Error {}
 
 /**
- * The screens of the real computer, kept by the screen daemon listening on `socketPath`. While anyone listens for its
- * restarts, its health is checked every `checkEvery` ms.
+ * The screens of the real computer, kept by the screen daemon listening on `socketPath`. Every answer names the daemon's
+ * boot, so any call can find it restarted; while anyone listens for restarts, its health is also checked every
+ * `checkEvery` ms.
  */
 export function connectScreens({
   socketPath,
@@ -30,6 +31,8 @@ export function connectScreens({
           headers: payload ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) } : {},
         },
         (res) => {
+          const boot = res.headers[bootHeader]
+          if (typeof boot === 'string') noticeBoot(boot)
           const chunks: Buffer[] = []
           res.on('data', (chunk: Buffer) => chunks.push(chunk))
           res.on('end', () => {
@@ -64,20 +67,33 @@ export function connectScreens({
   let checking = false
   let checker: ReturnType<typeof setInterval> | undefined
 
+  /** Tells the listeners when an answer comes from another boot than the last one. */
+  function noticeBoot(boot: string) {
+    const restarted = bootId !== undefined && boot !== bootId
+    bootId = boot
+    if (!restarted) return
+    // Apart from the answer being read, so a listener's own calls and errors stay out of it.
+    queueMicrotask(() => {
+      for (const listener of [...restartListeners]) {
+        try {
+          listener()
+        } catch (error) {
+          console.error('[screens] A listener for the screen daemon restarting failed:', error)
+        }
+      }
+    })
+  }
+
   async function check() {
     if (checking) return
     checking = true
-    let restarted = false
     try {
-      const health = await call<Health>('GET', '/health')
-      restarted = bootId !== undefined && health.bootId !== bootId
-      bootId = health.bootId
+      await call<Health>('GET', '/health')
     } catch {
       // Not up (yet): its next boot is told apart from the last one reached.
     } finally {
       checking = false
     }
-    if (restarted) for (const listener of [...restartListeners]) listener()
   }
 
   return {
