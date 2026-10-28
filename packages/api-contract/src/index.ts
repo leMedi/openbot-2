@@ -384,7 +384,7 @@ export type AuditEntryInfo = z.infer<typeof auditEntry>
 export const factTiers = ['profile', 'log', 'note'] as const
 export type FactTier = (typeof factTiers)[number]
 
-/** One fact of a bot's memory, as the owner sees it in the bot's Memory pane. */
+/** One fact of a bot's memory or of shared memory, as the owner sees it in the bot's Memory pane or Settings → Shared memory. */
 export const fact = z.object({
   /** Stable across edits; how the bot names it, e.g. `[12]`. */
   id: z.number().int(),
@@ -396,7 +396,7 @@ export const fact = z.object({
   importance: z.number().int(),
   /** Who it was learned from: the owner or a bot. */
   source: z.enum(['owner', 'bot']),
-  /** The bot it was learned from, as named when it wrote the fact; null when learned from the owner. */
+  /** The bot it was learned from, as named when it wrote the fact, e.g. `Rex (deleted)` once deleted; null when learned from the owner. */
   sourceBotName: z.string().nullable(),
   /** When it was learned, in milliseconds since the epoch. */
   createdAt: z.number(),
@@ -643,6 +643,11 @@ export const contract = {
       })
       .input(z.object({ timeZone }))
       .output(generalSettings),
+  },
+  sharedMemory: {
+    list: oc
+      .route({ method: 'GET', path: '/settings/shared-memory', summary: 'Shared memory, every fact, oldest first, including those prompts leave out' })
+      .output(z.array(fact)),
   },
   screens: {
     status: oc

@@ -130,15 +130,19 @@ export {
 export type { Orchestrator, OrchestratorMode, ProposedAction, ReviewContext, Surface, Verdict } from './ports/orchestrator.ts'
 export {
   defaultImportance,
-  editBotFact,
+  editFact,
   type Fact,
+  factSourceName,
   factTiers,
   type FactTier,
-  forgetBotFact,
+  forgetFact,
   frozenMemoryBlock,
   listBotFacts,
+  listSharedFacts,
   maxFactLength,
   maxImportance,
+  type MemoryScope,
   minImportance,
-  writeBotFact,
+  reachableFactScope,
+  writeFact,
 } from './memory.ts'

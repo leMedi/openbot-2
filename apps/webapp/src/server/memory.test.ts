@@ -292,3 +292,121 @@ describe('deleting a bot', () => {
     expect(rows.map((row) => row.content)).toEqual(['Ana reviews on Mondays.'])
   })
 })
+
+describe('shared memory', () => {
+  async function withAna(server: TestServer) {
+    return server.client.bots.create({ ...rex, name: 'Ana', instructions: 'Ana reviews code.' })
+  }
+
+  it("reaches a second bot's prompt with its next compaction, tagged with its writer, under the precedence line", async () => {
+    const { server, bot } = await startWithRex()
+    const ana = await withAna(server)
+    expect(await nextPrompt(server, ana)).not.toContain('<memory>')
+
+    expect(await updateState(server, bot, { action: 'write', scope: 'shared', tier: 'profile', text: 'The owner is called Sam.' })).toContain('Saved as [1]')
+    expect(await nextPrompt(server, ana)).not.toContain('The owner is called Sam.')
+
+    await compact(server, ana)
+    const prompt = await nextPrompt(server, ana)
+    expect(prompt).toContain('- [1] (learned 2026-10-28) [via Rex] The owner is called Sam.')
+    expect(prompt).toContain('instructions > bot memory > shared memory')
+  })
+
+  it('is reviewed and audited as memory_shared_write for every write, edit and forget; bot memory is not', async () => {
+    const { server, bot } = await startWithRex()
+    const ana = await withAna(server)
+    await updateState(server, bot, { action: 'write', scope: 'bot', tier: 'profile', text: 'Rex builds with pnpm.' })
+    await updateState(server, bot, { action: 'edit', id: 1, text: 'Rex builds with turbo.' })
+    await updateState(server, bot, { action: 'write', scope: 'shared', tier: 'profile', text: 'The owner is called Sam.' })
+
+    expect(await updateState(server, ana, { action: 'edit', id: 2, text: 'The owner is called Samuel.' })).toContain('Updated [2]')
+    expect(await updateState(server, ana, { action: 'forget', id: 2 })).toContain('Forgot [2]')
+    await updateState(server, bot, { action: 'forget', id: 1 })
+
+    expect(await server.client.bots.audit({ botId: bot.id })).toMatchObject([
+      {
+        surface: 'memory_shared_write',
+        tool: 'update_state',
+        input: { target: 'memory', action: 'write', scope: 'shared', text: 'The owner is called Sam.' },
+        verdict: { decision: 'allow' },
+      },
+    ])
+    expect(await server.client.bots.audit({ botId: ana.id })).toMatchObject([
+      // Pinned to the scope reviewed: the call can only change a shared fact.
+      { surface: 'memory_shared_write', input: { action: 'edit', id: 2, scope: 'shared' } },
+      { surface: 'memory_shared_write', input: { action: 'forget', id: 2, scope: 'shared' } },
+    ])
+  })
+
+  it('is not written when the orchestrator blocks the write', async () => {
+    const { server, bot } = await startWithRex({ orchestrator: { review: async () => ({ decision: 'deny', reason: 'not about the owner' }) } })
+    await server.client.orchestrator.updateModes({ memory_shared_write: 'enforce' })
+
+    expect(await updateState(server, bot, { action: 'write', scope: 'shared', tier: 'profile', text: 'Rex is the best bot.' })).toContain('not about the owner')
+    expect(await updateState(server, bot, { action: 'write', scope: 'bot', tier: 'profile', text: 'Rex is the best bot.' })).toContain('Saved as [1]')
+
+    expect(await server.client.sharedMemory.list()).toEqual([])
+  })
+
+  it("keeps a deleted bot's shared facts, shown as via Name (deleted) in prompts and in Settings", async () => {
+    const { server, bot } = await startWithRex()
+    const ana = await withAna(server)
+    await updateState(server, bot, { action: 'write', scope: 'shared', tier: 'profile', text: 'The owner is called Sam.', importance: 5 })
+    await updateState(server, bot, { action: 'write', scope: 'bot', tier: 'profile', text: 'Rex builds with pnpm.' })
+    await server.clock.advance(day)
+    await updateState(server, ana, { action: 'write', scope: 'shared', tier: 'log', text: 'The owner moved to Lisbon.' })
+
+    await server.client.bots.delete({ botId: bot.id })
+
+    expect(await server.client.sharedMemory.list()).toEqual([
+      {
+        id: 1,
+        tier: 'profile',
+        content: 'The owner is called Sam.',
+        importance: 5,
+        source: 'bot',
+        sourceBotName: 'Rex (deleted)',
+        createdAt: Date.parse('2026-10-28T12:00:00Z'),
+        updatedAt: Date.parse('2026-10-28T12:00:00Z'),
+      },
+      {
+        id: 3,
+        tier: 'log',
+        content: 'The owner moved to Lisbon.',
+        importance: 3,
+        source: 'bot',
+        sourceBotName: 'Ana',
+        createdAt: Date.parse('2026-10-29T12:00:00Z'),
+        updatedAt: Date.parse('2026-10-29T12:00:00Z'),
+      },
+    ])
+    await compact(server, ana)
+    const prompt = await nextPrompt(server, ana)
+    expect(prompt).toContain('- [1] (learned 2026-10-28) [via Rex (deleted)] The owner is called Sam.')
+    expect(prompt).toContain('- [3] (learned 2026-10-29) [via Ana] The owner moved to Lisbon.')
+    expect(prompt).not.toContain('pnpm')
+  })
+
+  it("reaches a bot's own bot memory and shared memory, whoever wrote it, never another bot's bot memory", async () => {
+    const { server, bot } = await startWithRex()
+    const ana = await withAna(server)
+    await updateState(server, bot, { action: 'write', scope: 'bot', tier: 'profile', text: 'Rex keeps the deploy key in the vault.' })
+    await updateState(server, bot, { action: 'write', scope: 'shared', tier: 'profile', text: 'The owner is called Sam.' })
+    await updateState(server, ana, { action: 'write', scope: 'bot', tier: 'profile', text: 'Ana reviews on Mondays.' })
+
+    expect(await updateState(server, ana, { action: 'edit', id: 1, text: 'Rex keeps nothing.' })).toContain('There is no fact [1] in your memory.')
+    expect(await updateState(server, ana, { action: 'edit', id: 2, text: 'The owner is called Samuel.' })).toContain('Updated [2]')
+    expect(await updateState(server, ana, { action: 'edit', id: 3, importance: 4 })).toContain('Updated [3]')
+
+    // Only the shared edit was reviewed: reaching for Rex's fact left no trace.
+    expect((await server.client.bots.audit({ botId: ana.id })).map((entry) => entry.input)).toMatchObject([{ action: 'edit', id: 2 }])
+    expect(await server.client.sharedMemory.list()).toMatchObject([{ id: 2, content: 'The owner is called Samuel.', sourceBotName: 'Rex' }])
+    expect((await server.client.bots.memory({ botId: bot.id })).map((fact) => fact.content)).toEqual(['Rex keeps the deploy key in the vault.'])
+    expect((await server.client.bots.memory({ botId: ana.id })).map((fact) => fact.content)).toEqual(['Ana reviews on Mondays.'])
+    await compact(server, bot)
+    const prompt = await nextPrompt(server, bot)
+    expect(prompt).toContain('- [1] (learned 2026-10-28) Rex keeps the deploy key in the vault.')
+    expect(prompt).toContain('- [2] (learned 2026-10-28) [via Rex] The owner is called Samuel.')
+    expect(prompt).not.toContain('Mondays')
+  })
+})

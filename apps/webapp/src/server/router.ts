@@ -33,6 +33,7 @@ import {
   NameTakenError,
   listAuditEntries,
   listBotFacts,
+  listSharedFacts,
   listBots,
   listMessages,
   postMessage,
@@ -502,6 +503,10 @@ export const router = os.router({
       }
       return writeModelSettings(context.db, input)
     }),
+  },
+
+  sharedMemory: {
+    list: os.sharedMemory.list.handler(async ({ context }) => (await listSharedFacts(context.db)).map(toFactInfo)),
   },
 
   general: {

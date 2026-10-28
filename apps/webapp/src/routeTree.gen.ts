@@ -17,6 +17,7 @@ import { Route as ApiSplatRouteImport } from './routes/api/$'
 import { Route as SettingsGeneralRouteImport } from './routes/settings/general'
 import { Route as SettingsModelsRouteImport } from './routes/settings/models'
 import { Route as SettingsProvidersRouteImport } from './routes/settings/providers'
+import { Route as SettingsSharedMemoryRouteImport } from './routes/settings/shared-memory'
 import { Route as AppBotsBotIdRouteImport } from './routes/_app/bots.$botId'
 import { Route as AppGroupsChatIdRouteImport } from './routes/_app/groups.$chatId'
 import { Route as AppGroupsNewRouteImport } from './routes/_app/groups.new'
@@ -60,6 +61,11 @@ const SettingsProvidersRoute = SettingsProvidersRouteImport.update({
   path: '/providers',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsSharedMemoryRoute = SettingsSharedMemoryRouteImport.update({
+  id: '/shared-memory',
+  path: '/shared-memory',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const AppBotsBotIdRoute = AppBotsBotIdRouteImport.update({
   id: '/bots/$botId',
   path: '/bots/$botId',
@@ -84,6 +90,7 @@ export interface FileRoutesByFullPath {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/providers': typeof SettingsProvidersRoute
+  '/settings/shared-memory': typeof SettingsSharedMemoryRoute
   '/bots/$botId': typeof AppBotsBotIdRoute
   '/groups/$chatId': typeof AppGroupsChatIdRoute
   '/groups/new': typeof AppGroupsNewRoute
@@ -95,6 +102,7 @@ export interface FileRoutesByTo {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/providers': typeof SettingsProvidersRoute
+  '/settings/shared-memory': typeof SettingsSharedMemoryRoute
   '/': typeof AppIndexRoute
   '/bots/$botId': typeof AppBotsBotIdRoute
   '/groups/$chatId': typeof AppGroupsChatIdRoute
@@ -109,6 +117,7 @@ export interface FileRoutesById {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/providers': typeof SettingsProvidersRoute
+  '/settings/shared-memory': typeof SettingsSharedMemoryRoute
   '/_app/': typeof AppIndexRoute
   '/_app/bots/$botId': typeof AppBotsBotIdRoute
   '/_app/groups/$chatId': typeof AppGroupsChatIdRoute
@@ -124,6 +133,7 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/models'
     | '/settings/providers'
+    | '/settings/shared-memory'
     | '/bots/$botId'
     | '/groups/$chatId'
     | '/groups/new'
@@ -135,6 +145,7 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/models'
     | '/settings/providers'
+    | '/settings/shared-memory'
     | '/'
     | '/bots/$botId'
     | '/groups/$chatId'
@@ -148,6 +159,7 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/models'
     | '/settings/providers'
+    | '/settings/shared-memory'
     | '/_app/'
     | '/_app/bots/$botId'
     | '/_app/groups/$chatId'
@@ -219,6 +231,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsProvidersRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/shared-memory': {
+      id: '/settings/shared-memory'
+      path: '/shared-memory'
+      fullPath: '/settings/shared-memory'
+      preLoaderRoute: typeof SettingsSharedMemoryRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/_app/bots/$botId': {
       id: '/_app/bots/$botId'
       path: '/bots/$botId'
@@ -263,12 +282,14 @@ interface SettingsRouteChildren {
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsModelsRoute: typeof SettingsModelsRoute
   SettingsProvidersRoute: typeof SettingsProvidersRoute
+  SettingsSharedMemoryRoute: typeof SettingsSharedMemoryRoute
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsModelsRoute: SettingsModelsRoute,
   SettingsProvidersRoute: SettingsProvidersRoute,
+  SettingsSharedMemoryRoute: SettingsSharedMemoryRoute,
 }
 
 const SettingsRouteWithChildren = SettingsRoute._addFileChildren(

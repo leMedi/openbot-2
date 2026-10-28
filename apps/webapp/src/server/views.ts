@@ -1,6 +1,6 @@
 import { type AuditEntryInfo, type BotInfo, type CardInfo, type ChatInfo, type FactInfo, deletedAuthorName, type MessageInfo } from '@openbot/api-contract'
 import type { BotStatus } from '@openbot/agent'
-import { type BotWithChat, type ChatSummary, handBackOutcomeOf, isQuestionCard, isTakeOverCard, questionAnswerOf, questionDismissedOf } from '@openbot/core'
+import { type BotWithChat, type ChatSummary, factSourceName, handBackOutcomeOf, isQuestionCard, isTakeOverCard, questionAnswerOf, questionDismissedOf } from '@openbot/core'
 import type { AuditEntry, Fact, Message } from '@openbot/db'
 
 /**
@@ -88,7 +88,7 @@ export function toAuditEntryInfo(entry: AuditEntry): AuditEntryInfo {
   }
 }
 
-/** A fact as the owner sees it in a bot's Memory pane. */
+/** A fact as the owner sees it in a bot's Memory pane or Settings → Shared memory; its writer shown as deleted once it is. */
 export function toFactInfo(fact: Fact): FactInfo {
   return {
     id: fact.id,
@@ -96,7 +96,7 @@ export function toFactInfo(fact: Fact): FactInfo {
     content: fact.content,
     importance: fact.importance,
     source: fact.source,
-    sourceBotName: fact.source === 'bot' ? fact.sourceBotName : null,
+    sourceBotName: fact.source === 'bot' ? factSourceName(fact) : null,
     createdAt: fact.createdAt.getTime(),
     updatedAt: fact.updatedAt.getTime(),
   }

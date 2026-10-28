@@ -105,6 +105,7 @@ describe('system credentials', () => {
       'general.detectTimeZone': await server.client.general.detectTimeZone({ timeZone: 'Europe/Paris' }),
       'general.updateSettings': await server.client.general.updateSettings({ timeZone: 'Asia/Tokyo' }),
       'general.getSettings': await server.client.general.getSettings(),
+      'sharedMemory.list': await server.client.sharedMemory.list(),
       'bots.delete': null,
       'chats.list': await server.client.chats.list(),
       'chats.read': await server.client.chats.read({ chatId: bot.chatId }),

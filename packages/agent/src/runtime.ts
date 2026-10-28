@@ -9,6 +9,7 @@ import {
   type ConversationId,
   type EntryRecord,
   GenerationTask,
+  type JsonObject,
   Harness,
   LiveDoc,
   MemoryStorage,
@@ -43,16 +44,18 @@ import {
   botsOwingReplies,
   type Clock,
   defaultImportance,
-  editBotFact,
+  editFact,
   factTiers,
-  forgetBotFact,
+  forgetFact,
   frozenMemoryBlock,
   maxFactLength,
   maxImportance,
   minImportance,
   ownerTimeZone,
+  type MemoryScope,
+  reachableFactScope,
   systemClock,
-  writeBotFact,
+  writeFact,
   describeUnanswered,
   findBotByHistory,
   findBotByName,
@@ -146,9 +149,19 @@ export type BotStatus = {
   error: string | null
 }
 
-/** A bot's tool and the surface the orchestrator reviews its calls under; null for tools without side effects. */
+/**
+ * The surface the orchestrator reviews a tool's calls under; null for calls without side effects. A function decides it
+ * per call, from the call's arguments and its bot, for a tool whose calls aren't all alike (e.g. `update_state`), and
+ * may give the arguments the call then runs with, pinned to what was reviewed.
+ */
+export type ToolSurface =
+  | Surface
+  | null
+  | ((args: any, botId: string) => Promise<{ surface: Surface | null; arguments?: JsonObject }>)
+
+/** A bot's tool and the surface the orchestrator reviews its calls under. */
 export type BotTool = {
-  surface: Surface | null
+  surface: ToolSurface
   tool: ToolRegistration<any, any>
 }
 
@@ -721,22 +734,33 @@ export class BotRuntime implements AgentRuntime {
     }
     // Grok's update_state, with the memory target only for now. The bot is always the run's, never an argument.
     const updateState: BotTool = {
-      // Bot memory isn't reviewed; shared memory, when it comes, is the memory_shared_write surface.
-      surface: null,
+      // Bot memory isn't reviewed; every write, edit or forget of shared memory is the memory_shared_write surface. An
+      // edit or forget runs pinned to the scope its fact had when reviewed, so a shared fact written in between under an id
+      // the bot guessed isn't changed unreviewed. A fact the bot can't reach isn't reviewed: the call answers "no such fact".
+      surface: async (args: { action: string; scope?: MemoryScope; id?: number }, botId) => {
+        if (args.action === 'write') return { surface: args.scope === 'shared' ? 'memory_shared_write' : null }
+        const scope = (args.id !== undefined && (await reachableFactScope(options.db, botId, args.id))) || 'bot'
+        return { surface: scope === 'shared' ? 'memory_shared_write' : null, arguments: { ...args, scope } }
+      },
       tool: defineTool({
         name: 'update_state',
         description:
-          'Change your own lasting state. target "memory": your bot memory, the facts you keep across conversations, ' +
-          'shown in your instructions with their ids. Save what will matter later (the owner\'s preferences, decisions, ' +
-          'how things are done), never secrets or passwords. A fact you write joins your instructions later; until then ' +
-          'it is in this conversation.\n' +
-          '- write: save a new fact (scope "bot", a tier, the text, an importance).\n' +
-          '- edit: change a fact by its id: its text, tier or importance.\n' +
-          '- forget: delete a fact for good by its id.',
+          'Change your own lasting state. target "memory": the facts you keep across conversations, shown in your ' +
+          'instructions with their ids: your bot memory (scope "bot", only yours, mostly about your own work) and shared ' +
+          'memory (scope "shared", every bot knows it, mostly about the owner). Save what will matter later (the owner\'s ' +
+          'preferences, decisions, how things are done), never secrets or passwords. A fact you write joins your ' +
+          'instructions later; until then it is in this conversation. Changes to shared memory are reviewed.\n' +
+          '- write: save a new fact (a scope, a tier, the text, an importance).\n' +
+          '- edit: change a fact of either scope by its id: its text, tier or importance. A fact never changes scope: forget it and write it anew.\n' +
+          '- forget: delete a fact of either scope for good by its id.',
         parameters: Type.Object({
           target: Type.Literal('memory'),
           action: Type.Union([Type.Literal('write'), Type.Literal('edit'), Type.Literal('forget')]),
-          scope: Type.Optional(Type.Literal('bot', { description: 'write: whose memory; "bot", your own' })),
+          scope: Type.Optional(
+            Type.Union([Type.Literal('bot'), Type.Literal('shared')], {
+              description: 'write: whose memory; "bot", your own, or "shared", every bot\'s. edit, forget: leave it out, the fact\'s own is used',
+            }),
+          ),
           tier: Type.Optional(
             Type.Union(
               factTiers.map((tier) => Type.Literal(tier)),
@@ -764,18 +788,17 @@ export class BotRuntime implements AgentRuntime {
           const now = runtime!.#clock.now()
           const answer = (text: string) => ({ output: [{ type: 'text' as const, text }] })
           if (args.action === 'write') {
-            if (args.scope !== 'bot') throw new Error('Write to your own memory: scope "bot".')
+            if (!args.scope) throw new Error('Say whose memory to write to: scope "bot" (yours) or "shared" (every bot\'s).')
             if (!args.tier || args.text === undefined) throw new Error('A new fact needs a tier and a text.')
-            const fact = await writeBotFact(options.db, bot, { tier: args.tier, text: args.text, importance: args.importance }, now)
+            const fact = await writeFact(options.db, bot, { scope: args.scope, tier: args.tier, text: args.text, importance: args.importance }, now)
             return answer(`Saved as [${fact.id}].`)
           }
           if (args.id === undefined) throw new Error(`Say which fact to ${args.action} by its id.`)
           if (args.action === 'edit') {
-            // A fact's scope never changes: the only scope there is yet is the bot's own.
-            const fact = await editBotFact(options.db, bot.id, args.id, { text: args.text, tier: args.tier, importance: args.importance }, now)
+            const fact = await editFact(options.db, bot.id, args.id, { text: args.text, tier: args.tier, importance: args.importance }, now, args.scope)
             return answer(`Updated [${fact.id}].`)
           }
-          await forgetBotFact(options.db, bot.id, args.id)
+          await forgetFact(options.db, bot.id, args.id, args.scope)
           return answer(`Forgot [${args.id}].`)
         },
       }),
@@ -800,7 +823,7 @@ export class BotRuntime implements AgentRuntime {
       },
     })
     const tools = [sendMessage, messageBot, askQuestion, updateState, ...computerTools(images), useComputer, ...(options.tools ?? [])].map(detachable)
-    const toolSurfaces = new Map<string, Surface | null>([
+    const toolSurfaces = new Map<string, ToolSurface>([
       ...tools.map(({ surface, tool }) => [tool.name, surface] as const),
       // Sessions don't select this extension, so its hooks shouldn't see their browser and desktop tools; if they ever
       // do, those calls were covered by the session's review.
@@ -823,17 +846,16 @@ export class BotRuntime implements AgentRuntime {
         // it reviews the arguments the call will run with, and no other hook may rewrite arguments after it.
         hook(ToolTask, {
           beforeTool: async (call, api) => {
-            const surface = toolSurfaces.get(call.name)
-            if (surface === null) return
+            const declared = toolSurfaces.get(call.name)
+            if (declared === null) return
             // Fails closed: a tool that never declared its surface can't run unreviewed.
-            if (surface === undefined) return { block: `${call.name} declares no surface, so it can't be reviewed` }
+            if (declared === undefined) return { block: `${call.name} declares no surface, so it can't be reviewed` }
             const bot = await botOf(api.conversationId)
-            const blocked = await reviewAction(options.db, options.orchestrator, bot.id, {
-              surface,
-              tool: call.name,
-              input: call.arguments,
-            })
-            return blocked ? { block: blocked } : undefined
+            const { surface, arguments: pinned } = typeof declared === 'function' ? await declared(call.arguments, bot.id) : { surface: declared }
+            const replaced = pinned && { arguments: pinned }
+            if (surface === null) return replaced
+            const blocked = await reviewAction(options.db, options.orchestrator, bot.id, { surface, tool: call.name, input: pinned ?? call.arguments })
+            return blocked ? { block: blocked } : replaced
           },
         }),
       ],

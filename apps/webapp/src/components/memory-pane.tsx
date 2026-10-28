@@ -5,8 +5,35 @@ import { api, errorMessage } from '../lib/api.ts'
 const tierSections: { tier: FactTier; title: string; hint: string }[] = [
   { tier: 'profile', title: 'Profile', hint: 'Always relevant; never fades.' },
   { tier: 'log', title: 'Log', hint: 'Dated events; they fade but are kept.' },
-  { tier: 'note', title: 'Notes', hint: 'Short-lived; out of its prompt after a week.' },
+  { tier: 'note', title: 'Notes', hint: 'Short-lived; out of prompts after a week.' },
 ]
+
+/** Facts by tier, each with its source, importance and the day it was learned; read-only for now. */
+export function FactsByTier({ facts }: { facts: FactInfo[] }) {
+  return tierSections.map(({ tier, title, hint }) => {
+    const inTier = facts.filter((fact) => fact.tier === tier)
+    if (!inTier.length) return null
+    return (
+      <section key={tier} aria-label={title} className="flex flex-col gap-2">
+        <header>
+          <h3 className="font-medium">{title}</h3>
+          <p className="text-xs text-muted-foreground">{hint}</p>
+        </header>
+        <ul className="flex flex-col gap-2">
+          {inTier.map((fact) => (
+            <li key={fact.id} className="rounded-md bg-secondary px-3 py-2">
+              <p className="text-base break-words whitespace-pre-wrap">{fact.content}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Learned {new Date(fact.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}{' '}
+                {fact.source === 'owner' ? 'from you' : `via ${fact.sourceBotName ?? 'a deleted bot'}`} · importance {fact.importance}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )
+  })
+}
 
 /**
  * A bot's bot memory, read-only for now: its facts by tier, each with its source, importance and the day it was learned. It
@@ -38,30 +65,7 @@ export function MemoryPane({ bot }: { bot: BotInfo }) {
       <h2 className="text-lg font-semibold">Memory</h2>
       {error && <p className="text-sm text-destructive-foreground">Couldn't load {bot.name}'s memory: {error}</p>}
       {shown && !shown.length && <p className="text-sm text-muted-foreground">{bot.name} doesn't remember anything yet.</p>}
-      {shown &&
-        tierSections.map(({ tier, title, hint }) => {
-          const inTier = shown.filter((fact) => fact.tier === tier)
-          if (!inTier.length) return null
-          return (
-            <section key={tier} aria-label={title} className="flex flex-col gap-2">
-              <header>
-                <h3 className="font-medium">{title}</h3>
-                <p className="text-xs text-muted-foreground">{hint}</p>
-              </header>
-              <ul className="flex flex-col gap-2">
-                {inTier.map((fact) => (
-                  <li key={fact.id} className="rounded-md bg-secondary px-3 py-2">
-                    <p className="text-base break-words whitespace-pre-wrap">{fact.content}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Learned {new Date(fact.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}{' '}
-                      {fact.source === 'owner' ? 'from you' : `by ${fact.sourceBotName ?? 'a deleted bot'}`} · importance {fact.importance}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )
-        })}
+      {shown && <FactsByTier facts={shown} />}
     </aside>
   )
 }

@@ -1,8 +1,8 @@
-import { bots, type Db, type Fact, type FactTier, factTiers, memories } from '@openbot/db'
-import { and, asc, eq } from 'drizzle-orm'
+import { bots, type Db, type Fact, type FactTier, factTiers, memories, type MemoryScope } from '@openbot/db'
+import { and, asc, eq, or } from 'drizzle-orm'
 
 export { factTiers }
-export type { Fact, FactTier }
+export type { Fact, FactTier, MemoryScope }
 
 /** A fact's content is at most this many characters. */
 export const maxFactLength = 500
@@ -59,8 +59,15 @@ function checkedImportance(importance: number): number {
   return importance
 }
 
-/** Only the bot's own bot memory: the ownership check every way of reaching a fact goes through. */
-const ownBotFact = (botId: string, id: number) => and(eq(memories.id, id), eq(memories.scope, 'bot'), eq(memories.botId, botId))
+/**
+ * What a bot can reach: its own bot memory and shared memory, never another bot's bot memory; only `scope` when given.
+ * The ownership check every way of reaching a fact by id goes through.
+ */
+const reachableFact = (botId: string, id: number, scope?: MemoryScope) => {
+  const own = and(eq(memories.scope, 'bot'), eq(memories.botId, botId))
+  const shared = eq(memories.scope, 'shared')
+  return and(eq(memories.id, id), scope === 'bot' ? own : scope === 'shared' ? shared : or(own, shared))
+}
 
 /** The bot's bot memory, oldest first. */
 export async function listBotFacts(db: Db, botId: string): Promise<Fact[]> {
@@ -71,21 +78,35 @@ export async function listBotFacts(db: Db, botId: string): Promise<Fact[]> {
     .orderBy(asc(memories.id))
 }
 
+/** Shared memory, every bot's, oldest first. */
+export async function listSharedFacts(db: Db): Promise<Fact[]> {
+  return db.select().from(memories).where(eq(memories.scope, 'shared')).orderBy(asc(memories.id))
+}
+
 /**
- * Saves a fact the bot wrote itself in its bot memory, learned `now`. Throws `InvalidFactError` for an empty or too
- * long text or an importance out of range.
+ * The scope of fact `id` if bot `botId` can reach it (see `reachableFact`), else undefined: what the orchestrator
+ * reviews an edit or forget of it under.
  */
-export async function writeBotFact(
+export async function reachableFactScope(db: Db, botId: string, id: number): Promise<MemoryScope | undefined> {
+  const [fact] = await db.select({ scope: memories.scope }).from(memories).where(reachableFact(botId, id))
+  return fact?.scope
+}
+
+/**
+ * Saves a fact the bot wrote itself, learned `now`: in its bot memory, or in shared memory, sourced to the bot with its
+ * name as it is now. Throws `InvalidFactError` for an empty or too long text or an importance out of range.
+ */
+export async function writeFact(
   db: Db,
   bot: { id: string; name: string },
-  { tier, text, importance = defaultImportance }: { tier: FactTier; text: string; importance?: number },
+  { scope, tier, text, importance = defaultImportance }: { scope: MemoryScope; tier: FactTier; text: string; importance?: number },
   now: number,
 ): Promise<Fact> {
   const [fact] = await db
     .insert(memories)
     .values({
-      scope: 'bot',
-      botId: bot.id,
+      scope,
+      botId: scope === 'bot' ? bot.id : null,
       tier,
       content: checkedContent(text),
       importance: checkedImportance(importance),
@@ -100,15 +121,17 @@ export async function writeBotFact(
 }
 
 /**
- * Changes a fact of the bot's bot memory in place, keeping its id and when it was learned. Throws `NoSuchFactError`
- * unless it is one, and `InvalidFactError` for nothing to change or a bad text or importance.
+ * Changes a fact the bot can reach (its bot memory or shared memory, whoever wrote it) in place, keeping its id, scope,
+ * source and when it was learned; only a fact of `scope` when given, e.g. the scope the orchestrator reviewed. Throws
+ * `NoSuchFactError` unless the bot can reach it, and `InvalidFactError` for nothing to change or a bad text or importance.
  */
-export async function editBotFact(
+export async function editFact(
   db: Db,
   botId: string,
   id: number,
   changes: { text?: string; tier?: FactTier; importance?: number },
   now: number,
+  scope?: MemoryScope,
 ): Promise<Fact> {
   const values = {
     ...(changes.text !== undefined && { content: checkedContent(changes.text) }),
@@ -119,22 +142,37 @@ export async function editBotFact(
   const [fact] = await db
     .update(memories)
     .set({ ...values, updatedAt: new Date(now) })
-    .where(ownBotFact(botId, id))
+    .where(reachableFact(botId, id, scope))
     .returning()
   if (!fact) throw new NoSuchFactError(id)
   return fact
 }
 
-/** Deletes a fact of the bot's bot memory for good. Throws `NoSuchFactError` unless it is one. */
-export async function forgetBotFact(db: Db, botId: string, id: number): Promise<void> {
-  const deleted = await db.delete(memories).where(ownBotFact(botId, id)).returning({ id: memories.id })
+/**
+ * Deletes a fact the bot can reach for good; only a fact of `scope` when given. Throws `NoSuchFactError` unless the bot
+ * can reach it.
+ */
+export async function forgetFact(db: Db, botId: string, id: number, scope?: MemoryScope): Promise<void> {
+  const deleted = await db.delete(memories).where(reachableFact(botId, id, scope)).returning({ id: memories.id })
   if (!deleted.length) throw new NoSuchFactError(id)
 }
 
-/** `- [12] (learned 2026-10-25) fact`, the date in the owner's time zone. */
+/** Who a shared fact is from, as its tag shows: `the owner`, `Rex`, or `Rex (deleted)` once Rex is gone. */
+export function factSourceName(fact: Pick<Fact, 'source' | 'sourceBotId' | 'sourceBotName'>): string {
+  if (fact.source === 'owner') return 'the owner'
+  const name = fact.sourceBotName ?? 'A bot'
+  // As deleted bots' messages show (`deletedAuthorName`).
+  return fact.sourceBotId ? name : `${name} (deleted)`
+}
+
+/**
+ * `- [12] (learned 2026-10-25) fact`, the date in the owner's time zone; a shared fact is tagged with its source, as in
+ * `- [12] (learned 2026-10-25) [via Rex] fact`.
+ */
 function factLine(fact: Fact, timeZone: string): string {
   const learned = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(fact.createdAt)
-  return `- [${fact.id}] (learned ${learned}) ${fact.content}`
+  const via = fact.scope === 'shared' ? `[via ${factSourceName(fact)}] ` : ''
+  return `- [${fact.id}] (learned ${learned}) ${via}${fact.content}`
 }
 
 /** `lines`, in order, up to the first that would take them past `maxChars` characters. */
@@ -150,30 +188,36 @@ function upTo(lines: string[], maxChars: number): string[] {
 }
 
 /**
- * The memory block of a bot's instructions, from its `facts` as they are `now`; empty without any to show (design
- * §5.3). Profile facts first, the most important first, the least important dropping out past `maxProfileChars`; then
- * "Recently", log facts and notes under a week old ranked by `log2(importance) + createdAt / half-life`, cut at
- * `maxRecentChars`. Dates are the owner's, in `timeZone`.
+ * The memory block of a bot's instructions, from its bot memory and shared memory (`facts`, any order) as they are
+ * `now`; empty without any to show (design §5.3). Profile facts first, its bot memory's then shared memory's, each the
+ * most important first, the least important dropping out past `maxProfileChars` per scope; then "Recently", log facts
+ * and notes under a week old of both scopes ranked by `log2(importance) + createdAt / half-life`, cut at
+ * `maxRecentChars`. Shared facts are tagged with their source. Dates are the owner's, in `timeZone`.
  */
 export function renderMemoryBlock(facts: readonly Fact[], { now, timeZone }: { now: number; timeZone: string }): string {
-  const profile = facts
-    .filter((fact) => fact.tier === 'profile')
-    .sort((a, b) => b.importance - a.importance || a.id - b.id)
-    .map((fact) => factLine(fact, timeZone))
+  const profileOf = (scope: MemoryScope) =>
+    upTo(
+      facts
+        .filter((fact) => fact.scope === scope && fact.tier === 'profile')
+        .sort((a, b) => b.importance - a.importance || a.id - b.id)
+        .map((fact) => factLine(fact, timeZone)),
+      maxProfileChars,
+    )
   const rank = (fact: Fact) => Math.log2(fact.importance) + fact.createdAt.getTime() / rankHalfLifeMs
   const recent = facts
     .filter((fact) => fact.tier === 'log' || (fact.tier === 'note' && now - fact.createdAt.getTime() < noteLifetimeMs))
     .sort((a, b) => rank(b) - rank(a) || b.id - a.id)
     .map((fact) => factLine(fact, timeZone))
   const sections = [
-    { title: 'Profile', lines: upTo(profile, maxProfileChars) },
+    { title: 'Profile', lines: [...profileOf('bot'), ...profileOf('shared')] },
     { title: 'Recently', lines: upTo(recent, maxRecentChars) },
   ].filter((section) => section.lines.length)
   if (!sections.length) return ''
   return [
     '<memory>',
-    'What you remember from earlier conversations: your bot memory, only yours. Your instructions win over it. ' +
-      'Each fact starts with its id in brackets; edit or forget a fact with update_state by its id.',
+    'What you remember from earlier conversations: your bot memory, only yours, and shared memory, which every bot ' +
+      'knows and may change; shared facts are tagged [via whoever wrote them]. When they disagree: instructions > bot ' +
+      'memory > shared memory. Each fact starts with its id in brackets; edit or forget a fact with update_state by its id.',
     ...sections.map((section) => `\n${section.title}:\n${section.lines.join('\n')}`),
     '</memory>',
   ].join('\n')
@@ -182,7 +226,7 @@ export function renderMemoryBlock(facts: readonly Fact[], { now, timeZone }: { n
 /**
  * The bot's memory block for its compaction epoch `epoch` (see `AgentRuntime`): rendered from its facts as they are
  * `now` the first time the epoch is asked for, then the same until the epoch changes, so the prompt stays cached. Facts
- * the bot writes meanwhile are in its history already.
+ * the bot writes meanwhile are in its history already; shared facts other bots write meanwhile wait for its next epoch.
  */
 export async function frozenMemoryBlock(
   db: Db,
@@ -192,7 +236,7 @@ export async function frozenMemoryBlock(
 ): Promise<string> {
   const [row] = await db.select({ memoryBlock: bots.memoryBlock }).from(bots).where(eq(bots.id, botId))
   if (row?.memoryBlock && row.memoryBlock.epoch === epoch) return row.memoryBlock.text
-  const text = renderMemoryBlock(await listBotFacts(db, botId), { now, timeZone })
+  const text = renderMemoryBlock([...(await listBotFacts(db, botId)), ...(await listSharedFacts(db))], { now, timeZone })
   await db.update(bots).set({ memoryBlock: { epoch, text } }).where(eq(bots.id, botId))
   return text
 }
