@@ -44,6 +44,14 @@ _Avoid_: Room, channel, group conversation
 A bot's single private record of everything it has seen and done across all its chats, messages from other bots, and routines; what its model reads.
 _Avoid_: Conversation, transcript, context
 
+**Compaction**:
+A bot's history being summed up when it grows too long. The stretch between two compactions is an **epoch**: what a bot sees of its memory and routines is fixed for the epoch, except for the owner's changes, which reach it on its next run.
+_Avoid_: Summarization, context reset
+
+**Timeline row**:
+A thin line in a DM recording a change a bot made on its own, such as creating a routine. It asks nothing, unlike a card, and never counts as the bot's reply.
+_Avoid_: Card (for the row), event
+
 **Pass**:
 A bot choosing to say nothing on its turn in a group chat.
 
@@ -112,11 +120,11 @@ _Avoid_: Status, success
 ### Capabilities
 
 **Plugin**:
-An installable bundle of skills, tool servers, or both, giving bots a capability such as Gmail or GitHub.
+A bundle from OpenBot's catalog of a hosted tool server, skills, or both, giving bots a capability such as Notion or Linear. It is connected once it has an account; a bot uses it only through a grant.
 _Avoid_: Connector, integration, extension
 
 **Plugin account**:
-One named sign-in to a plugin's service; a plugin may have several, and the first is called `default`.
+One sign-in to a plugin's service; a plugin may have several. Each keeps the slug it was given when connected (`account1`, `account2`…, never reused) and has a display name the owner can change.
 _Avoid_: Connection, profile
 
 **Skill**:
@@ -142,7 +150,7 @@ The model every bot uses unless it has its own.
 ### Memory and routines
 
 **Memory**:
-The facts a bot keeps across conversations: its bot memory plus the shared memory, in front of the bot on every run, the most important and newest first. When the two disagree, its own fact wins; its instructions win over both.
+The facts a bot keeps across conversations: its bot memory plus the shared memory, in the bot's prompt, the most important and newest first. A fact a bot writes reaches its prompt at its next compaction; the owner's changes reach it on its next run. When the two disagree, its own fact wins; its instructions win over both.
 
 **Bot memory**:
 The facts only one bot knows, mostly about its own work. They go when the bot is deleted.
@@ -163,15 +171,19 @@ _Avoid_: Journal, diary
 Picking out facts after each run: facts about the owner come only from the owner's own words, facts about the bot's work only from what it said; other bots' words are never a source.
 
 **Consolidation**:
-The nightly tidy-up of memory that changed that day: merging duplicates, promoting recurring facts to profile, dropping expired notes, and keeping profiles short.
+The nightly tidy-up of memory that changed since its last one: merging duplicates, promoting recurring facts to profile, and keeping profiles short. Expired notes are dropped every night, changed or not.
 _Avoid_: Dreaming
 
 **Routine**:
-A note from a bot to its future self plus a schedule; when it fires, the bot wakes and may stay silent.
+A prompt plus a schedule, written by the owner as a standing instruction or by the bot as a note to its future self; when it fires, the bot wakes and may stay silent.
 _Avoid_: Automation, cron job, task
 
 **Reminder**:
-A routine that fires once.
+A routine that fires once, and stays in the list, disabled, afterwards.
+
+**Time zone**:
+The owner's one time zone, detected from their browser and changed in Settings; routines and consolidation follow it. Before it is set, UTC.
+_Avoid_: Locale, server time
 
 ### Oversight
 
