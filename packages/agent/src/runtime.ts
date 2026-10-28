@@ -7,6 +7,7 @@ import {
   type CompactionPolicy,
   type Conversation,
   type ConversationId,
+  type EntryId,
   type EntryRecord,
   GenerationTask,
   type JsonObject,
@@ -43,6 +44,8 @@ import {
   type BotWithChat,
   botsOwingReplies,
   type Clock,
+  type ExchangePart,
+  type RunExchange,
   defaultImportance,
   editFact,
   factTiers,
@@ -215,6 +218,11 @@ export type BotRuntimeOptions = {
   compaction?: Partial<CompactionPolicy>
   /** The server's time, which memory facts are dated and ranked by; the system's by default. */
   clock?: Clock
+  /**
+   * A bot's run settled, in any lane, however it ended; `exchange` reads it back, as memory extraction does. Called in
+   * the order the bot's runs settle, never holding up its next run.
+   */
+  onRunSettled?(botId: string, exchange: () => Promise<RunExchange | undefined>): void
 }
 
 /** `provider/modelId`, split at the first slash since model ids may contain slashes. */
@@ -386,6 +394,38 @@ const reachedOwner = (entry: EntryRecord) =>
       (ownerTools.has(message.toolName) ||
         (message.toolName === 'use_computer' && Boolean((message.details as UseComputerDetails | undefined)?.takeOver))),
   )
+
+/** The tools a bot sends its own messages with: to the owner or a group, to teammates, and questions. */
+const sendingTools = new Set(['sendMessage', 'message_bot', 'askQuestion'])
+
+/** A tool call of the bot's as extraction reads it: a message it sent, or context. */
+function sentOrCalled(name: string, args: Record<string, unknown>): ExchangePart {
+  const text = (key: string) => (typeof args[key] === 'string' ? (args[key] as string) : '')
+  if (name === 'sendMessage') return { from: 'bot', text: text('text') }
+  if (name === 'message_bot') return { from: 'bot', text: text('text'), to: text('to') }
+  if (name === 'askQuestion') return { from: 'bot', text: text('prompt') }
+  return { from: 'context', kind: 'tool_call', label: `your call of ${name}`, text: JSON.stringify(args) }
+}
+
+/**
+ * Owner-lane inputs in the bot's DM that aren't only the owner's own words: an answer to a question card (it quotes the
+ * bot's question and options), a screen handed back, and a reply the server re-drives after a restart (its note, and
+ * messages the run they woke already read).
+ */
+const notOwnerWords = /^(answer|hand-back|owed-reply):/
+
+/** The owner's own message in the bot's DM, as the router wakes the bot with it: not a group chat's turn, nor the above. */
+const isOwnerDmInput = (input: BotInput) => input.lane === 'owner' && !input.groupChatId && !notOwnerWords.test(input.id ?? '')
+
+/** Where an input other than the owner's DM message came from, as extraction's context labels it. */
+const describeInputSource = (input: BotInput) =>
+  input.groupChatId
+    ? 'a group chat turn'
+    : input.lane === 'owner'
+      ? 'a card the owner answered, or a note from the server'
+      : input.lane === 'bot'
+        ? "a teammate's message"
+        : 'a background wake, e.g. a routine'
 
 /** What an input's entry in the history records: its lane, and the group chat whose turn it is. */
 type InputRecord = { lane: Lane; groupChatId?: string; id?: string }
@@ -1207,7 +1247,7 @@ export class BotRuntime implements AgentRuntime {
       context,
     )
     await markReminded(this.#options.db, unanswered.map((question) => question.id))
-    void this.#reportFailure(bot.id, submission)
+    void this.#settled(bot.id, inputs, submission)
     const status = async () => (await submission.status(context)).status
     return {
       ended: async () => ['done', 'unanswered'].includes(await status()),
@@ -1215,13 +1255,20 @@ export class BotRuntime implements AgentRuntime {
     }
   }
 
-  /** A run that ends without answering, other than by an interrupt, failed: the model or its provider errored. */
-  async #reportFailure(botId: string, submission: Submission) {
+  /**
+   * Once the run of `inputs` has settled: reports it failed when it ended without answering, other than by an interrupt
+   * (the model or its provider errored), and tells `onRunSettled` if its input made it into the history.
+   */
+  async #settled(botId: string, inputs: readonly QueuedInput[], submission: Submission) {
     let settled
     try {
       settled = await submission.wait(context)
     } catch {
       return // The Harness closed.
+    }
+    if (settled.entry !== undefined) {
+      const entry = settled.entry
+      this.#options.onRunSettled?.(botId, () => this.#exchange(botId, inputs, entry))
     }
     if (settled.status !== 'unanswered' || settled.reason === 'aborted') return
     const { detail, reason } = settled
@@ -1229,5 +1276,45 @@ export class BotRuntime implements AgentRuntime {
     console.error(`[agent] Bot ${botId}'s run failed: ${error}`)
     this.#errors.set(botId, error)
     this.#options.onStatus(botId, this.status(botId))
+  }
+
+  /**
+   * The run of `inputs`, whose input is entry `inputEntry` of the bot's history, as extraction reads it: the owner's DM
+   * messages are the owner's words, and what the bot sent with sendMessage, message_bot or askQuestion its own
+   * messages; everything else (other inputs, tool calls and results, its private text) is context.
+   */
+  async #exchange(botId: string, inputs: readonly QueuedInput[], inputEntry: EntryId): Promise<RunExchange | undefined> {
+    const history = await this.#existingHistory(botId)
+    if (!history) return undefined
+    const parts: ExchangePart[] = inputs
+      .filter((input) => input.text.trim())
+      .map((input) =>
+        isOwnerDmInput(input)
+          ? { from: 'owner', text: input.text }
+          : { from: 'context', kind: 'input', label: describeInputSource(input), text: input.text },
+      )
+    let cursor
+    do {
+      const page = await history.entries({ minEntryId: inputEntry, order: 'ascending' }, 100, cursor, context)
+      for (const entry of page.items) {
+        if (entry.id === inputEntry || isReminder(entry)) continue
+        // The next run's.
+        if (entry.kind === inputKind) return parts
+        for (const message of entry.model ?? []) {
+          if (message.role === 'assistant') {
+            for (const block of message.content) {
+              if (block.type === 'text' && block.text.trim()) parts.push({ from: 'context', kind: 'thought', label: 'your private text', text: block.text })
+              if (block.type === 'toolCall') parts.push(sentOrCalled(block.name, block.arguments))
+            }
+          }
+          if (message.role === 'toolResult' && !sendingTools.has(message.toolName)) {
+            const text = message.content.flatMap((part) => (part.type === 'text' ? [part.text] : ['(an image)'])).join('\n')
+            parts.push({ from: 'context', kind: 'tool_result', label: `result of ${message.toolName}`, text })
+          }
+        }
+      }
+      cursor = page.next
+    } while (cursor)
+    return parts
   }
 }

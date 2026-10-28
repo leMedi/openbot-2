@@ -308,12 +308,14 @@ export const model = z.object({
 export type ModelInfo = z.infer<typeof model>
 
 /**
- * Model refs. A null computer-use model is "same as each bot's model" (its own, else the default); a null default is
- * not chosen yet.
+ * Model refs. A null computer-use model is "same as each bot's model" (its own, else the default); a null memory model
+ * is "same as default"; a null default is not chosen yet.
  */
 export const modelSettings = z.object({
   defaultModel: z.string().nullable(),
   computerUseModel: z.string().nullable(),
+  /** Memory extraction's side calls run on it. */
+  memoryModel: z.string().nullable(),
 })
 export type ModelSettings = z.infer<typeof modelSettings>
 
@@ -356,12 +358,13 @@ export const verdict = z.discriminatedUnion('decision', [
   z.object({ decision: z.literal('ask'), reason: z.string(), proposedRule: z.string().optional() }),
 ])
 
-export const auditKinds = ['action', 'navigation', 'session_summary'] as const
+export const auditKinds = ['action', 'navigation', 'session_summary', 'extraction'] as const
 export const auditKind = z.enum(auditKinds)
 
 /**
  * One entry of a bot's audit log: a side-effecting tool call and its review (`action`), a page a computer-use session's
- * browser opened (`navigation`), or a computer-use session's summary once it ended (`session_summary`).
+ * browser opened (`navigation`), a computer-use session's summary once it ended (`session_summary`), or a change memory
+ * extraction made or was refused, or an extraction skipped after failing (`extraction`).
  */
 export const auditEntry = z.object({
   id: z.string(),
@@ -650,13 +653,13 @@ export const contract = {
       .route({ method: 'GET', path: '/models', summary: 'Models of connected providers' })
       .output(z.array(model)),
     getSettings: oc
-      .route({ method: 'GET', path: '/settings/models', summary: 'The default and computer-use models' })
+      .route({ method: 'GET', path: '/settings/models', summary: 'The default, computer-use and memory models' })
       .output(modelSettings),
     updateSettings: oc
       .route({
         method: 'PATCH',
         path: '/settings/models',
-        summary: 'Set the default and computer-use models; the computer-use model must accept images',
+        summary: 'Set the default, computer-use and memory models; the computer-use model must accept images',
       })
       .input(modelSettings.partial())
       .output(modelSettings),

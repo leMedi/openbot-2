@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { botUser, type BotRuntimeOptions, type BotTool, type ModelProvider, openBotComputer, type Watchdog } from '@openbot/agent'
 import { createFakeModel, createFakeProviders, fakeBotComputer, type FakeBotComputer, type FakeProviders, type FakeShellScript } from '@openbot/agent/testing'
 import { connectBrowser, connectDesktop, connectScreens, defaultDaemonSocket } from '@openbot/computer'
-import type { Orchestrator, Screens, ScreenStatus } from '@openbot/core'
+import { type Orchestrator, type Screens, type ScreenStatus, writeModelSettings } from '@openbot/core'
 import { createFakeClock, createFakeComputer, type FakeClock, type FakeComputer, type FakeComputerScript } from '@openbot/core/testing'
 import { openDb } from '@openbot/db'
 import { createRouterClient } from '@orpc/server'
@@ -68,6 +68,11 @@ export type TestServerOptions = {
   now?: Date
   /** Adds `fake/fake-memory`, scripted apart from the bots' models through `providers.memoryModel`. */
   memoryModel?: boolean
+  /**
+   * Extracts memory after every run, on `fake/fake-memory` (implied), set as the memory model; off otherwise, so tests
+   * script only their bots' runs.
+   */
+  extraction?: boolean
 }
 
 /**
@@ -84,11 +89,12 @@ type KeptFakes = { computer: FakeComputer; botComputer: FakeBotComputer; clock: 
 async function open(
   dir: string,
   secretKey: string,
-  { shell, pages, realComputer, outsideImage, modelProviders = [], script, memoryModel, compaction, now, ...options }: TestServerOptions,
+  { shell, pages, realComputer, outsideImage, modelProviders = [], script, memoryModel, extraction = false, compaction, now, ...options }: TestServerOptions,
   kept?: KeptFakes,
 ) {
   const db = await openDb(join(dir, 'openbot.db'))
-  const providers = createFakeProviders({ memoryModel })
+  const providers = createFakeProviders({ memoryModel: memoryModel || extraction })
+  if (extraction) await writeModelSettings(db, { memoryModel: providers.memoryModel.ref })
   script?.(providers)
   const home = realComputer ? process.env.OPENBOT_HOME! : join(dir, 'home')
   // The computer outlives the server, as the screen daemon does.
@@ -115,6 +121,7 @@ async function open(
     screenTickets,
     compaction,
     clock,
+    memoryExtraction: extraction,
     ...options,
   })
   await context.screensSynced
@@ -144,6 +151,8 @@ async function open(
     jobs: context.jobs,
     /** The owner's time zone and local times, as scheduled jobs read them. */
     ownerTime: context.ownerTime,
+    /** Memory extraction after runs, with `extraction`; `extraction.idle()` waits for those queued. */
+    extraction: context.extraction,
     /** The fakes, to keep across a restart. */
     kept: { computer, botComputer, clock } satisfies KeptFakes,
     /** The bots' home, a temporary folder: `shared/`, `bots/<id>/`. */
@@ -187,6 +196,7 @@ async function open(
       context.stopSyncingScreens()
       context.rounds.close()
       await context.runtime.close()
+      await context.extraction.close()
       db.$client.close()
     },
     /** Closes the database and deletes the data. */
@@ -197,6 +207,7 @@ async function open(
       await computer.close()
       context.rounds.close()
       await context.runtime.close()
+      await context.extraction.close()
       db.$client.close()
       await rm(dir, { recursive: true, force: true })
     },

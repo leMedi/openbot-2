@@ -22,6 +22,8 @@ import {
   ServerJobs,
   systemClock,
   keepScreensInSync,
+  MemoryExtraction,
+  readModelSettings,
 } from '@openbot/core'
 import type { Db } from '@openbot/db'
 import type { ScreenTickets } from './screen-stream.ts'
@@ -59,6 +61,8 @@ export type ServerContext = {
   jobs: ServerJobs
   /** The owner's time, as scheduled jobs (routines, memory consolidation) read it. */
   ownerTime: OwnerTime
+  /** Memory extraction after bots' runs; `extraction.close()` stops it. */
+  extraction: MemoryExtraction
 }
 
 /** The owner's time zone (`settings.timeZone`), as scheduled jobs read it. */
@@ -101,6 +105,7 @@ export async function createServerContext({
   fetch,
   compaction,
   clock = systemClock,
+  memoryExtraction = true,
 }: {
   db: Db
   /** Encrypts system credentials. */
@@ -132,6 +137,8 @@ export async function createServerContext({
   compaction?: BotRuntimeOptions['compaction']
   /** The server's time; the system's by default, a fake one tests move forward. */
   clock?: Clock
+  /** Extracts memory after every run of a bot (design §5.3); tests leave it off unless they script the memory model. */
+  memoryExtraction?: boolean
 }): Promise<ServerContext> {
   const bus = new EventBus<LiveEvent>()
   const attachments = new AttachmentStore(attachmentsDir)
@@ -145,6 +152,17 @@ export async function createServerContext({
     onSpeaking: (chatId) => void publish(chatId).catch((error) => console.error("[groups] Couldn't show who is taking a turn:", error)),
   })
   const publish = (chatId: string) => publishChat({ db, bus, rounds }, chatId)
+  const extraction = new MemoryExtraction({
+    db,
+    clock,
+    // The memory model, else the default; none while its provider isn't connected.
+    model: async () => {
+      const { memoryModel, defaultModel } = await readModelSettings(db)
+      const ref = memoryModel ?? defaultModel
+      return ref && (await providers.findModel(ref)) ? ref : undefined
+    },
+    complete: (ref, request) => providers.complete(ref, request),
+  })
   /** Posts a bot's message with copies of its files to `chatId`; returns it, or undefined for a replayed call's. */
   async function postBotMessage(bot: BotWithChat, chatId: string, text: string, files: AttachmentFile[], idempotencyKey: string) {
     const saved = await attachments.save(chatId, files)
@@ -182,6 +200,7 @@ export async function createServerContext({
     fetch,
     compaction,
     clock,
+    ...(memoryExtraction && { onRunSettled: (botId, exchange) => extraction.extract(botId, exchange) }),
     async sendMessage(bot, chatId, { text, attachments: files }, idempotencyKey) {
       await postBotMessage(bot, chatId, text, files, idempotencyKey)
     },
@@ -268,5 +287,21 @@ export async function createServerContext({
     timeZone: () => ownerTimeZone(db),
     instant: async (local) => instantAt(local, await ownerTimeZone(db)),
   }
-  return { db, bus, providers, runtime, computer, attachments, screens, screenTickets, screensSynced, stopSyncingScreens, rounds, clock, jobs, ownerTime }
+  return {
+    db,
+    bus,
+    providers,
+    runtime,
+    computer,
+    attachments,
+    screens,
+    screenTickets,
+    screensSynced,
+    stopSyncingScreens,
+    rounds,
+    clock,
+    jobs,
+    ownerTime,
+    extraction,
+  }
 }

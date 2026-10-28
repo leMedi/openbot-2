@@ -268,7 +268,7 @@ describe('model settings', () => {
   it('starts with no default model and the computer-use model following it', async () => {
     const server = await start()
 
-    expect(await server.client.models.getSettings()).toEqual({ defaultModel: null, computerUseModel: null })
+    expect(await server.client.models.getSettings()).toEqual({ defaultModel: null, computerUseModel: null, memoryModel: null })
   })
 
   it('sets the default and computer-use models', async () => {
@@ -280,7 +280,7 @@ describe('model settings', () => {
       computerUseModel: 'fake/fake-model',
     })
 
-    expect(updated).toEqual({ defaultModel: 'fake/fake-mini', computerUseModel: 'fake/fake-model' })
+    expect(updated).toEqual({ defaultModel: 'fake/fake-mini', computerUseModel: 'fake/fake-model', memoryModel: null })
     expect(await server.client.models.getSettings()).toEqual(updated)
   })
 
@@ -291,7 +291,16 @@ describe('model settings', () => {
 
     const updated = await server.client.models.updateSettings({ computerUseModel: null })
 
-    expect(updated).toEqual({ defaultModel: 'fake/fake-model', computerUseModel: null })
+    expect(updated).toEqual({ defaultModel: 'fake/fake-model', computerUseModel: null, memoryModel: null })
+  })
+
+  it('sets the memory model, and puts it back to "same as default"', async () => {
+    const server = await start()
+    await connectWithKey(server, 'sk-fake-123')
+
+    expect(await server.client.models.updateSettings({ defaultModel: 'fake/fake-model', memoryModel: 'fake/fake-mini' })).toMatchObject({ memoryModel: 'fake/fake-mini' })
+    expect(await server.client.models.updateSettings({ memoryModel: null })).toMatchObject({ memoryModel: null })
+    await expect(server.client.models.updateSettings({ memoryModel: 'fake-device/fake-text' })).rejects.toThrow(/not a model of a connected provider/)
   })
 
   it('only offers vision-capable models for computer use', async () => {
@@ -301,7 +310,7 @@ describe('model settings', () => {
     await expect(server.client.models.updateSettings({ computerUseModel: 'fake/fake-mini' })).rejects.toMatchObject({
       code: 'BAD_REQUEST',
     })
-    expect(await server.client.models.getSettings()).toEqual({ defaultModel: null, computerUseModel: null })
+    expect(await server.client.models.getSettings()).toEqual({ defaultModel: null, computerUseModel: null, memoryModel: null })
   })
 
   it('only accepts models of connected providers', async () => {

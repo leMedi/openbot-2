@@ -7,7 +7,7 @@ export const Route = createFileRoute('/settings/models')({
   component: Models,
 })
 
-/** The empty option: no default chosen yet, or the computer-use model left to each bot's own. */
+/** The empty option: no default chosen yet, the computer-use model left to each bot's own, or the memory model to the default. */
 const unset = ''
 
 function Models() {
@@ -72,6 +72,14 @@ function Models() {
               computer-use model so they can see screenshots.
             </p>
           )}
+          <ModelField
+            label="Memory model"
+            description="Picks out what bots should remember after each run; a small, cheap model does."
+            value={settings.memoryModel ?? unset}
+            models={models}
+            placeholder="Same as default"
+            onChange={(ref) => update({ memoryModel: ref || null })}
+          />
         </>
       )}
     </section>
