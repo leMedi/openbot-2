@@ -30,6 +30,7 @@ function testScreens(screens: Screens): Screens {
     stop: (bot) => screens.stop(bot),
     status: async (bot) => fromTest(await screens.status(bot)),
     list: async () => (await screens.list()).filter((screen) => (screen.display ?? 0) > testDisplayOffset).map(fromTest),
+    onRestart: (listener) => screens.onRestart(listener),
   }
 }
 
@@ -164,6 +165,7 @@ async function open(
     /** Stops the runtime and closes the database, keeping the data. */
     async shutdown() {
       for (const http of streamServers.splice(0)) http.close()
+      context.stopSyncingScreens()
       context.rounds.close()
       await context.runtime.close()
       db.$client.close()
@@ -171,6 +173,7 @@ async function open(
     /** Closes the database and deletes the data. */
     async close() {
       for (const http of streamServers.splice(0)) http.close()
+      context.stopSyncingScreens()
       await computer.close()
       context.rounds.close()
       await context.runtime.close()

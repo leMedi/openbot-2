@@ -142,6 +142,11 @@ export interface Screens {
   status(bot: ComputerBot): Promise<ScreenStatus>
   /** Every screen being kept running. */
   list(): Promise<ScreenListing[]>
+  /**
+   * Calls `listener` each time what keeps the screens (the screen daemon) is found to have restarted since it was last
+   * reached, so the caller can bring every bot's screen back; returns a function that stops listening.
+   */
+  onRestart(listener: () => void): () => void
 }
 
 /**

@@ -10,6 +10,7 @@ describeComputerContract('the fake computer', async () => {
     computer,
     reconnect: async () => computer,
     crash: (bot) => computer.crash(bot),
+    restart: () => computer.restart(),
     page: (name, page) => {
       const url = `https://contract.test/${name}`
       computer.pages.set(url, page)

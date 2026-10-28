@@ -61,13 +61,31 @@ describe('screens', () => {
     expect((await after.computer.screens.list()).map((screen) => screen.botId)).toEqual([rex.id])
   })
 
-  it("are started again when the computer lost one, e.g. after it couldn't be reached", async () => {
+  it('come back on their displays when the screen daemon restarts, without anyone opening them', async () => {
+    const server = await start()
+    const rex = await server.client.bots.create(newBot('Rex'))
+    const ada = await server.client.bots.create(newBot('Ada'))
+
+    await server.computer.restart()
+
+    await expect.poll(async () => (await server.computer.screens.list()).map(({ botId, display }) => ({ botId, display }))).toEqual([
+      { botId: rex.id, display: 1 },
+      { botId: ada.id, display: 2 },
+    ])
+  })
+
+  it('are only read by their routes: a stopped screen is reported, not started', async () => {
     const server = await start()
     const rex = await server.client.bots.create(newBot('Rex'))
     await server.computer.screens.stop(rex)
+    const calls = server.computer.calls.length
 
-    expect((await server.client.screens.status({ botId: rex.id })).state).toBe('running')
-    expect(server.computer.calls.at(-1)).toEqual({ bot: 'Rex', kind: 'screens.start', display: 1 })
+    expect((await server.client.screens.status({ botId: rex.id })).state).toBe('stopped')
+    await expect(server.client.screens.ticket({ botId: rex.id })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: "Rex's screen isn't running",
+    })
+    expect(server.computer.calls.length).toBe(calls)
   })
 
   it('stream live to the owner on a ticket', async () => {

@@ -589,7 +589,7 @@ export const contract = {
   },
   screens: {
     status: oc
-      .route({ method: 'GET', path: '/bots/{botId}/screen', summary: "The bot's screen; one that isn't running is started" })
+      .route({ method: 'GET', path: '/bots/{botId}/screen', summary: "The bot's screen, as the computer keeps it; only read, never started" })
       .input(z.object({ botId: z.string() }))
       .output(screen),
     ticket: oc

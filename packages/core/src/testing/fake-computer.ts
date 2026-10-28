@@ -46,6 +46,11 @@ export type FakeComputer = Computer & {
   readonly pages: Map<string, TestPage>
   /** Kills the bot's screen; it comes back at once, as the daemon restarts it. */
   crash(bot: ComputerBot): Promise<void>
+  /**
+   * Restarts the computer as the screen daemon restarting without its saved screens would: every screen is lost, then
+   * listeners are told.
+   */
+  restart(): Promise<void>
   /** Closes every screen's stream. */
   close(): Promise<void>
 }
@@ -95,6 +100,7 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
   const pages = new Map(Object.entries(script.pages ?? {}))
   const browsers = new Map<string, FakeBrowserState>()
   const desktops = new Map<string, FakeDesktopState>()
+  const restartListeners = new Set<() => void>()
   // Strictly increasing, so a restarted screen's start time always differs.
   let clock = Date.now()
   const now = () => (clock = Math.max(clock + 1, Date.now()))
@@ -348,6 +354,12 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
       async list() {
         return [...screens.keys()].map((botId) => ({ botId, ...status(botId) }))
       },
+      onRestart(listener) {
+        // Its own entry, so one listener added twice is told twice and removed once.
+        const entry = () => listener()
+        restartListeners.add(entry)
+        return () => void restartListeners.delete(entry)
+      },
     },
     async crash(bot) {
       const screen = screens.get(bot.id)
@@ -356,6 +368,10 @@ export function createFakeComputer(script: FakeComputerScript = {}): FakeCompute
       // Its apps die with its display.
       desktops.delete(bot.id)
       screens.set(bot.id, { display: screen.display, startedAt: now(), ...(await openStream()) })
+    },
+    async restart() {
+      await Promise.all([...screens.keys()].map(stop))
+      for (const listener of [...restartListeners]) listener()
     },
     async close() {
       await Promise.all([...screens.keys()].map(stop))

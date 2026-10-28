@@ -23,6 +23,8 @@ export type ContractWorld = {
   reconnect(): Promise<ContractComputer>
   /** Kills every process of the bot's screen, as a crash would. */
   crash(bot: ScreenBot): Promise<void>
+  /** Restarts what keeps the screens (the screen daemon), which may lose them. Needed to cover restarts. */
+  restart?(): Promise<void>
   /** Puts `page` where the computer's browsers can load it; returns its URL. Needed to cover the browser. */
   page?(name: string, page: TestPage): string
   /**
@@ -43,6 +45,8 @@ export type ContractOptions = {
   browser?: boolean
   /** Whether to cover the desktop; off for a screen daemon tested with stand-in programs. */
   desktop?: boolean
+  /** Whether to cover restarts; off where the computer can't be restarted by a test. */
+  restart?: boolean
 }
 
 /** The first bytes of the screen's stream: the VNC protocol's greeting, e.g. `RFB 003.008\n`. */
@@ -192,6 +196,26 @@ export function describeComputerContract(name: string, open: () => Promise<Contr
 
       expect(await computer.screens.status(rex)).toEqual(before)
       expect(await readStreamGreeting(before.streamPort!)).toMatch(greeting)
+    })
+
+    it.runIf(options.restart ?? true)('tells its clients when it restarted, so they can bring their screens back', { timeout: timeout * 2 }, async () => {
+      const world = await setup()
+      const rex = newBot('Rex')
+      await world.computer.screens.start(rex)
+      await untilRunning(world.computer, rex)
+      let restarts = 0
+      const stopListening = world.computer.screens.onRestart(() => restarts++)
+      // Listening before the restart, as the server does from its start.
+      await new Promise((resolve) => setTimeout(resolve, 200))
+
+      await world.restart!()
+
+      await expect.poll(() => restarts, { timeout }).toBe(1)
+      stopListening()
+      await world.computer.screens.start(rex)
+      expect((await untilRunning(world.computer, rex)).display).toBe(rex.display)
+      // Told once per restart.
+      expect(restarts).toBe(1)
     })
 
     it('stops a screen and its stream', { timeout: timeout * 2 }, async () => {

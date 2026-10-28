@@ -61,7 +61,7 @@ describe.skipIf(!inRuntimeImage)('the real computer', () => {
         },
       }
     },
-    { firstDisplay: 900, timeout: 60_000 },
+    { firstDisplay: 900, timeout: 60_000, restart: false },
   )
 })
 

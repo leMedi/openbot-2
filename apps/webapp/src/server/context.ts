@@ -37,6 +37,8 @@ export type ServerContext = {
   screenTickets: ScreenTickets
   /** Settles once the computer's screens first match the bots (or the computer couldn't be reached at all). */
   screensSynced: Promise<void>
+  /** Stops bringing the bots' screens back when the screen daemon restarts; when the server stops. */
+  stopSyncingScreens(): void
   /** Plays group chats' rounds of member turns. */
   rounds: GroupRounds
 }
@@ -223,25 +225,62 @@ export async function createServerContext({
     onStatus: (botId, status) => bus.publish({ type: 'bot.status', botId, ...status }),
   })
   opened(runtime)
-  const screensSynced = keepScreensInSync(db, screens)
-  return { db, bus, providers, runtime, computer, attachments, screens, screenTickets, screensSynced, rounds }
+  const { synced: screensSynced, stop: stopSyncingScreens } = keepScreensInSync(db, screens)
+  return { db, bus, providers, runtime, computer, attachments, screens, screenTickets, screensSynced, stopSyncingScreens, rounds }
 }
 
 const syncRetryMs = [1_000, 2_000, 5_000, 10_000, 30_000]
 
 /**
- * Makes the computer's screens match the bots when the server starts, retrying while the screen daemon isn't up yet
- * (e.g. both just started). Settles after the first attempt either way; retries go on in the background.
+ * Makes the computer's screens match the bots when the server starts and again each time the screen daemon restarts
+ * (it restores the screens it last saved, which may not be the bots' now), retrying while the daemon isn't up yet (e.g. both just started).
+ * `synced` settles after the first attempt either way; retries go on in the background.
  */
-function keepScreensInSync(db: Db, screens: Screens): Promise<void> {
-  return new Promise((settle) => {
-    let attempt = 0
-    const sync = () =>
-      syncScreens(db, screens).then(settle, (error: Error) => {
-        if (attempt === 0) console.warn(`[screens] Couldn't start the bots' screens; retrying: ${error.message}`)
-        settle()
-        setTimeout(sync, syncRetryMs[Math.min(attempt++, syncRetryMs.length - 1)]).unref()
+function keepScreensInSync(db: Db, screens: Screens): { synced: Promise<void>; stop(): void } {
+  let attempt = 0
+  let retry: ReturnType<typeof setTimeout> | undefined
+  let syncing: Promise<void> | undefined
+  /** A sync under way may have started screens on the daemon from before the restart. */
+  let restartedDuringSync = false
+  let stopped = false
+  function sync(): Promise<void> {
+    if (syncing) {
+      restartedDuringSync = true
+      return syncing
+    }
+    clearTimeout(retry)
+    syncing = syncScreens(db, screens)
+      .then(
+        () => {
+          attempt = 0
+        },
+        (error: Error) => {
+          if (attempt === 0) console.warn(`[screens] Couldn't start the bots' screens; retrying: ${error.message}`)
+          if (!stopped) retry = setTimeout(sync, syncRetryMs[Math.min(attempt++, syncRetryMs.length - 1)]).unref()
+        },
+      )
+      .finally(() => {
+        syncing = undefined
+        if (restartedDuringSync && !stopped) {
+          restartedDuringSync = false
+          void sync()
+        }
       })
+    return syncing
+  }
+  // Listening before the first sync, so a restart noticed during it is synced again.
+  const stopListening = screens.onRestart(() => {
+    if (stopped) return
+    console.warn("[screens] The screen daemon restarted; bringing the bots' screens back")
+    attempt = 0
     void sync()
   })
+  return {
+    synced: sync(),
+    stop() {
+      stopped = true
+      clearTimeout(retry)
+      stopListening()
+    },
+  }
 }

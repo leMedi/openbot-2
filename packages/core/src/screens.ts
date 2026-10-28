@@ -10,7 +10,8 @@ export async function startScreen(db: Db, screens: Screens, bot: BotWithChat): P
 
 /**
  * Makes the computer's screens match the bots: every bot's screen kept running, and the screens of bots deleted while
- * the computer couldn't be reached stopped (with their browser profiles). Run when the server starts.
+ * the computer couldn't be reached stopped (with their browser profiles). Run when the server starts and whenever the
+ * screen daemon restarts.
  */
 export async function syncScreens(db: Db, screens: Screens): Promise<void> {
   const bots = await listBots(db)

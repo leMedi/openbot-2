@@ -73,14 +73,27 @@ async function newDaemon() {
   return daemon
 }
 
+/** Stops `daemon` and starts it again on its folder, as supervisord or `node --watch` would. */
+async function restartDaemon(daemon: Daemon): Promise<Daemon> {
+  await daemon.close()
+  daemons = daemons.filter((other) => other !== daemon)
+  const restarted = await startDaemon(daemon.dir)
+  daemons.push(restarted)
+  return restarted
+}
+
 describeComputerContract(
   'the screen daemon',
   async () => {
-    const daemon = await newDaemon()
+    let daemon = await newDaemon()
+    const client = () => ({ screens: connectScreens({ socketPath: daemon.socketPath, checkEvery: 50 }) })
     return {
-      computer: { screens: connectScreens({ socketPath: daemon.socketPath }) },
-      reconnect: async () => ({ screens: connectScreens({ socketPath: daemon.socketPath }) }),
+      computer: client(),
+      reconnect: async () => client(),
       crash: async (bot) => kill(daemon.manager.pids(bot.id)),
+      restart: async () => {
+        daemon = await restartDaemon(daemon)
+      },
     }
   },
   { browser: false, desktop: false, timeout: 10_000 },
@@ -108,11 +121,8 @@ describe('the screen daemon', () => {
     const first = await newDaemon()
     await first.manager.start(rex)
     await expect.poll(() => first.manager.status('rex').state).toBe('running')
-    await first.close()
-    daemons = daemons.filter((daemon) => daemon !== first)
 
-    const second = await startDaemon(first.dir)
-    daemons.push(second)
+    const second = await restartDaemon(first)
 
     await expect.poll(() => second.manager.status('rex').state).toBe('running')
     expect(second.manager.status('rex').display).toBe(7)

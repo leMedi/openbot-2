@@ -131,11 +131,13 @@ async function botMustExist(context: ServerContext, botId: string): Promise<BotW
   return bot
 }
 
-/** The bot's screen, started if the computer isn't keeping it; SERVICE_UNAVAILABLE when the computer can't be reached. */
-async function ensureScreen(context: ServerContext, bot: BotWithChat) {
+/**
+ * The bot's screen as the computer reports it, never started here: the server brings screens back when it starts and
+ * when the screen daemon restarts. SERVICE_UNAVAILABLE when the computer can't be reached.
+ */
+async function screenOf(context: ServerContext, bot: BotWithChat) {
   try {
-    const status = await context.screens.status(bot)
-    return status.state === 'stopped' ? await startScreen(context.db, context.screens, bot) : status
+    return await context.screens.status(bot)
   } catch (error) {
     if (!(error instanceof ScreenDaemonError)) throw error
     console.error(`[screens] Can't reach ${bot.name}'s screen:`, error.message)
@@ -482,15 +484,16 @@ export const router = os.router({
   screens: {
     status: os.screens.status.handler(async ({ context, input }) => {
       const bot = await botMustExist(context, input.botId)
-      const { state, startedAt } = await ensureScreen(context, bot)
+      const { state, startedAt } = await screenOf(context, bot)
       return { state, startedAt, ...screenSize }
     }),
 
     ticket: os.screens.ticket.handler(async ({ context, input }) => {
       const bot = await botMustExist(context, input.botId)
-      const status = await ensureScreen(context, bot)
+      const status = await screenOf(context, bot)
       if (status.state !== 'running' || status.streamPort === null) {
-        throw new ORPCError('PRECONDITION_FAILED', { message: `${bot.name}'s screen is ${status.state === 'crashed' ? 'restarting' : 'starting'}` })
+        const why = status.state === 'stopped' ? "isn't running" : status.state === 'crashed' ? 'is restarting' : 'is starting'
+        throw new ORPCError('PRECONDITION_FAILED', { message: `${bot.name}'s screen ${why}` })
       }
       const { ticket, expiresAt } = context.screenTickets.issue(bot.id, status.streamPort)
       return { url: screenStreamUrl(bot.id, ticket), expiresAt }
