@@ -798,3 +798,149 @@ describe('extraction', () => {
     expect(await server.client.sharedMemory.list()).toMatchObject([{ content: 'The owner drinks tea.' }])
   })
 })
+
+describe('episodes', () => {
+  /** Rex on a server that extracts memory after every run, on `fake/fake-memory`. */
+  const startExtracting = () => startWithRex({ extraction: true })
+
+  /** What the memory model was asked to sum up as episodes: each such request's prompt. */
+  const episodePrompts = (server: TestServer) =>
+    server.providers.requests
+      .filter((request) => request.model === server.providers.memoryModel.ref && JSON.stringify(request.messages).includes('<runs>'))
+      .map((request) => JSON.stringify(request.messages))
+
+  /**
+   * The owner asks Rex for `text`; Rex answers `reply`, and extraction finds nothing to remember. `episode` is what the
+   * memory model answers next, for a run that completes an episode.
+   */
+  async function chatThatCounts(server: TestServer, bot: BotInfo, text: string, reply: string, ...episode: string[]) {
+    server.providers.script(callsTools(['sendMessage', { text: reply }]), endsSilently())
+    server.providers.memoryModel.script(says('NONE'), ...episode.map((answer) => says(answer)))
+    await chat(server, bot, text)
+    await server.extraction.idle()
+  }
+
+  it("sums up every 6 runs that sent a message or acted in one log fact in the bot's memory", async () => {
+    const { server, bot } = await startWithRex({ extraction: true, shell: () => ({ stdout: 'deployed', stderr: '', exitCode: 0 }) })
+    for (let run = 1; run <= 5; run++) await chatThatCounts(server, bot, `Fix bug #${run}.`, `Bug #${run} is fixed.`)
+    expect(episodePrompts(server)).toEqual([])
+    // The sixth acts without a word: a routine deploys.
+    server.providers.script(callsTools(['bash', { command: './deploy.sh' }]), endsSilently())
+    server.providers.memoryModel.script(says('Rex fixed bugs #1 to #5 for the owner and deployed the app.'))
+
+    await server.runtime.wake(bot.id, { lane: 'background', text: '[routine "Deploy", set by you] Deploy the app.' })
+    await untilIdle(server, bot)
+    await server.extraction.idle()
+
+    const [prompt] = episodePrompts(server)
+    expect(prompt).toContain('<bot>Bug #1 is fixed.</bot>')
+    expect(prompt).toContain('<bot>Bug #5 is fixed.</bot>')
+    expect(prompt).toContain('./deploy.sh')
+    expect(prompt).not.toContain('Fix bug #1.')
+    expect(await server.client.bots.memory({ botId: bot.id })).toMatchObject([
+      { tier: 'log', content: 'Rex fixed bugs #1 to #5 for the owner and deployed the app.', source: 'bot', sourceBotName: 'Rex' },
+    ])
+    expect(await server.client.sharedMemory.list()).toEqual([])
+  })
+
+  it("doesn't count silent routine wakes, passes in a group chat, runs that only looked or changed memory, nor small talk", async () => {
+    const { server, bot } = await startExtracting()
+    const ana = await server.client.bots.create({ ...rex, name: 'Ana', instructions: 'Ana reviews code.' })
+    for (let run = 1; run <= 5; run++) await chatThatCounts(server, bot, `Fix bug #${run}.`, `Bug #${run} is fixed.`)
+
+    // A routine wakes Rex, who stays silent.
+    server.providers.script(endsSilently())
+    await server.runtime.wake(bot.id, { lane: 'background', text: '[routine "Check", set by you] Check the build.' })
+    await untilIdle(server, bot)
+    // Rex only reads a file, then only changes his memory.
+    server.providers.script(callsTools(['read', { path: 'notes.txt' }]), endsSilently())
+    await server.runtime.wake(bot.id, { lane: 'background', text: '[routine "Read", set by you] Read your notes.' })
+    await untilIdle(server, bot)
+    await updateState(server, bot, { action: 'write', scope: 'bot', tier: 'note', text: 'The build is green.' })
+    // Both pass in a group chat.
+    server.providers.scriptFor('Rex', endsSilently())
+    server.providers.scriptFor('Ana', endsSilently())
+    const { chat: group } = await server.client.groups.create({ memberIds: [bot.id, ana.id], text: 'Anything to add?' })
+    await server.rounds.idle(group.id)
+    // Small talk.
+    server.providers.script(callsTools(['sendMessage', { text: 'Anytime!' }]), endsSilently())
+    await chat(server, bot, 'Thanks Rex!')
+    await server.extraction.idle()
+    expect(episodePrompts(server)).toEqual([])
+
+    server.providers.script(callsTools(['sendMessage', { text: 'Bug #6 is fixed.' }]), endsSilently())
+    server.providers.memoryModel.script(says('NONE'), says('Rex fixed bugs #1 to #6.'))
+    await chat(server, bot, 'Fix bug #6.')
+    await server.extraction.idle()
+
+    expect(episodePrompts(server)).toHaveLength(1)
+    expect(episodePrompts(server)[0]!.match(/<run>/g)).toHaveLength(6)
+    expect(await server.client.bots.memory({ botId: bot.id })).toMatchObject([
+      { tier: 'note', content: 'The build is green.' },
+      { tier: 'log', content: 'Rex fixed bugs #1 to #6.' },
+    ])
+    expect(await server.client.bots.memory({ botId: ana.id })).toEqual([])
+  })
+
+  it('ranks and renders an episode in the prompt like any other log fact', async () => {
+    const { server, bot } = await startExtracting()
+    await updateState(server, bot, { action: 'write', scope: 'bot', tier: 'log', text: 'Shipped v1.', importance: 3 })
+    for (let run = 1; run <= 5; run++) await chatThatCounts(server, bot, `Fix bug #${run}.`, `Bug #${run} is fixed.`)
+    server.providers.script(callsTools(['sendMessage', { text: 'Bug #6 is fixed.' }]), endsSilently())
+    server.providers.memoryModel.script(says('NONE'), says('"Rex fixed bugs #1 to #6."'))
+    await chat(server, bot, 'Fix bug #6.')
+    await server.extraction.idle()
+    await server.clock.advance(day)
+
+    await compact(server, bot)
+    const prompt = await nextPrompt(server, bot)
+
+    const block = JSON.parse(`"${/<memory>(.*?)<\/memory>/.exec(prompt)![1]}"`) as string
+    // Of the same importance, the newer ranks first.
+    expect(block).toContain(['Recently:', '- [2] (learned 2026-10-28) Rex fixed bugs #1 to #6.', '- [1] (learned 2026-10-28) Shipped v1.'].join('\n'))
+    expect((await server.client.bots.audit({ botId: bot.id })).map((entry) => entry.input)).toContainEqual({
+      change: 'episode',
+      runs: 6,
+      text: 'Rex fixed bugs #1 to #6.',
+      id: 2,
+    })
+  })
+
+  it('retries a failed episode once, then skips it with an audit entry; the next one sums up the next 6 runs', async () => {
+    const { server, bot } = await startExtracting()
+    for (let run = 1; run <= 5; run++) await chatThatCounts(server, bot, `Fix bug #${run}.`, `Bug #${run} is fixed.`)
+    server.providers.script(callsTools(['sendMessage', { text: 'Bug #6 is fixed.' }]), endsSilently())
+    server.providers.memoryModel.script(says('NONE'), fails('The memory model is down'), fails('The memory model is still down'))
+    await chat(server, bot, 'Fix bug #6.')
+    await server.extraction.idle()
+
+    expect(await server.client.bots.memory({ botId: bot.id })).toEqual([])
+    expect((await server.client.bots.audit({ botId: bot.id })).map((entry) => entry.input)).toEqual([
+      { status: 'skipped', episode: { runs: 6 }, model: 'fake/fake-memory', error: 'The memory model is still down' },
+    ])
+
+    for (let run = 7; run <= 11; run++) await chatThatCounts(server, bot, `Fix bug #${run}.`, `Bug #${run} is fixed.`)
+    await chatThatCounts(server, bot, 'Fix bug #12.', 'Bug #12 is fixed.', 'Rex fixed bugs #7 to #12.')
+
+    const last = episodePrompts(server).at(-1)!
+    expect(last.match(/<run>/g)).toHaveLength(6)
+    expect(last).toContain('Bug #7 is fixed.')
+    expect(last).not.toContain('Bug #6 is fixed.')
+    expect(await server.client.bots.memory({ botId: bot.id })).toMatchObject([{ tier: 'log', content: 'Rex fixed bugs #7 to #12.' }])
+  })
+
+  it("waits for the bot's next counting run when the run that completes an episode couldn't be extracted", async () => {
+    const { server, bot } = await startExtracting()
+    for (let run = 1; run <= 5; run++) await chatThatCounts(server, bot, `Fix bug #${run}.`, `Bug #${run} is fixed.`)
+    server.providers.script(callsTools(['sendMessage', { text: 'Bug #6 is fixed.' }]), endsSilently())
+    server.providers.memoryModel.script(fails('The memory model is down'), fails('The memory model is still down'))
+    await chat(server, bot, 'Fix bug #6.')
+    await server.extraction.idle()
+    expect(episodePrompts(server)).toEqual([])
+
+    await chatThatCounts(server, bot, 'Fix bug #7.', 'Bug #7 is fixed.', 'Rex fixed bugs #1 to #7.')
+
+    expect(episodePrompts(server)[0]!.match(/<run>/g)).toHaveLength(7)
+    expect(await server.client.bots.memory({ botId: bot.id })).toMatchObject([{ tier: 'log', content: 'Rex fixed bugs #1 to #7.' }])
+  })
+})

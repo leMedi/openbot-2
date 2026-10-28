@@ -286,6 +286,25 @@ export const memories = sqliteTable(
   (table) => [index('memories_bot_idx').on(table.botId)],
 )
 
+/**
+ * A bot's runs that sent a message or acted since its last episode (design §5.3), as extraction keeps them: once there
+ * are enough (`runsPerEpisode`), it sums them up in one log fact and deletes them. Deleting the bot deletes them.
+ */
+export const episodeRuns = sqliteTable(
+  'episode_runs',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    botId: text('bot_id')
+      .notNull()
+      .references(() => bots.id, { onDelete: 'cascade' }),
+    /** What the bot said and did in the run, one line each, as the episode prompt shows it. */
+    digest: text('digest').notNull(),
+    /** Written from the server's clock. */
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [index('episode_runs_bot_idx').on(table.botId)],
+)
+
 export type Setting = typeof settings.$inferSelect
 export type SystemCredential = typeof systemCredentials.$inferSelect
 export type Bot = typeof bots.$inferSelect

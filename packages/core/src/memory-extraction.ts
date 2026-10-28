@@ -1,4 +1,5 @@
-import { type Db, type FactTier, factTiers, type MemoryScope } from '@openbot/db'
+import { type Db, episodeRuns, type FactTier, factTiers, type MemoryScope } from '@openbot/db'
+import { and, asc, eq, lte } from 'drizzle-orm'
 import { getBot } from './bots.ts'
 import {
   editFact,
@@ -33,7 +34,15 @@ export type ExchangePart =
       /** What it is, e.g. `result of bash`. */
       label: string
       text: string
+      /**
+       * On a `tool_call`: the tool acts, its calls reviewed under a surface of their own (e.g. `bash`, `use_computer`), so
+       * the run counts towards an episode. Memory changes (`update_state`) and tools that only look don't, nor does a tool whose surface depends on its arguments.
+       */
+      acts?: true
     }
+
+/** The bot whose run is extracted. */
+type BotRef = { id: string; name: string }
 
 /** A bot's run once it settled, in order. */
 export type RunExchange = readonly ExchangePart[]
@@ -174,7 +183,7 @@ type Outcome = { id: number } | { refused: string }
  * edit or removal reaches only the bot's bot memory and shared memory, and every change needs its scope's source in
  * the exchange (`unsourced`).
  */
-async function applyChange(db: Db, bot: { id: string; name: string }, change: ExtractedChange, exchange: RunExchange, now: number): Promise<Outcome> {
+async function applyChange(db: Db, bot: BotRef, change: ExtractedChange, exchange: RunExchange, now: number): Promise<Outcome> {
   try {
     if (change.change === 'new') {
       const refused = unsourced(change.scope, exchange)
@@ -196,6 +205,47 @@ async function applyChange(db: Db, bot: { id: string; name: string }, change: Ex
   }
 }
 
+/** How many runs that sent a message or acted one episode sums up (design §5.3). */
+export const runsPerEpisode = 6
+/** A tool call's arguments are cut to this many characters in an episode's prompt. */
+const maxActionChars = 500
+
+/** Whether a run counts towards an episode: it sent a message, or called a tool that acts. */
+const countsTowardsEpisode = (exchange: RunExchange) => exchange.some((part) => part.from === 'bot' || (part.from === 'context' && part.acts))
+
+/**
+ * What a run counts towards an episode with: what the bot said (`<bot>`) and the calls of tools that act (`<action>`),
+ * in order. Never the owner's or other bots' words, nor tool results: an episode is the bot's account of its own work.
+ */
+function runDigest(exchange: RunExchange): string {
+  return exchange
+    .flatMap((part) => {
+      if (part.from === 'bot') return [partLine(part)]
+      if (part.from === 'context' && part.acts) return [`<action from="${escaped(part.label)}">${escaped(cut(part.text, maxActionChars))}</action>`]
+      return []
+    })
+    .join('\n')
+}
+
+/** What the memory model is told to sum up the bot `botName`'s last `runs` runs in an episode. */
+function episodeInstructions(botName: string, runs: number): string {
+  return `You keep the long-term memory of ${botName}, one of the owner's bots. You read what ${botName} said (<bot>) and did (<action>) in its last ${runs} runs that did something, oldest first, and sum them up in one sentence it will remember them by, e.g. "${botName} fixed the CI build and reviewed two pull requests for the owner."
+
+Say what ${botName} did, not what anyone else said or asked. At most ${maxFactLength} characters. Never include secrets, passwords or keys. Answer the sentence and nothing else.`
+}
+
+/** What the memory model reads to sum up an episode: each run's digest, oldest first. */
+const episodePrompt = (digests: readonly string[]) => ['<runs>', ...digests.flatMap((digest) => ['<run>', digest, '</run>']), '</runs>'].join('\n')
+
+/** The episode in the memory model's answer: its first line, unquoted; undefined when it is empty or NONE. */
+function parseEpisode(answer: string): string | undefined {
+  const line = answer
+    .split('\n')
+    .map((raw) => raw.trim().replace(/^["“](.*)["”]$/, '$1').trim())
+    .find(Boolean)
+  return line && !/^none\.?$/i.test(line) ? line : undefined
+}
+
 /** Extraction's audit entries sit under memory's surface; they are never reviewed. */
 const audit = (db: Db, botId: string, input: unknown) => recordUnreviewed(db, botId, { kind: 'extraction', surface: 'memory_shared_write', tool: 'extraction', input })
 
@@ -214,10 +264,11 @@ export type MemoryExtractionOptions = {
 
 /**
  * Extraction (design §5.3): after each run of a bot settles, a side call on the memory model picks out facts worth
- * remembering, from the owner's own words and the bot's own messages only. A bot's extractions run one at a time, in
- * the order its runs settled, never holding up its next run. A failed call is tried once more, then the extraction is
- * skipped and audited. Every change is audited, none reviewed. Kept in memory: extractions not done when the server
- * stops are lost.
+ * remembering, from the owner's own words and the bot's own messages only; every `runsPerEpisode` runs that sent a
+ * message or acted, another sums them up in an episode, a log fact of its bot memory. A bot's extractions run one at a
+ * time, in the order its runs settled, never holding up its next run. A failed call is tried once more, then the
+ * extraction is skipped and audited. Every change is audited, none reviewed. Kept in memory: extractions not done when
+ * the server stops are lost; the runs counted towards an episode are kept in the database.
  */
 export class MemoryExtraction {
   readonly #options: MemoryExtractionOptions
@@ -268,37 +319,91 @@ export class MemoryExtraction {
     }
   }
 
-  async #extractFor(bot: { id: string; name: string }, read: () => Promise<RunExchange | undefined>): Promise<void> {
-    const { db, clock, model, complete } = this.#options
+  async #extractFor(bot: BotRef, read: () => Promise<RunExchange | undefined>): Promise<void> {
     const exchange = await read()
+    if (!exchange || isTrivial(exchange, bot.name)) return
     // Only the owner's words and the bot's messages teach anything: without either, there is nothing to learn.
-    if (!exchange?.some((part) => part.from !== 'context') || isTrivial(exchange, bot.name)) return
-    const ref = await model()
+    const learns = exchange.some((part) => part.from !== 'context')
+    const counts = countsTowardsEpisode(exchange)
+    if (!learns && !counts) return
+    const ref = await this.#options.model()
     if (!ref) return
-    const request = {
+    const answered = learns ? await this.#learn(bot, ref, exchange) : true
+    if (!counts) return
+    await this.#options.db.insert(episodeRuns).values({ botId: bot.id, digest: runDigest(exchange), createdAt: new Date(this.#options.clock.now()) })
+    // Once the memory model failed, the episode waits for the bot's next run that counts rather than fail again.
+    if (answered) await this.#sumUpEpisode(bot, ref)
+  }
+
+  /** Asks the memory model what to remember from `exchange`, and applies its answer; false when the call failed. */
+  async #learn(bot: BotRef, ref: string, exchange: RunExchange): Promise<boolean> {
+    const { db, clock } = this.#options
+    const answer = await this.#ask(bot, ref, {
       systemPrompt: extractionInstructions(bot.name),
       prompt: extractionPrompt([...(await listBotFacts(db, bot.id)), ...(await listSharedFacts(db))], exchange),
-    }
-    let answer: string | undefined
-    let failure: unknown
-    for (let attempt = 0; attempt < 2 && answer === undefined; attempt++) {
-      try {
-        answer = await complete(ref, request)
-      } catch (error) {
-        failure = error
-      }
-    }
-    if (answer === undefined) return this.#skip(bot, ref, failure)
+    })
+    if (answer === undefined) return false
     for (const change of parseExtraction(answer)) {
       const outcome = await applyChange(db, bot, change, exchange, clock.now())
       await audit(db, bot.id, { ...change, ...outcome })
     }
+    return true
   }
 
-  /** Skips the bot's extraction after `failure`, with an audit entry; on model `ref` when the model failed. */
-  async #skip(bot: { id: string; name: string }, ref: string | undefined, failure: unknown): Promise<void> {
+  /**
+   * Once at least `runsPerEpisode` runs are kept towards the bot's episode, asks the memory model to sum them up in one
+   * log fact of its bot memory, then drops them, whether that worked or not.
+   */
+  async #sumUpEpisode(bot: BotRef, ref: string): Promise<void> {
+    const { db, clock } = this.#options
+    const runs = await db.select().from(episodeRuns).where(eq(episodeRuns.botId, bot.id)).orderBy(asc(episodeRuns.id))
+    if (runs.length < runsPerEpisode) return
+    const answer = await this.#ask(
+      bot,
+      ref,
+      { systemPrompt: episodeInstructions(bot.name, runs.length), prompt: episodePrompt(runs.map((run) => run.digest)) },
+      { episode: { runs: runs.length } },
+    )
+    if (answer !== undefined) {
+      const text = parseEpisode(answer)
+      let outcome: Outcome
+      try {
+        if (!text) throw new InvalidFactError('The memory model answered no episode.')
+        outcome = { id: (await writeFact(db, bot, { scope: 'bot', tier: 'log', text }, clock.now())).id }
+      } catch (error) {
+        if (!(error instanceof InvalidFactError)) throw error
+        outcome = { refused: error.message }
+      }
+      await audit(db, bot.id, { change: 'episode', runs: runs.length, ...(text && { text }), ...outcome })
+    }
+    // After the fact is written: a server stopping before keeps the runs for the next episode.
+    await db.delete(episodeRuns).where(and(eq(episodeRuns.botId, bot.id), lte(episodeRuns.id, runs.at(-1)!.id)))
+  }
+
+  /**
+   * The memory model's answer to `request` on model `ref`; a failed call is tried once more, then the bot's extraction
+   * is skipped with an audit entry (with `skipped` added), and this answers undefined.
+   */
+  async #ask(bot: BotRef, ref: string, request: { systemPrompt: string; prompt: string }, skipped?: object): Promise<string | undefined> {
+    let failure: unknown
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await this.#options.complete(ref, request)
+      } catch (error) {
+        failure = error
+      }
+    }
+    await this.#skip(bot, ref, failure, skipped)
+    return undefined
+  }
+
+  /**
+   * Skips the bot's extraction after `failure`, with an audit entry (with `details` added); on model `ref` when the
+   * model failed.
+   */
+  async #skip(bot: BotRef, ref: string | undefined, failure: unknown, details?: object): Promise<void> {
     const error = failure instanceof Error ? failure.message : String(failure)
     console.error(`[memory] Skipped ${bot.name}'s extraction: ${error}`)
-    await audit(this.#options.db, bot.id, { status: 'skipped', ...(ref && { model: ref }), error })
+    await audit(this.#options.db, bot.id, { status: 'skipped', ...details, ...(ref && { model: ref }), error })
   }
 }

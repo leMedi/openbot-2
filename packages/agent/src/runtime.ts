@@ -398,13 +398,16 @@ const reachedOwner = (entry: EntryRecord) =>
 /** The tools a bot sends its own messages with: to the owner or a group, to teammates, and questions. */
 const sendingTools = new Set(['sendMessage', 'message_bot', 'askQuestion'])
 
-/** A tool call of the bot's as extraction reads it: a message it sent, or context. */
-function sentOrCalled(name: string, args: Record<string, unknown>): ExchangePart {
+/**
+ * A tool call of the bot's as extraction reads it: a message it sent, or context, marked when the tool is one of
+ * `actingTools`.
+ */
+function sentOrCalled(name: string, args: Record<string, unknown>, actingTools: ReadonlySet<string>): ExchangePart {
   const text = (key: string) => (typeof args[key] === 'string' ? (args[key] as string) : '')
   if (name === 'sendMessage') return { from: 'bot', text: text('text') }
   if (name === 'message_bot') return { from: 'bot', text: text('text'), to: text('to') }
   if (name === 'askQuestion') return { from: 'bot', text: text('prompt') }
-  return { from: 'context', kind: 'tool_call', label: `your call of ${name}`, text: JSON.stringify(args) }
+  return { from: 'context', kind: 'tool_call', label: `your call of ${name}`, text: JSON.stringify(args), ...(actingTools.has(name) && { acts: true as const }) }
 }
 
 /**
@@ -471,11 +474,14 @@ export class BotRuntime implements AgentRuntime {
   readonly #groupMessages = new Map<string, { inputId: string; sent: number }>()
   /** The server's time, which memory facts are dated and ranked by. */
   readonly #clock: Clock
+  /** The tools that act: those whose calls are reviewed under a fixed surface (see `ExchangePart`'s `acts`). */
+  readonly #actingTools: ReadonlySet<string>
   /** Closing: a run that can't start now is queued still, for the next start. */
   #closing = false
 
-  private constructor(harness: Harness, options: BotRuntimeOptions, images: ImageProcessor) {
+  private constructor(harness: Harness, options: BotRuntimeOptions, images: ImageProcessor, actingTools: ReadonlySet<string>) {
     this.#harness = harness
+    this.#actingTools = actingTools
     this.#options = options
     this.#images = images
     this.#clock = options.clock ?? systemClock
@@ -917,7 +923,8 @@ export class BotRuntime implements AgentRuntime {
       },
       context,
     )
-    runtime = new BotRuntime(harness, options, images)
+    const actingTools = new Set([...toolSurfaces].flatMap(([name, surface]) => (typeof surface === 'string' ? [name] : [])))
+    runtime = new BotRuntime(harness, options, images, actingTools)
     // Read before pi-durable resumes runs, whose replayed calls may queue inputs: those are woken as they are queued.
     await pruneTakenInputs(options.db)
     const queued = await queuedInputs(options.db)
@@ -1304,7 +1311,7 @@ export class BotRuntime implements AgentRuntime {
           if (message.role === 'assistant') {
             for (const block of message.content) {
               if (block.type === 'text' && block.text.trim()) parts.push({ from: 'context', kind: 'thought', label: 'your private text', text: block.text })
-              if (block.type === 'toolCall') parts.push(sentOrCalled(block.name, block.arguments))
+              if (block.type === 'toolCall') parts.push(sentOrCalled(block.name, block.arguments, this.#actingTools))
             }
           }
           if (message.role === 'toolResult' && !sendingTools.has(message.toolName)) {
