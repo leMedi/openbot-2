@@ -333,16 +333,7 @@ function MessageList({
         const card = row.message?.card
         if (card?.type === 'take_over') {
           return (
-            <div
-              key={row.key}
-              role="article"
-              className={cn(
-                'max-w-[min(88%,520px)] origin-bottom-left',
-                continuesNext ? 'mb-1' : 'mb-[22px]',
-                row.enter && 'motion-safe:animate-message-in motion-reduce:animate-fade-in',
-              )}
-            >
-              <span className="sr-only">{row.authorName}: </span>
+            <CardRow key={row.key} row={row} continuesNext={continuesNext}>
               <TakeOverCard
                 message={row.message!}
                 card={card}
@@ -351,23 +342,14 @@ function MessageList({
                 onOpenScreen={() => onScreen?.()}
                 onHandedBack={onAnswered}
               />
-            </div>
+            </CardRow>
           )
         }
         if (card?.type === 'plugin_request') {
           return (
-            <div
-              key={row.key}
-              role="article"
-              className={cn(
-                'max-w-[min(88%,520px)] origin-bottom-left',
-                continuesNext ? 'mb-1' : 'mb-[22px]',
-                row.enter && 'motion-safe:animate-message-in motion-reduce:animate-fade-in',
-              )}
-            >
-              <span className="sr-only">{row.authorName}: </span>
+            <CardRow key={row.key} row={row} continuesNext={continuesNext}>
               <PluginRequestCard message={row.message!} card={card} botName={row.authorName} onDecided={onAnswered} />
-            </div>
+            </CardRow>
           )
         }
         if (card?.type === 'routine_change') {
@@ -383,18 +365,9 @@ function MessageList({
         }
         if (card?.type === 'question') {
           return (
-            <div
-              key={row.key}
-              role="article"
-              className={cn(
-                'max-w-[min(88%,520px)] origin-bottom-left',
-                continuesNext ? 'mb-1' : 'mb-[22px]',
-                row.enter && 'motion-safe:animate-message-in motion-reduce:animate-fade-in',
-              )}
-            >
-              <span className="sr-only">{row.authorName}: </span>
+            <CardRow key={row.key} row={row} continuesNext={continuesNext}>
               <QuestionCard message={row.message!} card={card} letterKeys={row.key === newestOpenQuestion} onAnswered={onAnswered} />
-            </div>
+            </CardRow>
           )
         }
         return (
@@ -463,6 +436,23 @@ function MessageList({
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+/** A card in a chat (a question, a take-over, a plugin request), as wide as cards are, read out as its author's. */
+function CardRow({ row, continuesNext, children }: { row: Row; continuesNext: boolean; children: ReactNode }) {
+  return (
+    <div
+      role="article"
+      className={cn(
+        'max-w-[min(88%,520px)] origin-bottom-left',
+        continuesNext ? 'mb-1' : 'mb-[22px]',
+        row.enter && 'motion-safe:animate-message-in motion-reduce:animate-fade-in',
+      )}
+    >
+      <span className="sr-only">{row.authorName}: </span>
+      {children}
     </div>
   )
 }

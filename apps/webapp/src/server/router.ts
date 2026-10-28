@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
 import { disconnectedNote, InvalidAccountNameError, InvalidRedirectError, PluginAccountNotFoundError, SignInNotFoundError, toolPrefix } from '@openbot/agent'
 import type { Plugin } from '@openbot/plugins'
-import { contract, type PluginRequestChoice } from '@openbot/api-contract'
+import { contract, type MessageInfo, type PluginRequestChoice } from '@openbot/api-contract'
 import { ScreenDaemonError } from '@openbot/computer'
 import {
   answerQuestion,
@@ -166,24 +166,41 @@ async function decideRequest(
     decided = { outcome: 'granted', account: account ? { slug: account.slug, displayName: account.displayName } : null }
   }
   const { message } = await pluginRequestMustFit(decidePluginRequest(context.db, messageId, decided))
-  const publish = async (changed: Message) => {
-    context.bus.publish({ type: 'message.updated', message: toMessageInfo(changed) })
-    await publishChat(context, changed.chatId)
+  const reopen = () => reopenPluginRequest(context.db, message.id)
+  if (decided.outcome === 'granted') {
+    const { account } = decided
+    await reopenOnFailure(context, reopen, () =>
+      account ? accountMustExist(context.pluginAccounts.grant(bot.id, card.plugin, account.slug)) : context.pluginAccounts.grantSkills(bot.id, card.plugin),
+    )
   }
+  const info = await publishCard(context, message)
+  const tools = decided.outcome === 'granted' && decided.account ? toolPrefix(card.plugin, decided.account.slug) : undefined
+  await reopenOnFailure(context, reopen, () =>
+    context.runtime.wake(bot.id, { lane: 'owner', text: describePluginDecision(card, decided, tools), id: `plugin-request:${message.id}` }),
+  )
+  return info
+}
+
+/** Tells every tab a card's message changed (answered, decided, reopened…) and how its chat now looks; returns it. */
+async function publishCard(context: ServerContext, message: Message): Promise<MessageInfo> {
+  const info = toMessageInfo(message)
+  context.bus.publish({ type: 'message.updated', message: info })
+  await publishChat(context, message.chatId)
+  return info
+}
+
+/**
+ * Runs `work` for a card the owner just closed, e.g. waking its bot with their answer. When it fails, the card is
+ * reopened with `reopen`, so the owner can close it again, and the error thrown: what the bot never got isn't kept.
+ */
+async function reopenOnFailure(context: ServerContext, reopen: () => Promise<Message | undefined>, work: () => Promise<unknown>) {
   try {
-    if (decided.outcome === 'granted') {
-      if (decided.account) await accountMustExist(context.pluginAccounts.grant(bot.id, card.plugin, decided.account.slug))
-      else await context.pluginAccounts.grantSkills(bot.id, card.plugin)
-    }
-    await publish(message)
-    const tools = decided.outcome === 'granted' && decided.account ? toolPrefix(card.plugin, decided.account.slug) : undefined
-    await context.runtime.wake(bot.id, { lane: 'owner', text: describePluginDecision(card, decided, tools), id: `plugin-request:${message.id}` })
+    await work()
   } catch (error) {
-    const reopened = await reopenPluginRequest(context.db, message.id)
-    if (reopened) await publish(reopened)
+    const reopened = await reopen()
+    if (reopened) await publishCard(context, reopened)
     throw error
   }
-  return toMessageInfo(message)
 }
 
 /** Writes the owner's time zone with `write`, refusing an invalid one; a change is published for scheduled jobs. */
@@ -534,21 +551,13 @@ export const router = os.router({
         [QuestionAnsweredError, 'CONFLICT'],
         [InvalidAnswerError, 'BAD_REQUEST'],
       ])
-      const info = toMessageInfo(message)
-      context.bus.publish({ type: 'message.updated', message: info })
-      await publishChat(context, message.chatId)
-      try {
-        // The owner's answer: it steers a run that is still going, like any message of theirs.
-        await context.runtime.wake(bot.id, { lane: 'owner', text: describeAnswer(card, answer), id: `answer:${message.id}` })
-      } catch (error) {
-        // An answer the bot never got isn't kept, so the owner can answer again.
-        const reopened = await reopenQuestion(context.db, message.id)
-        if (reopened) {
-          context.bus.publish({ type: 'message.updated', message: toMessageInfo(reopened) })
-          await publishChat(context, reopened.chatId)
-        }
-        throw error
-      }
+      const info = await publishCard(context, message)
+      // The owner's answer: it steers a run that is still going, like any message of theirs.
+      await reopenOnFailure(
+        context,
+        () => reopenQuestion(context.db, message.id),
+        () => context.runtime.wake(bot.id, { lane: 'owner', text: describeAnswer(card, answer), id: `answer:${message.id}` }),
+      )
       return info
     }),
 
@@ -558,10 +567,7 @@ export const router = os.router({
         [QuestionAnsweredError, 'CONFLICT'],
       ])
       // The bot isn't woken: its next run lists the question as unanswered.
-      const info = toMessageInfo(dismissed)
-      context.bus.publish({ type: 'message.updated', message: info })
-      await publishChat(context, dismissed.chatId)
-      return info
+      return publishCard(context, dismissed)
     }),
 
     handBack: os.chats.handBack.handler(async ({ context, input }) => {
@@ -573,20 +579,12 @@ export const router = os.router({
         [TakeOverNotFoundError, 'NOT_FOUND'],
         [HandedBackError, 'CONFLICT'],
       ])
-      const info = toMessageInfo(message)
-      context.bus.publish({ type: 'message.updated', message: info })
-      await publishChat(context, message.chatId)
-      try {
-        await context.runtime.wake(bot.id, { lane: 'owner', text: describeHandBack(card, input.outcome), id: `hand-back:${message.id}` })
-      } catch (error) {
-        // A hand-back the bot never got isn't kept, so the owner can hand back again.
-        const reopened = await reopenTakeOver(context.db, message.id)
-        if (reopened) {
-          context.bus.publish({ type: 'message.updated', message: toMessageInfo(reopened) })
-          await publishChat(context, reopened.chatId)
-        }
-        throw error
-      }
+      const info = await publishCard(context, message)
+      await reopenOnFailure(
+        context,
+        () => reopenTakeOver(context.db, message.id),
+        () => context.runtime.wake(bot.id, { lane: 'owner', text: describeHandBack(card, input.outcome), id: `hand-back:${message.id}` }),
+      )
       return info
     }),
 

@@ -239,6 +239,13 @@ export async function createServerContext({
     await publish(chatId)
     return posted.message
   }
+  /** Posts a bot's card (a question, a take-over, a plugin request, a routine change) to its DM, once per idempotency key. */
+  async function postCard(bot: BotWithChat, card: object, text: string, idempotencyKey: string) {
+    const { message, created } = await postMessage(db, { chatId: bot.chatId, author: 'bot', authorBotId: bot.id, authorName: bot.name, text, card, idempotencyKey })
+    if (!created) return
+    bus.publish({ type: 'message.created', message: toMessageInfo(message) })
+    await publish(bot.chatId)
+  }
   const runtime = await BotRuntime.open({
     db,
     models: providers.models,
@@ -323,65 +330,21 @@ export async function createServerContext({
       }
       return posted[1]!.message
     },
-    async askQuestion(bot, card, idempotencyKey) {
-      const { message, created } = await postMessage(db, {
-        chatId: bot.chatId,
-        author: 'bot',
-        authorBotId: bot.id,
-        authorName: bot.name,
-        // The prompt doubles as the message's text, e.g. for previews.
-        text: card.prompt,
-        card,
-        idempotencyKey,
-      })
-      if (!created) return
-      bus.publish({ type: 'message.created', message: toMessageInfo(message) })
-      await publish(bot.chatId)
+    askQuestion(bot, card, idempotencyKey) {
+      // The prompt doubles as the message's text, e.g. for previews.
+      return postCard(bot, card, card.prompt, idempotencyKey)
     },
-    async requestPlugin(bot, card, idempotencyKey) {
-      const { message, created } = await postMessage(db, {
-        chatId: bot.chatId,
-        author: 'bot',
-        authorBotId: bot.id,
-        authorName: bot.name,
-        // "Wants to use Notion: <reason>" doubles as the message's text, e.g. for previews.
-        text: describePluginRequest(card),
-        card,
-        idempotencyKey,
-      })
-      if (!created) return
-      bus.publish({ type: 'message.created', message: toMessageInfo(message) })
-      await publish(bot.chatId)
+    requestPlugin(bot, card, idempotencyKey) {
+      // "Wants to use Notion: <reason>" doubles as the message's text, e.g. for previews.
+      return postCard(bot, card, describePluginRequest(card), idempotencyKey)
     },
-    async postRoutineChange(bot, card, idempotencyKey) {
-      const { message, created } = await postMessage(db, {
-        chatId: bot.chatId,
-        author: 'bot',
-        authorBotId: bot.id,
-        authorName: bot.name,
-        // The row's sentence doubles as the message's text, e.g. for previews.
-        text: describeRoutineChange(bot.name, card),
-        card,
-        idempotencyKey,
-      })
-      if (!created) return
-      bus.publish({ type: 'message.created', message: toMessageInfo(message) })
-      await publish(bot.chatId)
+    postRoutineChange(bot, card, idempotencyKey) {
+      // The row's sentence doubles as the message's text, e.g. for previews.
+      return postCard(bot, card, describeRoutineChange(bot.name, card), idempotencyKey)
     },
-    async requestTakeOver(bot, card, idempotencyKey) {
-      const { message, created } = await postMessage(db, {
-        chatId: bot.chatId,
-        author: 'bot',
-        authorBotId: bot.id,
-        authorName: bot.name,
-        // The instruction doubles as the message's text, e.g. for previews.
-        text: card.instruction,
-        card,
-        idempotencyKey,
-      })
-      if (!created) return
-      bus.publish({ type: 'message.created', message: toMessageInfo(message) })
-      await publish(bot.chatId)
+    requestTakeOver(bot, card, idempotencyKey) {
+      // The instruction doubles as the message's text, e.g. for previews.
+      return postCard(bot, card, card.instruction, idempotencyKey)
     },
     onStatus: (botId, status) => bus.publish({ type: 'bot.status', botId, ...status }),
     onInputSettled: (_botId, inputId, outcome) =>
