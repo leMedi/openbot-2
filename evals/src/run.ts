@@ -309,13 +309,7 @@ async function collect(server: TestServer, scenario: Scenario, bots: Map<string,
 async function runFailures(server: TestServer, bots: Map<string, BotInfo>, models: EvalModels): Promise<string | undefined> {
   const failed = (await server.client.bots.list()).filter((bot) => bot.error)
   if (failed.length) return failed.map((bot) => `${bot.name}'s run failed: ${bot.error}`).join('; ')
-  const skipped: string[] = []
-  for (const [name, bot] of bots)
-    for (const entry of await server.client.bots.audit({ botId: bot.id })) {
-      const input = entry.input as { status?: string; error?: string } | null
-      if (entry.kind === 'extraction' && input?.status === 'skipped') skipped.push(`${name}'s memory extraction was skipped: ${input.error}`)
-    }
-  if (skipped.length) return skipped.join('; ')
+  if (server.extraction.skipped.length) return server.extraction.skipped.join('; ')
   if (models.kind === 'real') return
   const left = server.providers.pendingTurns
   if (left) return `The faux script has ${left} turn${left === 1 ? '' : 's'} left over: it no longer fits the scenario`

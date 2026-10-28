@@ -635,12 +635,6 @@ describe('extraction', () => {
     await server.extraction.idle()
 
     expect(await server.client.sharedMemory.list()).toEqual([])
-    expect(await server.client.bots.audit({ botId: bot.id })).toContainEqual(
-      expect.objectContaining({
-        kind: 'extraction',
-        input: expect.objectContaining({ change: 'new', scope: 'shared', refused: expect.stringContaining("only from the owner's own words") }),
-      }),
-    )
   })
 
   it('asks nothing after a run in which neither the owner nor the bot said anything, e.g. one that only read a page', async () => {
@@ -699,9 +693,7 @@ describe('extraction', () => {
     // Rex only passed, with nothing of his own to learn from; Ana's run is asked, and its answer refused.
     expect(extractionPrompts(server)).toHaveLength(1)
     expect(extractionPrompts(server)[0]).toMatch(/<context from=\\"a group chat turn\\">[^<]*Where should we get lunch\?/)
-    expect(await server.client.bots.audit({ botId: ana.id })).toMatchObject([
-      { kind: 'extraction', surface: 'memory_shared_write', verdict: null, input: { change: 'new', scope: 'shared', text: 'The owner is vegan.' } },
-    ])
+    expect(await server.client.bots.audit({ botId: ana.id })).toEqual([])
   })
 
   it("refuses edit and remove answers naming another bot's facts, as unknown ids; its own and shared ones change", async () => {
@@ -731,12 +723,6 @@ describe('extraction', () => {
     const prompt = extractionPrompts(server)[0]!
     expect(prompt).toContain('The owner lives in Paris.')
     expect(prompt).not.toContain('Ana reviews on Mondays.')
-    expect((await server.client.bots.audit({ botId: bot.id })).map((entry) => entry.input)).toEqual([
-      { change: 'edit', id: anas.id, text: 'Ana reviews on Fridays.', refused: `There is no fact [${anas.id}] in your memory.` },
-      { change: 'remove', id: anas.id, refused: `There is no fact [${anas.id}] in your memory.` },
-      { change: 'edit', id: rexs.id, tier: 'log', text: 'The build is green again.' },
-      { change: 'edit', id: shared.id, text: 'The owner lives in Lyon.' },
-    ])
   })
 
   it("runs a bot's extractions one at a time, in order, without holding up its next run", async () => {
@@ -760,7 +746,7 @@ describe('extraction', () => {
     expect(await server.client.sharedMemory.list()).toMatchObject([{ id: 1, content: 'The owner ships on Thursdays.' }])
   })
 
-  it('retries a failed extraction once, then skips it with an audit entry', async () => {
+  it('retries a failed extraction once, then skips it, unaudited', async () => {
     const { server, bot } = await startExtracting()
     server.providers.memoryModel.script(fails('The memory model is down'), says('new shared profile 3: The owner ships on Fridays.'))
     server.providers.memoryModel.script(fails('The memory model is down'), fails('The memory model is still down'))
@@ -774,10 +760,8 @@ describe('extraction', () => {
 
     expect(extractionPrompts(server)).toHaveLength(4)
     expect(await server.client.sharedMemory.list()).toMatchObject([{ content: 'The owner ships on Fridays.' }])
-    expect((await server.client.bots.audit({ botId: bot.id })).map((entry) => entry.input)).toEqual([
-      { change: 'new', scope: 'shared', tier: 'profile', importance: 3, text: 'The owner ships on Fridays.', id: 1 },
-      { status: 'skipped', model: 'fake/fake-memory', error: 'The memory model is still down' },
-    ])
+    expect(server.extraction.skipped).toEqual(["Rex's memory extraction was skipped: The memory model is still down"])
+    expect(await server.client.bots.audit({ botId: bot.id })).toEqual([])
   })
 
   it('runs on the default model when no memory model is set, and not at all while the memory model has no working provider', async () => {
@@ -898,15 +882,9 @@ describe('episodes', () => {
     const block = JSON.parse(`"${/<memory>(.*?)<\/memory>/.exec(prompt)![1]}"`) as string
     // Of the same importance, the newer ranks first.
     expect(block).toContain(['Recently:', '- [2] (learned 2026-10-28) Rex fixed bugs #1 to #6.', '- [1] (learned 2026-10-28) Shipped v1.'].join('\n'))
-    expect((await server.client.bots.audit({ botId: bot.id })).map((entry) => entry.input)).toContainEqual({
-      change: 'episode',
-      runs: 6,
-      text: 'Rex fixed bugs #1 to #6.',
-      id: 2,
-    })
   })
 
-  it('retries a failed episode once, then skips it with an audit entry; the next one sums up the next 6 runs', async () => {
+  it('retries a failed episode once, then skips it; the next one sums up the next 6 runs', async () => {
     const { server, bot } = await startExtracting()
     for (let run = 1; run <= 5; run++) await chatThatCounts(server, bot, `Fix bug #${run}.`, `Bug #${run} is fixed.`)
     server.providers.script(callsTools(['sendMessage', { text: 'Bug #6 is fixed.' }]), endsSilently())
@@ -915,9 +893,7 @@ describe('episodes', () => {
     await server.extraction.idle()
 
     expect(await server.client.bots.memory({ botId: bot.id })).toEqual([])
-    expect((await server.client.bots.audit({ botId: bot.id })).map((entry) => entry.input)).toEqual([
-      { status: 'skipped', episode: { runs: 6 }, model: 'fake/fake-memory', error: 'The memory model is still down' },
-    ])
+    expect(server.extraction.skipped).toEqual(["Rex's memory extraction was skipped: The memory model is still down"])
 
     for (let run = 7; run <= 11; run++) await chatThatCounts(server, bot, `Fix bug #${run}.`, `Bug #${run} is fixed.`)
     await chatThatCounts(server, bot, 'Fix bug #12.', 'Bug #12 is fixed.', 'Rex fixed bugs #7 to #12.')

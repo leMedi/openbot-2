@@ -15,7 +15,6 @@ import {
   NoSuchFactError,
   profileLength,
 } from './memory.ts'
-import { recordUnreviewed } from './orchestrator.ts'
 import type { Clock } from './ports/clock.ts'
 import { ownerTimeZone } from './settings.ts'
 
@@ -125,16 +124,14 @@ function parseChanges(answer: string): ProposedChange[] {
 /** The ids of the facts `change` touches. */
 const idsOf = (change: ProposedChange) => (change.change === 'merge' ? change.ids : [change.id])
 
-/** Why `change` can't be proposed for `facts` (its scope's), or undefined when it can. */
-function whyRefused(change: ProposedChange, facts: ReadonlyMap<number, Fact>, touched: ReadonlySet<number>): string | undefined {
+/**
+ * Whether `change` can be proposed for `facts` (its scope's): a merge names two facts or more, every id is one of
+ * `facts` (one of another scope reads as one that doesn't exist), and none is `touched` by another change already.
+ */
+function proposable(change: ProposedChange, facts: ReadonlyMap<number, Fact>, touched: ReadonlySet<number>): boolean {
   const ids = idsOf(change)
-  if (change.change === 'merge' && new Set(ids).size < 2) return 'A merge needs two facts or more.'
-  const unknown = ids.find((id) => !facts.has(id))
-  // As the tool answers any id it can't reach: one of another scope reads as one that doesn't exist.
-  if (unknown !== undefined) return new NoSuchFactError(unknown).message
-  const again = ids.find((id) => touched.has(id))
-  if (again !== undefined) return `Fact [${again}] is changed by another change already.`
-  return undefined
+  if (change.change === 'merge' && new Set(ids).size < 2) return false
+  return ids.every((id) => facts.has(id) && !touched.has(id))
 }
 
 /** Whether `a` and `b`, one fact read twice, say the same: nothing changed it in between. */
@@ -192,15 +189,14 @@ function verificationPrompt(scope: Scope, facts: readonly Fact[], shared: readon
   ].join('\n')
 }
 
-/** The verdicts in the verification call's answer, by change number: accepted, or rejected with why. */
-function parseVerdicts(answer: string): Map<number, { accepted: true } | { accepted: false; reason: string }> {
-  const verdicts = new Map<number, { accepted: true } | { accepted: false; reason: string }>()
+/** The verdicts in the verification call's answer, by change number: whether each was accepted. */
+function parseVerdicts(answer: string): Map<number, boolean> {
+  const verdicts = new Map<number, boolean>()
   for (const raw of answer.split('\n')) {
-    const match = /^\s*[-*]?\s*(\d+)[.):]?\s+(accept(?:ed)?|reject(?:ed)?)\b\s*[:\-–]?\s*(.*)$/i.exec(raw)
+    const match = /^\s*[-*]?\s*(\d+)[.):]?\s+(accept(?:ed)?|reject(?:ed)?)\b/i.exec(raw)
     if (!match) continue
     const number = Number(match[1])
-    if (verdicts.has(number)) continue
-    verdicts.set(number, match[2]!.toLowerCase().startsWith('accept') ? { accepted: true } : { accepted: false, reason: match[3]!.trim() || 'Rejected.' })
+    if (!verdicts.has(number)) verdicts.set(number, match[2]!.toLowerCase().startsWith('accept'))
   }
   return verdicts
 }
@@ -220,8 +216,7 @@ export type MemoryConsolidationOptions = {
  * then, on the memory model, consolidates each scope (shared memory, then each bot's bot memory) whose facts changed
  * since that scope was last consolidated (a bot's also once shared memory did): one call proposes changes by fact id, a second verifies them, and only those it
  * accepts are applied, through the ownership check of the scope worked on. A failed call is tried once more, then the
- * scope waits for the next run. Every change, applied or not, is audited (shared memory's under every bot, which all
- * see it), none reviewed. Nothing runs without a bot: no one reads memory then.
+ * scope waits for the next run. No change is reviewed or audited. Nothing runs without a bot: no one reads memory then.
  */
 export class MemoryConsolidation {
   readonly #options: MemoryConsolidationOptions
@@ -237,13 +232,7 @@ export class MemoryConsolidation {
     const bots = await listBots(db)
     if (!bots.length) return
     const scopes: Scope[] = [{ scope: 'shared' }, ...bots.map((bot) => ({ scope: 'bot' as const, bot: { id: bot.id, name: bot.name } }))]
-    const auditedUnder = (scope: Scope) => (scope.scope === 'shared' ? bots.map((bot) => bot.id) : [scope.bot.id])
-    const audit = async (scope: Scope, input: object) => {
-      for (const botId of auditedUnder(scope)) {
-        await recordUnreviewed(db, botId, { kind: 'consolidation', surface: 'memory_shared_write', tool: 'consolidation', input: { scope: scope.scope, ...input } })
-      }
-    }
-    for (const scope of scopes) await this.#expireNotes(scope, now, audit)
+    for (const scope of scopes) await expireNotes(db, reachOf(scope), now)
     const ref = await this.#options.model()
     if (!ref) return
     const timeZone = await ownerTimeZone(db)
@@ -257,7 +246,7 @@ export class MemoryConsolidation {
         since === undefined || changedSince(facts, since) || (scope.scope === 'bot' && changedSince(await listSharedFacts(db), since))
       if (!facts.length || !changed) continue
       try {
-        if (!(await this.#consolidate(scope, facts, ref, now, timeZone, audit))) continue
+        if (!(await this.#consolidate(scope, facts, ref, now, timeZone))) continue
       } catch (error) {
         // Not the model's: e.g. the database failed. The scope waits for the next run.
         console.error(`[memory] Consolidation of ${describeScope(scope)} failed:`, error)
@@ -274,79 +263,48 @@ export class MemoryConsolidation {
     return scope.scope === 'shared' ? listSharedFacts(this.#options.db) : listBotFacts(this.#options.db, scope.bot.id)
   }
 
-  /** Deletes the notes of `scope` learned a week or more before `now`, each audited. */
-  async #expireNotes(scope: Scope, now: number, audit: (scope: Scope, input: object) => Promise<void>): Promise<void> {
-    for (const fact of await expireNotes(this.#options.db, reachOf(scope), now)) {
-      await audit(scope, { change: 'expire', id: fact.id, text: fact.content, outcome: 'applied' })
-    }
-  }
-
   /**
    * Proposes, verifies and applies changes to `facts`, the facts of `scope`, dated `now`; false when a call failed and
    * the scope waits for the next run.
    */
-  async #consolidate(
-    scope: Scope,
-    facts: readonly Fact[],
-    ref: string,
-    now: number,
-    timeZone: string,
-    audit: (scope: Scope, input: object) => Promise<void>,
-  ): Promise<boolean> {
+  async #consolidate(scope: Scope, facts: readonly Fact[], ref: string, now: number, timeZone: string): Promise<boolean> {
     const { db } = this.#options
     const shared = scope.scope === 'bot' ? await listSharedFacts(db) : []
-    const skip = (step: string) => async (error: string) => {
-      console.error(`[memory] Skipped consolidating ${describeScope(scope)}: ${error}`)
-      await audit(scope, { status: 'skipped', step, model: ref, error })
-    }
-    const answer = await this.#ask(ref, { systemPrompt: consolidationInstructions(scope), prompt: consolidationPrompt(scope, facts, shared, timeZone) }, skip('consolidation'))
+    const answer = await this.#ask(scope, ref, { systemPrompt: consolidationInstructions(scope), prompt: consolidationPrompt(scope, facts, shared, timeZone) })
     if (answer === undefined) return false
     const byId = new Map(facts.map((fact) => [fact.id, fact]))
     const proposed: ProposedChange[] = []
     const touched = new Set<number>()
     for (const change of parseChanges(answer)) {
-      const refused = whyRefused(change, byId, touched)
-      if (refused) {
-        await audit(scope, { ...change, outcome: 'refused', reason: refused })
-        continue
-      }
+      if (!proposable(change, byId, touched)) continue
       for (const id of idsOf(change)) touched.add(id)
       proposed.push(change)
     }
     if (!proposed.length) return true
     const described = proposed.map((change) => describeChange(change, byId))
-    const verdict = await this.#ask(
-      ref,
-      { systemPrompt: verificationInstructions(scope), prompt: verificationPrompt(scope, facts, shared, described, timeZone) },
-      skip('verification'),
-    )
+    const verdict = await this.#ask(scope, ref, {
+      systemPrompt: verificationInstructions(scope),
+      prompt: verificationPrompt(scope, facts, shared, described, timeZone),
+    })
     if (verdict === undefined) return false
     const verdicts = parseVerdicts(verdict)
-    for (const [index, change] of proposed.entries()) {
-      const judged = verdicts.get(index + 1) ?? { accepted: false, reason: 'The verification call answered nothing for it.' }
-      if (!judged.accepted) {
-        await audit(scope, { ...change, outcome: 'rejected', reason: judged.reason })
-        continue
-      }
-      const refused = await this.#apply(scope, change, byId, now)
-      await audit(scope, { ...change, ...(refused ? { outcome: 'refused', reason: refused } : { outcome: 'applied' }) })
-    }
+    // A change the verification call answered nothing for counts as rejected.
+    for (const [index, change] of proposed.entries()) if (verdicts.get(index + 1)) await this.#apply(scope, change, byId, now)
     return true
   }
 
   /**
-   * Applies `change` through the ownership check of `scope` (as `update_state` changes facts), dated `now`; answers why
-   * it couldn't be, e.g. a fact gone meanwhile, or undefined once applied.
+   * Applies `change` through the ownership check of `scope` (as `update_state` changes facts), dated `now`; leaves it
+   * when it can't be, e.g. a fact gone or changed meanwhile.
    */
-  async #apply(scope: Scope, change: ProposedChange, facts: ReadonlyMap<number, Fact>, now: number): Promise<string | undefined> {
+  async #apply(scope: Scope, change: ProposedChange, facts: ReadonlyMap<number, Fact>, now: number): Promise<void> {
     const { db } = this.#options
     const reach = reachOf(scope)
     // As read when the change was proposed: one changed meanwhile, e.g. by the owner, isn't overwritten by stale text.
     const current = new Map((await this.#factsOf(scope)).map((fact) => [fact.id, fact]))
     for (const id of idsOf(change)) {
       const [before, after] = [facts.get(id)!, current.get(id)]
-      if (!after) return new NoSuchFactError(id).message
-      if (!sameFact(before, after)) return `Fact [${id}] changed meanwhile.`
+      if (!after || !sameFact(before, after)) return
     }
     try {
       if (change.change === 'remove') await forgetFact(db, reach, change.id)
@@ -361,15 +319,13 @@ export class MemoryConsolidation {
           })
         }
       }
-      return undefined
     } catch (error) {
-      if (error instanceof NoSuchFactError || error instanceof InvalidFactError) return error.message
-      throw error
+      if (!(error instanceof NoSuchFactError || error instanceof InvalidFactError)) throw error
     }
   }
 
-  /** The answer to `request` on model `ref`; a failed call is tried once more, then `skip` is told why and this answers undefined. */
-  async #ask(ref: string, request: { systemPrompt: string; prompt: string }, skip: (error: string) => Promise<void>): Promise<string | undefined> {
+  /** The answer to `request` on model `ref`; a failed call is tried once more, then `scope` is skipped and this answers undefined. */
+  async #ask(scope: Scope, ref: string, request: { systemPrompt: string; prompt: string }): Promise<string | undefined> {
     let failure: unknown
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -378,7 +334,7 @@ export class MemoryConsolidation {
         failure = error
       }
     }
-    await skip(failure instanceof Error ? failure.message : String(failure))
+    console.error(`[memory] Skipped consolidating ${describeScope(scope)}: ${failure instanceof Error ? failure.message : String(failure)}`)
     return undefined
   }
 }

@@ -13,7 +13,6 @@ import {
   reachableFactScope,
   writeFact,
 } from './memory.ts'
-import { recordUnreviewed } from './orchestrator.ts'
 import type { Clock } from './ports/clock.ts'
 
 /**
@@ -175,33 +174,25 @@ function unsourced(scope: MemoryScope, exchange: RunExchange): string | undefine
   return undefined
 }
 
-/** How a change went, as audited: applied (with the fact's id) or refused (with why). */
-type Outcome = { id: number } | { refused: string }
-
 /**
  * Applies one change the memory model answered for bot `bot`, through the same ownership check as `update_state`: an
  * edit or removal reaches only the bot's bot memory and shared memory, and every change needs its scope's source in
  * the exchange (`unsourced`).
  */
-async function applyChange(db: Db, bot: BotRef, change: ExtractedChange, exchange: RunExchange, now: number): Promise<Outcome> {
+async function applyChange(db: Db, bot: BotRef, change: ExtractedChange, exchange: RunExchange, now: number): Promise<void> {
   try {
     if (change.change === 'new') {
-      const refused = unsourced(change.scope, exchange)
-      if (refused) return { refused }
-      return { id: (await writeFact(db, bot, change, now)).id }
+      if (!unsourced(change.scope, exchange)) await writeFact(db, bot, change, now)
+      return
     }
     const scope = await reachableFactScope(db, bot.id, change.id)
-    if (!scope) throw new NoSuchFactError(change.id)
-    const refused = unsourced(scope, exchange)
-    if (refused) return { refused }
+    if (!scope || unsourced(scope, exchange)) return
     // Pinned to the scope checked, so a fact written meanwhile under another scope isn't changed.
     const reach = { botId: bot.id, scope }
     if (change.change === 'edit') await editFact(db, reach, change.id, { text: change.text, tier: change.tier, importance: change.importance }, now)
     else await forgetFact(db, reach, change.id)
-    return { id: change.id }
   } catch (error) {
-    if (error instanceof NoSuchFactError || error instanceof InvalidFactError) return { refused: error.message }
-    throw error
+    if (!(error instanceof NoSuchFactError || error instanceof InvalidFactError)) throw error
   }
 }
 
@@ -246,9 +237,6 @@ function parseEpisode(answer: string): string | undefined {
   return line && !/^none\.?$/i.test(line) ? line : undefined
 }
 
-/** Extraction's audit entries sit under memory's surface; they are never reviewed. */
-const audit = (db: Db, botId: string, input: unknown) => recordUnreviewed(db, botId, { kind: 'extraction', surface: 'memory_shared_write', tool: 'extraction', input })
-
 export type MemoryExtractionOptions = {
   db: Db
   /** The server's time, which facts are dated by. */
@@ -267,7 +255,7 @@ export type MemoryExtractionOptions = {
  * remembering, from the owner's own words and the bot's own messages only; every `runsPerEpisode` runs that sent a
  * message or acted, another sums them up in an episode, a log fact of its bot memory. A bot's extractions run one at a
  * time, in the order its runs settled, never holding up its next run. A failed call is tried once more, then the
- * extraction is skipped and audited. Every change is audited, none reviewed. Kept in memory: extractions not done when
+ * extraction is skipped. No change is reviewed or audited. Kept in memory: extractions not done when
  * the server stops are lost; the runs counted towards an episode are kept in the database.
  */
 export class MemoryExtraction {
@@ -277,6 +265,7 @@ export class MemoryExtraction {
   /** Extractions queued or under way. */
   readonly #pending = new Set<Promise<void>>()
   #closed = false
+  readonly #skipped: string[] = []
 
   constructor(options: MemoryExtractionOptions) {
     this.#options = options
@@ -294,6 +283,11 @@ export class MemoryExtraction {
       this.#pending.delete(next)
       if (this.#chains.get(botId) === next) this.#chains.delete(botId)
     })
+  }
+
+  /** The extractions skipped, or ended early, on a failure since the server started: whose, and why. */
+  get skipped(): readonly string[] {
+    return this.#skipped
   }
 
   /** Resolves once every extraction queued, and any they queue, is done. */
@@ -314,8 +308,8 @@ export class MemoryExtraction {
     try {
       await this.#extractFor(bot, read)
     } catch (error) {
-      // Not the model's: e.g. the history or the database failed. Skipped and audited, as a failed call is.
-      await this.#skip(bot, undefined, error)
+      // Not the model's: e.g. the history or the database failed. Skipped, as a failed call is.
+      this.#skip(bot, error)
     }
   }
 
@@ -343,10 +337,7 @@ export class MemoryExtraction {
       prompt: extractionPrompt([...(await listBotFacts(db, bot.id)), ...(await listSharedFacts(db))], exchange),
     })
     if (answer === undefined) return false
-    for (const change of parseExtraction(answer)) {
-      const outcome = await applyChange(db, bot, change, exchange, clock.now())
-      await audit(db, bot.id, { ...change, ...outcome })
-    }
+    for (const change of parseExtraction(answer)) await applyChange(db, bot, change, exchange, clock.now())
     return true
   }
 
@@ -358,23 +349,14 @@ export class MemoryExtraction {
     const { db, clock } = this.#options
     const runs = await db.select().from(episodeRuns).where(eq(episodeRuns.botId, bot.id)).orderBy(asc(episodeRuns.id))
     if (runs.length < runsPerEpisode) return
-    const answer = await this.#ask(
-      bot,
-      ref,
-      { systemPrompt: episodeInstructions(bot.name, runs.length), prompt: episodePrompt(runs.map((run) => run.digest)) },
-      { episode: { runs: runs.length } },
-    )
-    if (answer !== undefined) {
-      const text = parseEpisode(answer)
-      let outcome: Outcome
+    const answer = await this.#ask(bot, ref, { systemPrompt: episodeInstructions(bot.name, runs.length), prompt: episodePrompt(runs.map((run) => run.digest)) })
+    const text = answer === undefined ? undefined : parseEpisode(answer)
+    if (text) {
       try {
-        if (!text) throw new InvalidFactError('The memory model answered no episode.')
-        outcome = { id: (await writeFact(db, bot, { scope: 'bot', tier: 'log', text }, clock.now())).id }
+        await writeFact(db, bot, { scope: 'bot', tier: 'log', text }, clock.now())
       } catch (error) {
         if (!(error instanceof InvalidFactError)) throw error
-        outcome = { refused: error.message }
       }
-      await audit(db, bot.id, { change: 'episode', runs: runs.length, ...(text && { text }), ...outcome })
     }
     // After the fact is written: a server stopping before keeps the runs for the next episode.
     await db.delete(episodeRuns).where(and(eq(episodeRuns.botId, bot.id), lte(episodeRuns.id, runs.at(-1)!.id)))
@@ -382,9 +364,9 @@ export class MemoryExtraction {
 
   /**
    * The memory model's answer to `request` on model `ref`; a failed call is tried once more, then the bot's extraction
-   * is skipped with an audit entry (with `skipped` added), and this answers undefined.
+   * is skipped, and this answers undefined.
    */
-  async #ask(bot: BotRef, ref: string, request: { systemPrompt: string; prompt: string }, skipped?: object): Promise<string | undefined> {
+  async #ask(bot: BotRef, ref: string, request: { systemPrompt: string; prompt: string }): Promise<string | undefined> {
     let failure: unknown
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -393,17 +375,14 @@ export class MemoryExtraction {
         failure = error
       }
     }
-    await this.#skip(bot, ref, failure, skipped)
+    this.#skip(bot, failure)
     return undefined
   }
 
-  /**
-   * Skips the bot's extraction after `failure`, with an audit entry (with `details` added); on model `ref` when the
-   * model failed.
-   */
-  async #skip(bot: BotRef, ref: string | undefined, failure: unknown, details?: object): Promise<void> {
+  /** Skips the bot's extraction after `failure`, noting it in `skipped`. */
+  #skip(bot: BotRef, failure: unknown): void {
     const error = failure instanceof Error ? failure.message : String(failure)
+    this.#skipped.push(`${bot.name}'s memory extraction was skipped: ${error}`)
     console.error(`[memory] Skipped ${bot.name}'s extraction: ${error}`)
-    await audit(this.#options.db, bot.id, { status: 'skipped', ...details, ...(ref && { model: ref }), error })
   }
 }

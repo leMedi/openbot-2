@@ -56,10 +56,6 @@ const verificationPrompts = (server: TestServer) =>
     .filter((request) => request.model === server.providers.memoryModel.ref && JSON.stringify(request.messages).includes('<proposed>'))
     .map((request) => JSON.stringify(request.messages))
 
-/** What consolidation audited under bot `botId`, in order: each entry's input. */
-const consolidations = async (server: TestServer, botId: string) =>
-  (await server.client.bots.audit({ botId })).filter((entry) => entry.kind === 'consolidation').map((entry) => entry.input)
-
 /** 04:00 in Paris (UTC+1 from October 25th, 2026) on `date`. */
 const fourAm = (date: string) => new Date(`${date}T03:00:00Z`)
 
@@ -130,7 +126,7 @@ describe('memory consolidation', () => {
     ])
   })
 
-  it('audits every change, applied or rejected, under every bot for shared memory and under its bot for bot memory', async () => {
+  it('applies only the changes the verification call accepts, and no second change to a fact', async () => {
     const { server, bot } = await startWithRex()
     const ana = await server.client.bots.create({ ...rex, name: 'Ana', instructions: 'Ana reviews code.' })
     await updateState(server, bot, { action: 'write', scope: 'shared', tier: 'profile', text: 'The owner prefers tabs.' })
@@ -145,19 +141,11 @@ describe('memory consolidation', () => {
 
     await server.clock.advanceTo(fourAm('2026-10-29'))
 
-    const merged = {
-      scope: 'shared',
-      change: 'merge',
-      ids: [1, 2],
-      text: 'The owner indents with tabs, which they prefer.',
-      outcome: 'applied',
-    }
-    expect(await consolidations(server, ana.id)).toEqual([merged])
-    expect(await consolidations(server, bot.id)).toEqual([
-      merged,
-      { scope: 'bot', change: 'remove', id: 3, outcome: 'refused', reason: 'Fact [3] is changed by another change already.' },
-      { scope: 'bot', change: 'edit', id: 3, tier: 'profile', importance: 4, outcome: 'rejected', reason: 'deploying is a habit, not always true' },
-    ])
+    expect(await server.client.sharedMemory.list()).toMatchObject([{ content: 'The owner indents with tabs, which they prefer.' }])
+    // Rex's: the removal of a fact the edit already changes is never proposed, and the edit is rejected.
+    expect(verificationPrompts(server)).toHaveLength(2)
+    expect(verificationPrompts(server)[1]).not.toContain('remove')
+    expect(await server.client.bots.memory({ botId: ana.id })).toEqual([])
     expect(await server.client.bots.memory({ botId: bot.id })).toMatchObject([{ id: 3, tier: 'log' }])
   })
 
@@ -177,10 +165,6 @@ describe('memory consolidation', () => {
 
     expect(await server.client.bots.memory({ botId: bot.id })).toMatchObject([{ content: 'The build is green.' }])
     expect(await server.client.sharedMemory.list()).toEqual([])
-    expect(await consolidations(server, bot.id)).toEqual([
-      { scope: 'shared', change: 'expire', id: 2, text: 'The owner is on holiday this week.', outcome: 'applied' },
-      { scope: 'bot', change: 'expire', id: 1, text: 'The build is red.', outcome: 'applied' },
-    ])
   })
 
   it("never touches facts outside the scope it works on: another bot's, or shared memory from a bot's", async () => {
@@ -204,9 +188,6 @@ describe('memory consolidation', () => {
     expect(await server.client.sharedMemory.list()).toMatchObject([{ id: 1, content: 'The owner prefers tabs.' }])
     expect(await server.client.bots.memory({ botId: bot.id })).toMatchObject([{ id: 2, content: 'Rex deploys with ./deploy.sh.' }])
     expect(await server.client.bots.memory({ botId: ana.id })).toMatchObject([{ id: 3, content: 'Ana reviews every pull request.' }])
-    const refusals = (await server.client.bots.audit({ botId: bot.id })).map((entry) => entry.input)
-    expect(refusals).toContainEqual({ scope: 'bot', change: 'remove', id: 1, outcome: 'refused', reason: 'There is no fact [1] in your memory.' })
-    expect(refusals).toContainEqual(expect.objectContaining({ scope: 'shared', change: 'remove', id: 2, outcome: 'refused' }))
   })
 
   it('tries a failed call once more, then leaves the scope for the next night', async () => {
@@ -216,13 +197,7 @@ describe('memory consolidation', () => {
 
     await server.clock.advanceTo(fourAm('2026-10-29'))
     expect(consolidationPrompts(server)).toHaveLength(2)
-    expect((await server.client.bots.audit({ botId: bot.id })).map((entry) => entry.input)).toContainEqual({
-      scope: 'shared',
-      status: 'skipped',
-      step: 'consolidation',
-      model: 'fake/fake-memory',
-      error: 'The memory model is still down',
-    })
+    expect(await server.client.sharedMemory.list()).toMatchObject([{ content: 'The owner prefers tabs.' }])
 
     server.providers.memoryModel.script(says('NONE'))
     await server.clock.advanceTo(fourAm('2026-10-30'))
@@ -242,10 +217,9 @@ describe('memory consolidation', () => {
 
     expect(consolidationPrompts(server).at(-1)).toContain('<shared>\\n- [2] (profile, 3, learned 2026-10-29, from the owner) The owner never deploys on Fridays any more.')
     expect(await server.client.bots.memory({ botId: bot.id })).toEqual([])
-    expect(await consolidations(server, bot.id)).toContainEqual({ scope: 'bot', change: 'remove', id: 1, outcome: 'applied' })
   })
 
-  it('refuses a change to a fact edited while the memory model was answering', async () => {
+  it('leaves a change to a fact edited while the memory model was answering', async () => {
     const { server, bot } = await startWithRex()
     await updateState(server, bot, { action: 'write', scope: 'shared', tier: 'profile', text: 'The owner prefers tabs.' })
     await updateState(server, bot, { action: 'write', scope: 'shared', tier: 'profile', text: 'The owner indents with tabs.' })
@@ -262,6 +236,5 @@ describe('memory consolidation', () => {
       { id: 1, content: 'The owner prefers spaces now.' },
       { id: 2, content: 'The owner indents with tabs.' },
     ])
-    expect(await consolidations(server, bot.id)).toContainEqual(expect.objectContaining({ change: 'merge', outcome: 'refused', reason: 'Fact [1] changed meanwhile.' }))
   })
 })

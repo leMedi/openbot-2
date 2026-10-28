@@ -194,12 +194,10 @@ export const messages = sqliteTable(
 
 /**
  * What an audit entry records: a side-effecting tool call (`action`), a page a computer-use session's browser opened
- * (`navigation`), what a computer-use session did once it ended (`session_summary`), or a change memory extraction made
- * or was refused, or an extraction skipped after failing (`extraction`, under `memory_shared_write`), or a change nightly
- * consolidation made, rejected or was refused, or a consolidation skipped after failing (`consolidation`, likewise), or a
- * routine's run that failed (`routine`, under `routine_change`).
+ * (`navigation`), what a computer-use session did once it ended (`session_summary`), or a routine's run that failed
+ * (`routine`, under `routine_change`).
  */
-export const auditKinds = ['action', 'navigation', 'session_summary', 'extraction', 'consolidation', 'routine'] as const
+export const auditKinds = ['action', 'navigation', 'session_summary', 'routine'] as const
 export type AuditKind = (typeof auditKinds)[number]
 
 export const auditLog = sqliteTable(

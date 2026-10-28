@@ -204,6 +204,28 @@ describe('orchestrator modes', () => {
     })
   })
 
+  it("drop memory extraction's and consolidation's old entries, which nothing writes any more", async () => {
+    const server = await createTestServer()
+    await server.shutdown()
+    const file = join(server.dataDir, 'openbot.db')
+    await rm(file)
+    const legacy = await openDbBefore(file, '0013_memory_side_calls_unaudited')
+    await legacy.$client.batch([
+      `INSERT INTO bots (id, name, avatar_shape, avatar_color) VALUES ('rex', 'Rex', 'hex', 'blue')`,
+      `INSERT INTO chats (id, kind, bot_id) VALUES ('rex-dm', 'dm', 'rex')`,
+      `INSERT INTO audit_log (id, bot_id, kind, surface, tool, action, mode)
+         VALUES ('a', 'rex', 'action', 'shell', 'bash', '{"command":"ls"}', 'off'),
+                ('b', 'rex', 'extraction', 'memory_shared_write', 'extraction', '{"status":"skipped"}', 'off'),
+                ('c', 'rex', 'consolidation', 'memory_shared_write', 'consolidation', '{"change":"expire"}', 'off')`,
+    ])
+    legacy.$client.close()
+
+    const restarted = await restartTestServer(server)
+    servers.push(restarted)
+
+    expect(await restarted.client.bots.audit({ botId: 'rex' })).toMatchObject([{ kind: 'action', tool: 'bash' }])
+  })
+
   it('reject an unknown bot', async () => {
     const { server } = await startWithRex()
     await expect(server.client.bots.getOrchestratorModes({ botId: 'nope' })).rejects.toMatchObject({ code: 'NOT_FOUND' })
