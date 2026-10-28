@@ -18,12 +18,17 @@ export const migrationsFolder = join(
 
 /** Opens the libSQL file at `file`, creating it and applying pending migrations. */
 export async function openDb(file: string) {
+  return openMigrated(file, migrationsFolder)
+}
+
+/** Opens the libSQL file at `file`, creating it and applying the pending migrations in `folder`. */
+export async function openMigrated(file: string, folder: string) {
   mkdirSync(dirname(file), { recursive: true })
   const client = createClient({ url: pathToFileURL(file).href })
   // Bot deletion relies on real cascades (ADR 0009); SQLite leaves them off per connection.
   await client.execute('PRAGMA foreign_keys = ON')
   const db = drizzle(client, { schema })
-  await migrate(db, { migrationsFolder })
+  await migrate(db, { migrationsFolder: folder })
   return db
 }
 

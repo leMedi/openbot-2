@@ -1,12 +1,7 @@
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
-import { createClient } from '@libsql/client'
-import { drizzle } from 'drizzle-orm/libsql'
-import { migrate } from 'drizzle-orm/libsql/migrator'
-import { migrationsFolder } from './client.ts'
-import * as schema from './schema.ts'
+import { migrationsFolder, openMigrated } from './client.ts'
 
 /**
  * Creates the libSQL file at `file` as it was just before migration `tag` (e.g. `0008_memory_shared_write`), so a test
@@ -21,9 +16,7 @@ export async function openDbBefore(file: string, tag: string) {
     const index = journal.entries.findIndex((entry) => entry.tag === tag)
     if (index === -1) throw new Error(`No migration ${tag}`)
     await writeFile(journalFile, JSON.stringify({ ...journal, entries: journal.entries.slice(0, index) }))
-    const db = drizzle(createClient({ url: pathToFileURL(file).href }), { schema })
-    await migrate(db, { migrationsFolder: folder })
-    return db
+    return await openMigrated(file, folder)
   } finally {
     await rm(folder, { recursive: true, force: true })
   }
