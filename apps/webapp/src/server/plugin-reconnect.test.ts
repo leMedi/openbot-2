@@ -136,7 +136,6 @@ describe('an expired plugin sign-in', () => {
     expect(fake.calls.map((call) => call.args.query)).toEqual(['trip', 'budget'])
     expect(toolResults(server).at(-1)).toEqual({ tool: notesSearch, isError: false, text: 'Found 2 pages about budget.' })
     expect(await server.client.plugins.get({ name: 'notes' })).toMatchObject({
-      status: 'connected',
       accounts: [{ slug: 'account1', displayName: 'Work', needsReconnect: false, grantedTo: [rex.id, ada.id] }],
     })
     for (const bot of [rex, ada]) {
@@ -144,20 +143,11 @@ describe('an expired plugin sign-in', () => {
       expect(cards.map((message) => message.card)).toMatchObject([{ outcome: 'reconnected' }])
       expect((await server.client.chats.list()).find((entry) => entry.id === bot.chatId)!.waitingFor).toBeNull()
     }
-    const told = server.providers.requests.flatMap((request) => request.messages.map((message) => JSON.stringify(message.content)))
-    expect(told.some((text) => text.includes('Notes (Work) was reconnected'))).toBe(true)
   })
 
-  it('shows its plugin as Needs reconnect, and refuses to reconnect an account the plugin lacks', async () => {
+  it('refuses to reconnect an account the plugin lacks', async () => {
     const { server, fake } = await start()
-    const rex = await grantedBot(server, 'Rex')
-    searches(server, 'trip')
-    await send(server, rex, 'Find my trip notes')
-    fake.expireSignIns()
-    searches(server, 'budget')
-    await send(server, rex, 'And my budget notes')
 
-    expect((await server.client.plugins.list()).find((plugin) => plugin.name === 'notes')).toMatchObject({ status: 'needs_reconnect' })
     await expect(connectAccount(server, fake, { account: 'account9' })).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })
 

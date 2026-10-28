@@ -151,7 +151,7 @@ export function toPluginInfo(plugin: Plugin, accounts: PluginAccountSummary[], g
     version: plugin.version,
     description: plugin.description,
     icon: plugin.icon && pluginIconPath(plugin.name),
-    status: own.some((account) => account.needsReconnect) ? 'needs_reconnect' : own.length ? 'connected' : 'not_connected',
+    status: own.length ? 'connected' : 'not_connected',
     servers: plugin.servers,
     skills: plugin.skills.map(({ name, description }) => ({ name, description })),
     accounts: own,

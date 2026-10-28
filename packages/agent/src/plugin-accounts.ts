@@ -75,10 +75,6 @@ const needsReconnectAnswer = (label: string) => ({
   isError: true,
 })
 
-/** What each bot granted an account reads in its history once the owner reconnects it. */
-export const reconnectedNote = (plugin: { displayName: string }, account: { plugin: string; slug: string; displayName: string }) =>
-  `[${accountLabel(plugin, account.displayName)} was reconnected by the owner: its tools (${toolPrefix(account.plugin, account.slug)}…) work again.]`
-
 /** What each bot granted a disconnected account reads in its history, e.g. "Notion (Work) was disconnected". */
 export const disconnectedNote = (plugin: { displayName: string }, account: { plugin: string; slug: string; displayName: string }) =>
   `[${accountLabel(plugin, account.displayName)} was disconnected by the owner: its tools (${toolPrefix(account.plugin, account.slug)}…) are gone.]`

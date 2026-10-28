@@ -6,7 +6,6 @@ import {
   InvalidRedirectError,
   PluginAccountNotFoundError,
   type PluginAccountSummary,
-  reconnectedNote,
   SignInNotFoundError,
   toolPrefix,
 } from '@openbot/agent'
@@ -191,12 +190,9 @@ async function decideRequest(
   return info
 }
 
-/** Once an account is reconnected: closes its Reconnect cards, and tells each bot granted it that its tools work again. */
-async function onReconnected(context: ServerContext, plugin: Plugin, account: PluginAccountSummary) {
+/** Once an account is reconnected: closes its Reconnect cards. */
+async function onReconnected(context: ServerContext, account: PluginAccountSummary) {
   for (const message of await closePluginReconnects(context.db, account.plugin, account.slug, 'reconnected')) await publishCard(context, message)
-  for (const botId of account.grantedTo) {
-    await context.runtime.note(botId, reconnectedNote(plugin, account)).catch((error) => console.error(`[plugins] Couldn't tell bot ${botId} an account was reconnected:`, error))
-  }
 }
 
 /** Tells every tab a card's message changed (answered, decided, reopened…) and how its chat now looks; returns it. */
@@ -691,7 +687,7 @@ export const router = os.router({
         if (!(await context.pluginAccounts.list(plugin.name)).some((account) => account.slug === input.account)) {
           throw new ORPCError('NOT_FOUND', { message: `No ${plugin.name} account ${input.account}` })
         }
-        const onConnected = (account: PluginAccountSummary) => onReconnected(context, plugin, account)
+        const onConnected = (account: PluginAccountSummary) => onReconnected(context, account)
         return yield* context.pluginAccounts.connect(connectable, callbackUrl, { signal, account: input.account, onConnected })
       }
       // From a bot's request card: checked before the sign-in, and the new account granted to the bot once connected.
