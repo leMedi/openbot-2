@@ -211,6 +211,9 @@ importers:
       '@openbot/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@openbot/plugins':
+        specifier: workspace:*
+        version: link:../../packages/plugins
       '@openbot/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -443,6 +446,19 @@ importers:
       drizzle-kit:
         specifier: ^0.31.11
         version: 0.31.11
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  packages/plugins:
+    dependencies:
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
+    devDependencies:
+      '@types/node':
+        specifier: ^24
+        version: 24.19.2
       typescript:
         specifier: ^7.0.2
         version: 7.0.2

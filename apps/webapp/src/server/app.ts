@@ -5,6 +5,7 @@ import { botUser, builtinModelProviders, openBotComputer } from '@openbot/agent'
 import { connectBrowser, connectDesktop, connectScreens } from '@openbot/computer'
 import { openDb } from '@openbot/db'
 import { env, paths } from '@openbot/db/env'
+import { bundledCatalog } from '@openbot/plugins'
 import { createServerContext, type ServerContext } from './context.ts'
 import { serverScreenTickets } from './screen-stream.ts'
 
@@ -43,6 +44,8 @@ async function open(): Promise<ServerContext> {
     attachmentsDir: join(paths.dataDir, 'attachments'),
     screens,
     screenTickets: serverScreenTickets(),
+    catalog: bundledCatalog,
+    home: paths.home,
   })
 }
 

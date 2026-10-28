@@ -1,0 +1,11 @@
+{
+  "name": "exa",
+  "displayName": "Exa",
+  "version": "1.0.0",
+  "description": "Search the web and read pages through Exa, a search engine built for AI.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://exa.ai",
+  "icon": "./logo.svg"
+}

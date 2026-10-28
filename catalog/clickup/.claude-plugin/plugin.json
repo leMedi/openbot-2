@@ -1,0 +1,11 @@
+{
+  "name": "clickup",
+  "displayName": "ClickUp",
+  "version": "1.0.0",
+  "description": "Work with tasks, lists, docs and comments in your ClickUp workspace.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://clickup.com",
+  "icon": "./logo.svg"
+}

@@ -21,6 +21,8 @@ import { Route as SettingsSharedMemoryRouteImport } from './routes/settings/shar
 import { Route as AppBotsBotIdRouteImport } from './routes/_app/bots.$botId'
 import { Route as AppGroupsChatIdRouteImport } from './routes/_app/groups.$chatId'
 import { Route as AppGroupsNewRouteImport } from './routes/_app/groups.new'
+import { Route as SettingsPluginsIndexRouteImport } from './routes/settings/plugins.index'
+import { Route as SettingsPluginsNameRouteImport } from './routes/settings/plugins.$name'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -81,6 +83,16 @@ const AppGroupsNewRoute = AppGroupsNewRouteImport.update({
   path: '/groups/new',
   getParentRoute: () => AppRoute,
 } as any)
+const SettingsPluginsIndexRoute = SettingsPluginsIndexRouteImport.update({
+  id: '/plugins/',
+  path: '/plugins/',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsPluginsNameRoute = SettingsPluginsNameRouteImport.update({
+  id: '/plugins/$name',
+  path: '/plugins/$name',
+  getParentRoute: () => SettingsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -94,6 +106,8 @@ export interface FileRoutesByFullPath {
   '/bots/$botId': typeof AppBotsBotIdRoute
   '/groups/$chatId': typeof AppGroupsChatIdRoute
   '/groups/new': typeof AppGroupsNewRoute
+  '/settings/plugins/$name': typeof SettingsPluginsNameRoute
+  '/settings/plugins/': typeof SettingsPluginsIndexRoute
 }
 export interface FileRoutesByTo {
   '/onboarding': typeof OnboardingRoute
@@ -107,6 +121,8 @@ export interface FileRoutesByTo {
   '/bots/$botId': typeof AppBotsBotIdRoute
   '/groups/$chatId': typeof AppGroupsChatIdRoute
   '/groups/new': typeof AppGroupsNewRoute
+  '/settings/plugins/$name': typeof SettingsPluginsNameRoute
+  '/settings/plugins': typeof SettingsPluginsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -122,6 +138,8 @@ export interface FileRoutesById {
   '/_app/bots/$botId': typeof AppBotsBotIdRoute
   '/_app/groups/$chatId': typeof AppGroupsChatIdRoute
   '/_app/groups/new': typeof AppGroupsNewRoute
+  '/settings/plugins/$name': typeof SettingsPluginsNameRoute
+  '/settings/plugins/': typeof SettingsPluginsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -137,6 +155,8 @@ export interface FileRouteTypes {
     | '/bots/$botId'
     | '/groups/$chatId'
     | '/groups/new'
+    | '/settings/plugins/$name'
+    | '/settings/plugins/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/onboarding'
@@ -150,6 +170,8 @@ export interface FileRouteTypes {
     | '/bots/$botId'
     | '/groups/$chatId'
     | '/groups/new'
+    | '/settings/plugins/$name'
+    | '/settings/plugins'
   id:
     | '__root__'
     | '/_app'
@@ -164,6 +186,8 @@ export interface FileRouteTypes {
     | '/_app/bots/$botId'
     | '/_app/groups/$chatId'
     | '/_app/groups/new'
+    | '/settings/plugins/$name'
+    | '/settings/plugins/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -259,6 +283,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppGroupsNewRouteImport
       parentRoute: typeof AppRoute
     }
+    '/settings/plugins/': {
+      id: '/settings/plugins/'
+      path: '/plugins'
+      fullPath: '/settings/plugins/'
+      preLoaderRoute: typeof SettingsPluginsIndexRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/plugins/$name': {
+      id: '/settings/plugins/$name'
+      path: '/plugins/$name'
+      fullPath: '/settings/plugins/$name'
+      preLoaderRoute: typeof SettingsPluginsNameRouteImport
+      parentRoute: typeof SettingsRoute
+    }
   }
 }
 
@@ -283,6 +321,8 @@ interface SettingsRouteChildren {
   SettingsModelsRoute: typeof SettingsModelsRoute
   SettingsProvidersRoute: typeof SettingsProvidersRoute
   SettingsSharedMemoryRoute: typeof SettingsSharedMemoryRoute
+  SettingsPluginsNameRoute: typeof SettingsPluginsNameRoute
+  SettingsPluginsIndexRoute: typeof SettingsPluginsIndexRoute
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
@@ -290,6 +330,8 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsModelsRoute: SettingsModelsRoute,
   SettingsProvidersRoute: SettingsProvidersRoute,
   SettingsSharedMemoryRoute: SettingsSharedMemoryRoute,
+  SettingsPluginsNameRoute: SettingsPluginsNameRoute,
+  SettingsPluginsIndexRoute: SettingsPluginsIndexRoute,
 }
 
 const SettingsRouteWithChildren = SettingsRoute._addFileChildren(

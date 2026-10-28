@@ -8,6 +8,7 @@ const sections = [
   { to: '/settings/general', label: 'General' },
   { to: '/settings/providers', label: 'Providers' },
   { to: '/settings/models', label: 'Models' },
+  { to: '/settings/plugins', label: 'Plugins' },
   { to: '/settings/shared-memory', label: 'Shared memory' },
 ] as const
 

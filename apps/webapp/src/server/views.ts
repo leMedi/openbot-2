@@ -1,7 +1,8 @@
-import { type AuditEntryInfo, type BotInfo, type CardInfo, type ChatInfo, type FactInfo, deletedAuthorName, type MessageInfo, type RoutineInfo, type RoutineRunInfo } from '@openbot/api-contract'
+import { type AuditEntryInfo, type BotInfo, type CardInfo, type ChatInfo, type FactInfo, deletedAuthorName, type MessageInfo, type PluginInfo, pluginIconPath, type RoutineInfo, type RoutineRunInfo } from '@openbot/api-contract'
 import type { BotStatus } from '@openbot/agent'
 import { type BotWithChat, type ChatSummary, type RoutineState, factSourceName, handBackOutcomeOf, isQuestionCard, isRoutineChangeCard, isTakeOverCard, questionAnswerOf, questionDismissedOf } from '@openbot/core'
 import type { AuditEntry, Fact, Message, RoutineRun } from '@openbot/db'
+import type { Plugin } from '@openbot/plugins'
 
 /**
  * What the API shows of a message: never its tool call's idempotency key. A bot's message whose bot was deleted keeps
@@ -131,5 +132,19 @@ export function toRoutineRunInfo(run: RoutineRun, chatId: string): RoutineRunInf
     finishedAt: run.finishedAt?.getTime() ?? null,
     message: run.messageId ? { id: run.messageId, chatId } : null,
     test: run.test,
+  }
+}
+
+/** What the owner sees of a catalog plugin. No accounts can be connected yet, so none is connected. */
+export function toPluginInfo(plugin: Plugin): PluginInfo {
+  return {
+    name: plugin.name,
+    displayName: plugin.displayName,
+    version: plugin.version,
+    description: plugin.description,
+    icon: plugin.icon && pluginIconPath(plugin.name),
+    status: 'not_connected',
+    servers: plugin.servers,
+    skills: plugin.skills.map(({ name, description }) => ({ name, description })),
   }
 }

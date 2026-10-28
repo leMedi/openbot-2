@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
 import { SignInNotFoundError } from '@openbot/agent'
 import { contract } from '@openbot/api-contract'
@@ -67,9 +68,16 @@ import { implement, ORPCError } from '@orpc/server'
 import { generateContentDisposition } from '@orpc/standard-server'
 import { chatInfoOf, publishChat, type ServerContext } from './context.ts'
 import { screenStreamUrl } from './screen-stream.ts'
-import { toAuditEntryInfo, toBotInfo, toFactInfo, toMessageInfo, toRoutineInfo, toRoutineRunInfo } from './views.ts'
+import { toAuditEntryInfo, toBotInfo, toFactInfo, toMessageInfo, toPluginInfo, toRoutineInfo, toRoutineRunInfo } from './views.ts'
 
 const os = implement(contract).$context<ServerContext>()
+
+/** The catalog's plugin named `name`, or NOT_FOUND. */
+function pluginMustExist(context: ServerContext, name: string) {
+  const plugin = context.plugins.find((entry) => entry.name === name)
+  if (!plugin) throw new ORPCError('NOT_FOUND', { message: `No plugin named ${name}` })
+  return plugin
+}
 
 /** Writes the owner's time zone with `write`, refusing an invalid one; a change is published for scheduled jobs. */
 async function setTimeZone(context: ServerContext, write: () => Promise<TimeZoneWrite>) {
@@ -578,6 +586,23 @@ export const router = os.router({
     }),
 
     disconnect: os.providers.disconnect.handler(({ context, input }) => context.providers.disconnect(input.providerId)),
+  },
+
+  plugins: {
+    list: os.plugins.list.handler(({ context }) => context.plugins.map(toPluginInfo)),
+
+    get: os.plugins.get.handler(({ context, input }) => toPluginInfo(pluginMustExist(context, input.name))),
+
+    icon: os.plugins.icon.handler(async ({ context, input }) => {
+      const { icon } = pluginMustExist(context, input.name)
+      const bytes = icon && (await readFile(icon.file).catch(() => undefined))
+      if (!bytes) throw new ORPCError('NOT_FOUND', { message: `${input.name} has no icon` })
+      return {
+        // Shown as an image, and never run as a page of this origin, whatever an SVG holds.
+        headers: { 'content-security-policy': 'sandbox', 'x-content-type-options': 'nosniff' },
+        body: new File([bytes], basename(icon!.file), { type: icon!.type }),
+      }
+    }),
   },
 
   models: {

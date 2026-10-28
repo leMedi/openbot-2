@@ -1,0 +1,11 @@
+{
+  "name": "linear",
+  "displayName": "Linear",
+  "version": "1.0.0",
+  "description": "Find, create and update issues, projects and comments in Linear.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://linear.app",
+  "icon": "./logo.svg"
+}

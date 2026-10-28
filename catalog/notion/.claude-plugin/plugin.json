@@ -1,0 +1,11 @@
+{
+  "name": "notion",
+  "displayName": "Notion",
+  "version": "1.0.0",
+  "description": "Search, read and write pages and databases in your Notion workspace.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.notion.com",
+  "icon": "./logo.svg"
+}

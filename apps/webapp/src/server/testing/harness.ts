@@ -9,6 +9,7 @@ import { connectBrowser, connectDesktop, connectScreens, defaultDaemonSocket } f
 import { type Orchestrator, type Screens, type ScreenStatus, writeModelSettings } from '@openbot/core'
 import { createFakeClock, createFakeComputer, type FakeClock, type FakeComputer, type FakeComputerScript } from '@openbot/core/testing'
 import { openDb } from '@openbot/db'
+import { bundledCatalog } from '@openbot/plugins'
 import { createRouterClient } from '@orpc/server'
 import { createServerContext } from '../context.ts'
 import { handleScreenUpgrade, ScreenTickets } from '../screen-stream.ts'
@@ -80,6 +81,8 @@ export type TestServerOptions = {
    * model; off otherwise, so tests that move the clock across nights script only their bots' runs.
    */
   consolidation?: boolean
+  /** The plugin catalog's folder, e.g. a fixture; the release's bundled catalog by default. */
+  catalog?: string
 }
 
 /**
@@ -96,7 +99,7 @@ type KeptFakes = { computer: FakeComputer; botComputer: FakeBotComputer; clock: 
 async function open(
   dir: string,
   secretKey: string,
-  { shell, pages, realComputer, outsideImage, modelProviders = [], script, memoryModel, extraction = false, consolidation = false, compaction, now, ...options }: TestServerOptions,
+  { shell, pages, realComputer, outsideImage, modelProviders = [], script, memoryModel, extraction = false, consolidation = false, compaction, now, catalog = bundledCatalog, ...options }: TestServerOptions,
   kept?: KeptFakes,
 ) {
   const db = await openDb(join(dir, 'openbot.db'))
@@ -130,6 +133,8 @@ async function open(
     clock,
     memoryExtraction: extraction,
     memoryConsolidation: consolidation,
+    catalog,
+    home,
     ...options,
   })
   await context.screensSynced

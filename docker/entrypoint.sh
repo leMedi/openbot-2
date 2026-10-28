@@ -14,6 +14,8 @@ done
 install -d -o openbot-server -g openbot-server -m 0700 "${OPENBOT_DATA_DIR}"
 # The bots' world.
 install -d -o openbot -g openbot -m 0755 "${OPENBOT_HOME}" "${OPENBOT_HOME}/shared" "${OPENBOT_HOME}/bots"
+# Plugins' skills, copied by the server on boot: the bots can read them but not change them.
+install -d -o openbot-server -g openbot-server -m 0755 "${OPENBOT_HOME}/plugins"
 install -d -o openbot-server -g openbot-server -m 0755 "${OPENBOT_APP_DIR}"
 # The release the image embeds, if any, unless a newer one is installed already.
 openbot-install-release

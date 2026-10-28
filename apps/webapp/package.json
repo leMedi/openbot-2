@@ -21,6 +21,7 @@
     "@openbot/computer": "workspace:*",
     "@openbot/core": "workspace:*",
     "@openbot/db": "workspace:*",
+    "@openbot/plugins": "workspace:*",
     "@openbot/ui": "workspace:*",
     "@orpc/openapi": "1.16.1",
     "@orpc/server": "1.16.1",

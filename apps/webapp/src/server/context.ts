@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { type BotComputer, BotRuntime, type BotRuntimeOptions, type BotTool, type ModelProvider, Providers, type Watchdog } from '@openbot/agent'
 import type { ChatInfo, LiveEvent } from '@openbot/api-contract'
 import {
@@ -30,6 +31,7 @@ import {
   getBot,
 } from '@openbot/core'
 import type { Db } from '@openbot/db'
+import { installSkills, loadCatalog, type Plugin } from '@openbot/plugins'
 import type { ScreenTickets } from './screen-stream.ts'
 import { toChatInfo, toMessageInfo, toRoutineInfo, toRoutineRunInfo } from './views.ts'
 
@@ -69,6 +71,8 @@ export type ServerContext = {
   extraction: MemoryExtraction
   /** Bots' routines, fired on the server's clock; `routines.close()` stops them. */
   routines: Routines
+  /** The plugin catalog, read once on boot, by name. */
+  plugins: Plugin[]
 }
 
 /** The owner's time zone (`settings.timeZone`), as scheduled jobs read it. */
@@ -114,6 +118,8 @@ export async function createServerContext({
   clock = systemClock,
   memoryExtraction = true,
   memoryConsolidation = true,
+  catalog,
+  home,
 }: {
   db: Db
   /** Encrypts system credentials. */
@@ -151,8 +157,13 @@ export async function createServerContext({
   memoryExtraction?: boolean
   /** Consolidates memory nightly (design §5.3); tests leave it off unless they script the memory model. */
   memoryConsolidation?: boolean
+  /** The plugin catalog's folder: the release's, or a test's fixture. */
+  catalog: string
+  /** The bots' home, where plugins' skills are copied for them to read. */
+  home: string
 }): Promise<ServerContext> {
   const bus = new EventBus<LiveEvent>()
+  const plugins = await openCatalog(catalog, home)
   const attachments = new AttachmentStore(attachmentsDir)
   const providers = new Providers({ db, box: new SecretBox(secretKey), providers: modelProviders })
   // Made before the runtime, whose resumed runs may post to groups as it opens; turns wait for it to be open.
@@ -361,5 +372,18 @@ export async function createServerContext({
     ownerTime,
     extraction,
     routines,
+    plugins,
   }
+}
+
+/**
+ * The catalog's plugins, with what the loader refused or ignored logged, and their skills copied into the bots' home,
+ * replacing the copies of an earlier release. Bots go without skills, rather than the server failing to start, when
+ * they can't be copied.
+ */
+async function openCatalog(catalog: string, home: string): Promise<Plugin[]> {
+  const { plugins, problems } = await loadCatalog(catalog)
+  for (const problem of problems) console.warn(`[plugins] ${problem}`)
+  await installSkills(plugins, join(home, 'plugins')).catch((error) => console.error("[plugins] Couldn't copy plugins' skills for bots:", error))
+  return plugins
 }

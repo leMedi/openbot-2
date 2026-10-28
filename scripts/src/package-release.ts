@@ -7,6 +7,7 @@
 //   apps/webapp/dist          the built web app; its server build bundles the web app and the workspace packages
 //   apps/desktopd/src         the screen daemon, run with plain Node
 //   apps/*, packages/*        the workspace packages' sources (tests left out)
+//   catalog/                  the bundled plugins (design §5.5)
 //   node_modules              production dependencies for linux x64 and arm64, installed flat ("hoisted")
 //
 // Dependencies stay outside the server build and are installed flat so that the build's imports resolve from
@@ -22,8 +23,11 @@ import { readReleaseConfig, type ReleaseConfig, releaseManifest, releaseNotes, t
 
 /** Top-level files every release keeps: pnpm's workspace files, so the release can be inspected and reinstalled. */
 const rootFiles = ['package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml']
-/** Where the workspace packages live; evals/ too, so the workspace installs as its lockfile says (nothing runs it). */
-const packageFolders = ['apps/', 'packages/', 'scripts/', 'evals/']
+/**
+ * Where the workspace packages live; evals/ too, so the workspace installs as its lockfile says (nothing runs it); and
+ * the plugin catalog, which the server reads on boot.
+ */
+const packageFolders = ['apps/', 'packages/', 'scripts/', 'evals/', 'catalog/']
 const isTest = (path: string) => /\.test\.tsx?$/.test(path)
 
 /** The platforms the runtime image runs on, whose native dependencies the release carries. */

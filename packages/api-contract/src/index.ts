@@ -524,6 +524,29 @@ export const screenTicket = z.object({
 })
 export type ScreenTicket = z.infer<typeof screenTicket>
 
+/** Whether bots could use a plugin: connected once it has an account; needs reconnect when a sign-in expired. */
+export const pluginStatuses = ['not_connected', 'connected', 'needs_reconnect'] as const
+
+/** A plugin of the catalog bundled with this release, as Settings → Plugins shows it. */
+export const plugin = z.object({
+  /** Its id: lowercase kebab-case, part of its tools' names. */
+  name: z.string(),
+  displayName: z.string(),
+  version: z.string().nullable(),
+  description: z.string(),
+  /** Its icon's path on this API, or null when it has none. */
+  icon: z.string().nullable(),
+  status: z.enum(pluginStatuses),
+  /** The hosted MCP servers it brings; none for a plugin of skills only. */
+  servers: z.array(z.object({ name: z.string(), url: z.string() })),
+  /** The skills it brings, which bots it's granted to read. */
+  skills: z.array(z.object({ name: z.string(), description: z.string() })),
+})
+export type PluginInfo = z.infer<typeof plugin>
+
+/** The path of a plugin's icon on this API. */
+export const pluginIconPath = (name: string) => `/plugins/${name}/icon`
+
 export const contract = {
   health: oc
     .route({ method: 'GET', path: '/health', summary: 'Liveness, used by the installer and the updater' })
@@ -762,6 +785,19 @@ export const contract = {
       .route({ method: 'DELETE', path: '/providers/{providerId}/connection', summary: 'Forget the stored credential' })
       .input(z.object({ providerId: z.string() }))
       .output(z.void()),
+  },
+  plugins: {
+    list: oc
+      .route({ method: 'GET', path: '/plugins', summary: 'The plugin catalog bundled with this release, by name, with each plugin\'s status' })
+      .output(z.array(plugin)),
+    get: oc
+      .route({ method: 'GET', path: '/plugins/{name}', summary: 'One plugin of the catalog, with its servers and skills' })
+      .input(z.object({ name: z.string() }))
+      .output(plugin),
+    icon: oc
+      .route({ method: 'GET', path: '/plugins/{name}/icon', summary: "A plugin's icon, an image file of the plugin", outputStructure: 'detailed' })
+      .input(z.object({ name: z.string() }))
+      .output(z.object({ headers: z.record(z.string(), z.string()), body: z.file() })),
   },
   models: {
     list: oc
