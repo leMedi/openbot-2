@@ -1,8 +1,11 @@
+import { rm } from 'node:fs/promises'
+import { join } from 'node:path'
 import { callsTools, endsSilently, recordingTool } from '@openbot/agent/testing'
 import type { Orchestrator } from '@openbot/core'
 import type { BotInfo, NewBot } from '@openbot/api-contract'
+import { openDbBefore } from '@openbot/db/testing'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createTestServer, type TestServerOptions, type TestServer } from './testing/harness.ts'
+import { createTestServer, restartTestServer, type TestServerOptions, type TestServer } from './testing/harness.ts'
 
 const servers: TestServer[] = []
 afterEach(async () => {
@@ -148,7 +151,7 @@ describe('orchestrator modes', () => {
       vault: 'shadow',
       plugin_request: 'shadow',
       routine_change: 'shadow',
-      memory_global_write: 'shadow',
+      memory_shared_write: 'shadow',
     })
     expect(await server.client.bots.getOrchestratorModes({ botId: bot.id })).toMatchObject({ overrides: {}, modes: { shell: 'shadow' } })
   })
@@ -176,6 +179,29 @@ describe('orchestrator modes', () => {
     await callShell(server, bot, { command: 'rm -rf /' })
 
     expect(shell.calls).toEqual([])
+  })
+
+  it('set on memory_global_write carry over to memory_shared_write, globally and per bot', async () => {
+    const server = await createTestServer()
+    await server.shutdown()
+    const file = join(server.dataDir, 'openbot.db')
+    await rm(file)
+    const legacy = await openDbBefore(file, '0008_memory_shared_write')
+    await legacy.$client.batch([
+      `INSERT INTO settings (key, value) VALUES ('orchestratorModes', '{"memory_global_write":"enforce","shell":"off"}')`,
+      `INSERT INTO bots (id, name, avatar_shape, avatar_color, orchestrator_modes)
+         VALUES ('rex', 'Rex', 'hex', 'blue', '{"memory_global_write":"off","vault":"enforce"}')`,
+    ])
+    legacy.$client.close()
+
+    const restarted = await restartTestServer(server)
+    servers.push(restarted)
+
+    expect(await restarted.client.orchestrator.getModes()).toMatchObject({ memory_shared_write: 'enforce', shell: 'off' })
+    expect(await restarted.client.bots.getOrchestratorModes({ botId: 'rex' })).toEqual({
+      overrides: { memory_shared_write: 'off', vault: 'enforce' },
+      modes: expect.objectContaining({ memory_shared_write: 'off', vault: 'enforce', shell: 'off' }),
+    })
   })
 
   it('reject an unknown bot', async () => {

@@ -320,7 +320,7 @@ export const surfaces = [
   'vault',
   'plugin_request',
   'routine_change',
-  'memory_global_write',
+  'memory_shared_write',
 ] as const
 const surface = z.enum(surfaces)
 /** off: not reviewed, only logged; shadow: reviewed and logged, never blocked; enforce: a deny blocks the action. */

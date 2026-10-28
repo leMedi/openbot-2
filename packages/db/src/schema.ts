@@ -43,7 +43,7 @@ export const surfaces = [
   'vault',
   'plugin_request',
   'routine_change',
-  'memory_global_write',
+  'memory_shared_write',
 ] as const
 export type Surface = (typeof surfaces)[number]
 
