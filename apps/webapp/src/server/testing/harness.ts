@@ -73,6 +73,11 @@ export type TestServerOptions = {
    * script only their bots' runs.
    */
   extraction?: boolean
+  /**
+   * Consolidates memory nightly at 04:00 in the owner's time zone, on `fake/fake-memory` (implied), set as the memory
+   * model; off otherwise, so tests that move the clock across nights script only their bots' runs.
+   */
+  consolidation?: boolean
 }
 
 /**
@@ -89,12 +94,12 @@ type KeptFakes = { computer: FakeComputer; botComputer: FakeBotComputer; clock: 
 async function open(
   dir: string,
   secretKey: string,
-  { shell, pages, realComputer, outsideImage, modelProviders = [], script, memoryModel, extraction = false, compaction, now, ...options }: TestServerOptions,
+  { shell, pages, realComputer, outsideImage, modelProviders = [], script, memoryModel, extraction = false, consolidation = false, compaction, now, ...options }: TestServerOptions,
   kept?: KeptFakes,
 ) {
   const db = await openDb(join(dir, 'openbot.db'))
-  const providers = createFakeProviders({ memoryModel: memoryModel || extraction })
-  if (extraction) await writeModelSettings(db, { memoryModel: providers.memoryModel.ref })
+  const providers = createFakeProviders({ memoryModel: memoryModel || extraction || consolidation })
+  if (extraction || consolidation) await writeModelSettings(db, { memoryModel: providers.memoryModel.ref })
   script?.(providers)
   const home = realComputer ? process.env.OPENBOT_HOME! : join(dir, 'home')
   // The computer outlives the server, as the screen daemon does.
@@ -122,6 +127,7 @@ async function open(
     compaction,
     clock,
     memoryExtraction: extraction,
+    memoryConsolidation: consolidation,
     ...options,
   })
   await context.screensSynced

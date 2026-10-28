@@ -358,13 +358,14 @@ export const verdict = z.discriminatedUnion('decision', [
   z.object({ decision: z.literal('ask'), reason: z.string(), proposedRule: z.string().optional() }),
 ])
 
-export const auditKinds = ['action', 'navigation', 'session_summary', 'extraction'] as const
+export const auditKinds = ['action', 'navigation', 'session_summary', 'extraction', 'consolidation'] as const
 export const auditKind = z.enum(auditKinds)
 
 /**
  * One entry of a bot's audit log: a side-effecting tool call and its review (`action`), a page a computer-use session's
  * browser opened (`navigation`), a computer-use session's summary once it ended (`session_summary`), or a change memory
- * extraction made or was refused, or an extraction skipped after failing (`extraction`).
+ * extraction made or was refused, or an extraction skipped after failing (`extraction`), or a change nightly consolidation
+ * made, rejected or was refused, or a consolidation skipped after failing (`consolidation`).
  */
 export const auditEntry = z.object({
   id: z.string(),

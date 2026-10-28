@@ -154,3 +154,4 @@ export {
   writeFact,
 } from './memory.ts'
 export { type ExchangePart, MemoryExtraction, type RunExchange } from './memory-extraction.ts'
+export { MemoryConsolidation } from './memory-consolidation.ts'

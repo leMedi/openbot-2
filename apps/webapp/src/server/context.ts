@@ -22,6 +22,7 @@ import {
   ServerJobs,
   systemClock,
   keepScreensInSync,
+  MemoryConsolidation,
   MemoryExtraction,
   readModelSettings,
 } from '@openbot/core'
@@ -106,6 +107,7 @@ export async function createServerContext({
   compaction,
   clock = systemClock,
   memoryExtraction = true,
+  memoryConsolidation = true,
 }: {
   db: Db
   /** Encrypts system credentials. */
@@ -139,6 +141,8 @@ export async function createServerContext({
   clock?: Clock
   /** Extracts memory after every run of a bot (design §5.3); tests leave it off unless they script the memory model. */
   memoryExtraction?: boolean
+  /** Consolidates memory nightly (design §5.3); tests leave it off unless they script the memory model. */
+  memoryConsolidation?: boolean
 }): Promise<ServerContext> {
   const bus = new EventBus<LiveEvent>()
   const attachments = new AttachmentStore(attachmentsDir)
@@ -152,7 +156,7 @@ export async function createServerContext({
     onSpeaking: (chatId) => void publish(chatId).catch((error) => console.error("[groups] Couldn't show who is taking a turn:", error)),
   })
   const publish = (chatId: string) => publishChat({ db, bus, rounds }, chatId)
-  const extraction = new MemoryExtraction({
+  const memoryModelOptions = {
     db,
     clock,
     // The memory model, else the default; none while its provider isn't connected.
@@ -161,8 +165,9 @@ export async function createServerContext({
       const ref = memoryModel ?? defaultModel
       return ref && (await providers.findModel(ref)) ? ref : undefined
     },
-    complete: (ref, request) => providers.complete(ref, request),
-  })
+    complete: (ref: string, request: { systemPrompt: string; prompt: string }) => providers.complete(ref, request),
+  }
+  const extraction = new MemoryExtraction(memoryModelOptions)
   /** Posts a bot's message with copies of its files to `chatId`; returns it, or undefined for a replayed call's. */
   async function postBotMessage(bot: BotWithChat, chatId: string, text: string, files: AttachmentFile[], idempotencyKey: string) {
     const saved = await attachments.save(chatId, files)
@@ -286,6 +291,10 @@ export async function createServerContext({
   const ownerTime: OwnerTime = {
     timeZone: () => ownerTimeZone(db),
     instant: async (local) => instantAt(local, await ownerTimeZone(db)),
+  }
+  if (memoryConsolidation) {
+    const consolidation = new MemoryConsolidation(memoryModelOptions)
+    jobs.daily('memory consolidation', { at: '04:00', timeZone: ownerTime.timeZone }, () => consolidation.run())
   }
   return {
     db,

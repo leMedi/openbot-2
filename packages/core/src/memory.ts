@@ -1,5 +1,5 @@
 import { bots, type Db, type Fact, type FactTier, factTiers, memories, type MemoryScope } from '@openbot/db'
-import { and, asc, eq, isNull, or, sql } from 'drizzle-orm'
+import { and, asc, eq, isNull, lte, or, sql } from 'drizzle-orm'
 import { uuidv7 } from 'uuidv7'
 
 export { factTiers }
@@ -70,13 +70,16 @@ export type FactChanges = { text?: string; tier?: FactTier; importance?: number 
  */
 export type FactReach = { botId: string; scope?: MemoryScope } | { botId?: undefined; scope: 'shared' }
 
-/** The ownership check every way of reaching a fact by id goes through: fact `id`, if `reach` reaches it. */
-const reachableFact = (reach: FactReach, id: number) => {
+/** The facts `reach` reaches. */
+const reachable = (reach: FactReach) => {
   const shared = eq(memories.scope, 'shared')
-  if (reach.botId === undefined) return and(eq(memories.id, id), shared)
+  if (reach.botId === undefined) return shared
   const own = and(eq(memories.scope, 'bot'), eq(memories.botId, reach.botId))
-  return and(eq(memories.id, id), reach.scope === 'bot' ? own : reach.scope === 'shared' ? shared : or(own, shared))
+  return reach.scope === 'bot' ? own : reach.scope === 'shared' ? shared : or(own, shared)
 }
+
+/** The ownership check every way of reaching a fact by id goes through: fact `id`, if `reach` reaches it. */
+const reachableFact = (reach: FactReach, id: number) => and(eq(memories.id, id), reachable(reach))
 
 /** The bot's bot memory, oldest first. */
 export async function listBotFacts(db: Db, botId: string): Promise<Fact[]> {
@@ -164,6 +167,18 @@ export async function forgetFact(db: Db, reach: FactReach, id: number): Promise<
 }
 
 /**
+ * Deletes the notes `reach` reaches that were learned at least `noteLifetimeMs` before `now`, for good; answers them,
+ * oldest first.
+ */
+export async function expireNotes(db: Db, reach: FactReach, now: number): Promise<Fact[]> {
+  const expired = await db
+    .delete(memories)
+    .where(and(reachable(reach), eq(memories.tier, 'note'), lte(memories.createdAt, new Date(now - noteLifetimeMs))))
+    .returning()
+  return expired.sort((a, b) => a.id - b.id)
+}
+
+/**
  * Breaks the freeze of every bot that sees `fact` (its bot for bot memory, every bot for shared memory): each renders
  * its memory block anew on its next run, without waiting for a compaction. What the owner changes takes effect at once;
  * bots' own changes don't need it, being in their history already, but a re-render shows them too. The block left is
@@ -238,6 +253,15 @@ function factLine(fact: Fact, timeZone: string): string {
   const learned = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(fact.createdAt)
   const via = fact.scope === 'shared' ? `[via ${factSourceName(fact)}] ` : ''
   return `- [${fact.id}] (learned ${learned}) ${via}${fact.content}`
+}
+
+/**
+ * How many characters the profile facts among `facts` (one scope's) take in the memory block, all shown; past
+ * `maxProfileChars`, the least important drop out.
+ */
+export function profileLength(facts: readonly Fact[], timeZone: string): number {
+  const lines = facts.filter((fact) => fact.tier === 'profile').map((fact) => factLine(fact, timeZone))
+  return Math.max(0, lines.reduce((length, line) => length + line.length + 1, -1))
 }
 
 /** `lines`, in order, up to the first that would take them past `maxChars` characters. */
