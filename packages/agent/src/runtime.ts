@@ -99,6 +99,7 @@ import {
   queuedInputs,
   type TakeOverCard,
   readModelSettings,
+  recordOutcome,
   recordUnreviewed,
   redriveReply,
   requeueInput,
@@ -117,6 +118,8 @@ const context = BACKGROUND_CONTEXT
 
 /** The entry kind of everything that wakes a bot, tagged with its lane. */
 const inputKind = 'openbot.input'
+/** A note from the server in a bot's history, e.g. that a plugin account it was granted was disconnected. */
+const noteKind = 'openbot.note'
 
 /** At most this many reminders follow a run that answers the owner without a message (Grok's `MAX_REPLY_NUDGES`). */
 const maxReplyReminders = 3
@@ -178,6 +181,8 @@ export type ToolSurface =
 export type BotTool = {
   surface: ToolSurface
   tool: ToolRegistration<any, any>
+  /** The MCP server a plugin tool calls, `<plugin>_<accountN>`, as its calls are audited. */
+  server?: string
 }
 
 export type BotRuntimeOptions = {
@@ -1019,6 +1024,8 @@ export class BotRuntime implements AgentRuntime {
       },
     })
     const tools = [sendMessage, messageBot, askQuestion, updateState, ...computerTools(images), useComputer, ...(options.tools ?? [])].map(detachable)
+    /** The audit entries of reviewed calls that are running, by conversation and call, and when each started. */
+    const reviewed = new Map<string, { entryId: string; started: number }>()
     const toolSurfaces = new Map<string, ToolSurface>([
       ...tools.map(({ surface, tool }) => [tool.name, surface] as const),
       // Sessions don't select this extension, so its hooks shouldn't see their browser and desktop tools; if they ever
@@ -1046,19 +1053,36 @@ export class BotRuntime implements AgentRuntime {
             let declared = toolSurfaces.get(call.name)
             if (declared === null) return
             const bot = await botOf(api.conversationId)
+            let server: string | undefined
             if (!toolSurfaces.has(call.name)) {
               // One of the bot's own tools, checked against those it has now: one it lost since loading it fails cleanly.
               const own = (await options.botTools?.(bot.id))?.find(({ tool }) => tool.name === call.name)
               if (!own) return { block: lostTool(call.name) }
               declared = own.surface
+              server = own.server
             }
             // Fails closed: a tool that never declared its surface can't run unreviewed.
             if (declared === undefined) return { block: `${call.name} declares no surface, so it can't be reviewed` }
             const { surface, arguments: pinned } = typeof declared === 'function' ? await declared(call.arguments, bot.id) : { surface: declared }
             const replaced = pinned && { arguments: pinned }
             if (surface === null) return replaced
-            const blocked = await reviewAction(options.db, options.orchestrator, bot.id, { surface, tool: call.name, input: pinned ?? call.arguments })
-            return blocked ? { block: blocked } : replaced
+            const { entryId, blocked } = await reviewAction(options.db, options.orchestrator, bot.id, {
+              surface,
+              tool: call.name,
+              input: pinned ?? call.arguments,
+              ...(server && { server }),
+            })
+            if (blocked) return { block: blocked }
+            reviewed.set(`${api.conversationId}:${call.id}`, { entryId, started: Date.now() })
+            return replaced
+          },
+          // How each reviewed call that ran ended goes into its audit entry.
+          afterTool: async (call, result, api) => {
+            const key = `${api.conversationId}:${call.id}`
+            const entry = reviewed.get(key)
+            if (!entry) return
+            reviewed.delete(key)
+            await recordOutcome(options.db, entry.entryId, { status: result.isError ? 'error' : 'ok', durationMs: Date.now() - entry.started })
           },
         }),
       ],
@@ -1184,6 +1208,16 @@ export class BotRuntime implements AgentRuntime {
     } catch (error) {
       console.error(`[agent] Couldn't wake bot ${botId} for the reply it owes the owner:`, error)
     }
+  }
+
+  /**
+   * Leaves `text` in the bot's history for its model to read, without waking it: at once when it is idle, otherwise
+   * after its current tool round. A bot without a history yet has nothing to be told.
+   */
+  async note(botId: string, text: string): Promise<void> {
+    const history = await this.#existingHistory(botId)
+    if (!history) return
+    await history.submit({ type: 'write', entry: { kind: noteKind, data: { text }, model: [{ role: 'user', content: text, timestamp: Date.now() }] } }, context)
   }
 
   /** Queues `input` (see `AgentRuntime.wake` and `RunScheduler`). */

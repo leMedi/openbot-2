@@ -88,7 +88,7 @@ _Avoid_: Widget, prompt
 The owner's yes or no on a card asking to let a bot do something.
 
 **Grant**:
-A standing permission for one bot to use one thing (a plugin account, a vault item), created by an approval and revocable.
+A standing permission for one bot to use one thing (a plugin account, a vault item), given by the owner (directly, or by approving the bot's request) and revocable.
 _Avoid_: Permission, access
 
 **Take over**:

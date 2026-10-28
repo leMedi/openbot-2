@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { type BotComputer, BotRuntime, type BotRuntimeOptions, type BotTool, type ModelProvider, PluginAccounts, Providers, type Watchdog } from '@openbot/agent'
+import { type BotComputer, BotRuntime, type BotRuntimeOptions, type BotTool, type ConnectablePlugin, type ModelProvider, PluginAccounts, Providers, type Watchdog } from '@openbot/agent'
 import type { ChatInfo, LiveEvent } from '@openbot/api-contract'
 import {
   AllowAllOrchestrator,
@@ -73,7 +73,7 @@ export type ServerContext = {
   routines: Routines
   /** The plugin catalog, read once on boot, by name. */
   plugins: Plugin[]
-  /** The owner's plugin accounts and their sign-ins. */
+  /** The owner's plugin accounts, their sign-ins, grants and connections; `pluginAccounts.close()` closes those. */
   pluginAccounts: PluginAccounts
 }
 
@@ -145,7 +145,10 @@ export async function createServerContext({
   screenTickets: ScreenTickets
   /** Tools beyond the built-in ones, e.g. a test's. */
   tools?: BotTool[]
-  /** The tools only some bots have, e.g. a test's plugin tools: deferred until each bot loads them with tool_search. */
+  /**
+   * The tools only some bots have, deferred until each bot loads them with tool_search: the plugin accounts' tools each
+   * bot is granted, or a test's.
+   */
   botTools?: BotRuntimeOptions['botTools']
   /** When a run the owner's message waits for is interrupted again, then detached; Grok's timings by default. */
   watchdog?: Watchdog
@@ -169,7 +172,7 @@ export async function createServerContext({
   const attachments = new AttachmentStore(attachmentsDir)
   const box = new SecretBox(secretKey)
   const providers = new Providers({ db, box, providers: modelProviders })
-  const pluginAccounts = new PluginAccounts({ db, box })
+  const pluginAccounts = new PluginAccounts({ db, box, plugins: connectable(plugins) })
   // Made before the runtime, whose resumed runs may post to groups as it opens; turns wait for it to be open.
   let opened!: (runtime: BotRuntime) => void
   const runtimeOpen = new Promise<BotRuntime>((resolve) => (opened = resolve))
@@ -243,7 +246,7 @@ export async function createServerContext({
     browser,
     desktop,
     tools,
-    botTools,
+    botTools: botTools ?? ((botId) => pluginAccounts.botTools(botId)),
     watchdog,
     fetch,
     compaction,
@@ -380,6 +383,10 @@ export async function createServerContext({
     pluginAccounts,
   }
 }
+
+/** The catalog's plugins whose accounts bots can call: those with one server (OpenBot can't sign in to several yet). */
+const connectable = (plugins: Plugin[]): ConnectablePlugin[] =>
+  plugins.flatMap(({ name, displayName, servers: [server, ...more] }) => (server && !more.length ? [{ name, displayName, serverUrl: server.url }] : []))
 
 /**
  * The catalog's plugins, with what the loader refused or ignored logged, and their skills copied into the bots' home,

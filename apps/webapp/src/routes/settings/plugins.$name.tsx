@@ -2,17 +2,18 @@ import { type PluginAccountInfo, type PluginInfo, pluginAccountNameMax } from '@
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { useCallback, useEffect, useState } from 'react'
 import { Dialog } from '../../components/dialog.tsx'
-import { PluginIcon, PluginStatus } from '../../components/plugins.tsx'
+import { GrantSwitch, PluginIcon, PluginStatus } from '../../components/plugins.tsx'
 import { SignInWizard } from '../../components/sign-in-wizard.tsx'
 import { api, errorMessage } from '../../lib/api.ts'
+import { useLive } from '../../lib/live.tsx'
 
 export const Route = createFileRoute('/settings/plugins/$name')({
   component: PluginDetail,
 })
 
 /**
- * A plugin's detail view in Settings → Plugins: what it is, its status, its accounts (connect, rename, disconnect), and
- * the servers and skills it brings.
+ * A plugin's detail view in Settings → Plugins: what it is, its status, its accounts (connect, rename, disconnect, and
+ * the bots granted each), and the servers and skills it brings.
  */
 function PluginDetail() {
   const { name } = Route.useParams()
@@ -128,8 +129,9 @@ function PluginDetail() {
   )
 }
 
-/** One connected account: its name, which the owner can change, its slug, and Disconnect. */
+/** One connected account: its name, which the owner can change, its slug, Disconnect, and the bots granted it. */
 function AccountRow({ plugin, account, onChanged }: { plugin: PluginInfo; account: PluginAccountInfo; onChanged: () => void }) {
+  const { bots } = useLive()
   const [renaming, setRenaming] = useState(false)
   const [displayName, setDisplayName] = useState(account.displayName)
   const [disconnecting, setDisconnecting] = useState(false)
@@ -202,6 +204,14 @@ function AccountRow({ plugin, account, onChanged }: { plugin: PluginInfo; accoun
         </div>
       )}
       {error && <p className="text-sm text-destructive-foreground">{error}</p>}
+      {bots && bots.length > 0 && (
+        <fieldset className="mt-1 flex flex-col gap-1">
+          <legend className="mb-1 text-sm text-muted-foreground">Bots that may use it</legend>
+          {bots.map((bot) => (
+            <GrantSwitch key={bot.id} plugin={plugin} account={account} bot={bot} label={bot.name} onChanged={onChanged} />
+          ))}
+        </fieldset>
+      )}
 
       {disconnecting && (
         <Dialog label={`Disconnect ${account.displayName}`} onClose={() => setDisconnecting(false)}>
@@ -212,7 +222,7 @@ function AccountRow({ plugin, account, onChanged }: { plugin: PluginInfo; accoun
                   Disconnect {plugin.displayName} ({account.displayName})?
                 </h2>
                 <p className="text-muted-foreground">
-                  OpenBot forgets this account's sign-in. Connecting it again gives it a new slug, so bots see it as a new account.
+                  OpenBot forgets this account's sign-in, and the bots granted it lose its tools. Connecting it again gives it a new slug, so bots see it as a new account.
                 </p>
               </header>
               <footer className="flex justify-end gap-2">

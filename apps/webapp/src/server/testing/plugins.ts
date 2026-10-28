@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { type FakeMcpServer, startFakeMcpServer } from '@openbot/agent/testing'
+import { type FakeMcpServer, type FakeMcpTool, startFakeMcpServer } from '@openbot/agent/testing'
 import type { SignInStep } from '@openbot/api-contract'
 import { expect } from 'vitest'
 import type { TestServer } from './harness.ts'
@@ -32,9 +32,12 @@ export async function writeCatalog(plugins: Record<string, FixturePlugin>, into?
   return catalog
 }
 
-/** A hosted plugin `name` served by a fake MCP server behind its own OAuth authorization server; returns both. */
-export async function hostedPlugin(name = 'notes') {
-  const fake = await startFakeMcpServer()
+/**
+ * A hosted plugin `name` served by a fake MCP server, offering `tools`, behind its own OAuth authorization server;
+ * returns both.
+ */
+export async function hostedPlugin(name = 'notes', tools: FakeMcpTool[] = []) {
+  const fake = await startFakeMcpServer({ tools })
   made.push(() => fake.close())
   const plugin: FixturePlugin = {
     '.claude-plugin/plugin.json': { name, displayName: 'Notes', description: 'Your notes workspace', icon: './logo.svg' },

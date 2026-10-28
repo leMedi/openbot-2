@@ -200,6 +200,9 @@ export const messages = sqliteTable(
 export const auditKinds = ['action', 'navigation', 'session_summary', 'routine'] as const
 export type AuditKind = (typeof auditKinds)[number]
 
+/** How an action that ran ended: whether its result was an error, and how long it took. */
+export type ActionOutcome = { status: 'ok' | 'error'; durationMs: number }
+
 export const auditLog = sqliteTable(
   'audit_log',
   {
@@ -211,12 +214,16 @@ export const auditLog = sqliteTable(
     surface: text('surface', { enum: surfaces }).notNull(),
     /** The tool the bot called; for a navigation, the session's tool that opened the page. */
     tool: text('tool').notNull(),
+    /** The MCP server a plugin tool's call went to, `<plugin>_<accountN>`; null for other tools. */
+    server: text('server'),
     /** The tool call's input, a navigation's URL and title, or a session's summary; with secrets redacted. */
     action: text('action', { mode: 'json' }).$type<unknown>().notNull(),
     /** Null when nothing was reviewed: the surface was off, or the entry isn't an action. */
     verdict: text('verdict', { mode: 'json' }).$type<Verdict>(),
     /** The surface's mode for the bot at the time. */
     mode: text('mode', { enum: orchestratorModes }).notNull(),
+    /** How an action ended once it ran; null for other entries, and for an action blocked, still running, or cut short. */
+    outcome: text('outcome', { mode: 'json' }).$type<ActionOutcome>(),
     createdAt: createdAt(),
   },
   (table) => [index('audit_log_bot_idx').on(table.botId, table.id)],
@@ -396,6 +403,26 @@ export const pluginAccounts = sqliteTable(
   (table) => [uniqueIndex('plugin_accounts_slug_idx').on(table.plugin, table.slug)],
 )
 
+/**
+ * Which bots may use which plugin accounts (design §5.5): one row per (bot, plugin, account), until revoked, the account
+ * disconnected or the bot deleted.
+ */
+export const pluginGrants = sqliteTable(
+  'plugin_grants',
+  {
+    id: id(),
+    botId: text('bot_id')
+      .notNull()
+      .references(() => bots.id, { onDelete: 'cascade' }),
+    /** The catalog plugin's name. */
+    plugin: text('plugin').notNull(),
+    /** The account's slug, `account1`… */
+    account: text('account').notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [uniqueIndex('plugin_grants_idx').on(table.botId, table.plugin, table.account)],
+)
+
 export type Setting = typeof settings.$inferSelect
 export type SystemCredential = typeof systemCredentials.$inferSelect
 export type Bot = typeof bots.$inferSelect
@@ -410,3 +437,4 @@ export type Fact = typeof memories.$inferSelect
 export type Routine = typeof routines.$inferSelect
 export type RoutineRun = typeof routineRuns.$inferSelect
 export type PluginAccount = typeof pluginAccounts.$inferSelect
+export type PluginGrant = typeof pluginGrants.$inferSelect

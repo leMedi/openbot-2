@@ -454,12 +454,16 @@ export const auditEntry = z.object({
   surface,
   /** The tool the bot called; for a navigation, the session's tool that opened the page. */
   tool: z.string(),
+  /** The MCP server a plugin tool's call went to, `<plugin>_<accountN>`; null for other tools. */
+  server: z.string().nullable(),
   /** The tool call's input, a navigation's `{ url, title }`, or a session's summary; with secrets redacted. */
   input: z.unknown(),
   /** Null when nothing was reviewed: the surface was off, or the entry isn't an action. */
   verdict: verdict.nullable(),
   /** The surface's mode for the bot at the time. */
   mode: orchestratorMode,
+  /** How an action ended once it ran; null for other entries, and for an action blocked, still running or cut short. */
+  outcome: z.object({ status: z.enum(['ok', 'error']), durationMs: z.number() }).nullable(),
   /** Milliseconds since the epoch. */
   createdAt: z.number(),
 })
@@ -537,6 +541,8 @@ export const pluginAccount = z.object({
   /** `Account N` until the owner renames it. */
   displayName: z.string(),
   connectedAt: z.number(),
+  /** The ids of the bots granted it, oldest grant first: they call its tools. */
+  grantedTo: z.array(z.string()),
 })
 export type PluginAccountInfo = z.infer<typeof pluginAccount>
 
@@ -850,9 +856,25 @@ export const contract = {
       .input(z.object({ name: z.string(), account: z.string(), displayName: z.string().max(pluginAccountNameMax) }))
       .output(pluginAccount),
     disconnectAccount: oc
-      .route({ method: 'DELETE', path: '/plugins/{name}/accounts/{account}', summary: "Disconnect an account, deleting its tokens; its slug isn't given again" })
+      .route({
+        method: 'DELETE',
+        path: '/plugins/{name}/accounts/{account}',
+        summary: "Disconnect an account, deleting its tokens and its grants, with a note to each bot granted it; its slug isn't given again",
+      })
       .input(z.object({ name: z.string(), account: z.string() }))
       .output(z.void()),
+    grant: oc
+      .route({ method: 'PUT', path: '/plugins/{name}/accounts/{account}/grants/{botId}', summary: "Let a bot use an account's tools, until revoked" })
+      .input(z.object({ name: z.string(), account: z.string(), botId: z.string() }))
+      .output(pluginAccount),
+    revoke: oc
+      .route({
+        method: 'DELETE',
+        path: '/plugins/{name}/accounts/{account}/grants/{botId}',
+        summary: "Take an account back from a bot: its tools fail from the bot's next call, and a call in flight finishes",
+      })
+      .input(z.object({ name: z.string(), account: z.string(), botId: z.string() }))
+      .output(pluginAccount),
   },
   models: {
     list: oc

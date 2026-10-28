@@ -1,12 +1,16 @@
-import { authorizeMcp, McpOAuthProvider, type McpOAuthState, type McpOAuthStateStore, MemoryOAuthStateStore } from '@earendil-works/pi-mcp/oauth'
+import { type JsonObject, Type } from '@earendil-works/pi-ai'
+import { defineTool } from '@earendil-works/pi-durable'
+import { type Tool, toLlmContent } from '@earendil-works/pi-mcp'
+import { authorizeMcp, McpOAuthProvider, MemoryOAuthStateStore } from '@earendil-works/pi-mcp/oauth'
 import type { SecretBox } from '@openbot/core'
-import { type Db, type PluginAccount, pluginAccounts } from '@openbot/db'
+import { type Db, type PluginAccount, pluginAccounts, pluginGrants } from '@openbot/db'
 import { and, asc, count, eq, isNull } from 'drizzle-orm'
-import { SealedCredentials } from './credential-store.ts'
+import { AccountCredentials, type AccountServer, PluginConnections, serverName } from './plugin-connections.ts'
+import type { BotTool } from './runtime.ts'
 import { SignInNotFoundError, type SignInStep, stepQueue } from './sign-in.ts'
 
-/** A connected account of a plugin, as Settings → Plugins lists it. Never carries its tokens. */
-export type PluginAccountSummary = { plugin: string; slug: string; displayName: string; connectedAt: Date }
+/** A connected account of a plugin, as Settings → Plugins lists it, with the bots granted it. Never carries its tokens. */
+export type PluginAccountSummary = { plugin: string; slug: string; displayName: string; connectedAt: Date; grantedTo: string[] }
 
 /** The plugin to connect: its catalog name and display name, and the hosted MCP server an account signs in to. */
 export type ConnectablePlugin = { name: string; displayName: string; serverUrl: string }
@@ -27,31 +31,43 @@ const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]'])
 /** The instance's callback when the catalog's servers accept it: over https, or on this machine's loopback. */
 const reachable = (callbackUrl: URL) => callbackUrl.protocol === 'https:' || (callbackUrl.protocol === 'http:' && loopbackHosts.has(callbackUrl.hostname))
 
-const toSummary = ({ plugin, slug, displayName, connectedAt }: PluginAccount): PluginAccountSummary => ({ plugin, slug, displayName, connectedAt })
+const toSummary = ({ plugin, slug, displayName, connectedAt }: PluginAccount, grantedTo: string[]): PluginAccountSummary => ({
+  plugin,
+  slug,
+  displayName,
+  connectedAt,
+  grantedTo,
+})
 
-const credentialKey = (plugin: string, slug: string) => `plugin:${plugin}:${slug}`
+/** The prefix of an account's tools' names: `mcp__<plugin>_<accountN>__`. */
+const toolPrefix = (plugin: string, slug: string) => `mcp__${serverName(plugin, slug)}__`
 
-/** An account's OAuth state (client, tokens, discovery), sealed in `system_credentials` (ADR 0006). */
-class AccountCredentials implements McpOAuthStateStore {
-  readonly #sealed: SealedCredentials
-  readonly #key: string
+/** Providers allow tool names of at most 64 characters of `[A-Za-z0-9_-]`. */
+const toolName = (plugin: string, slug: string, tool: string) => `${toolPrefix(plugin, slug)}${tool.replace(/[^A-Za-z0-9_-]/g, '_')}`.slice(0, 64)
 
-  /** `db` may be a transaction, e.g. one saving the account's row. */
-  constructor(db: ConstructorParameters<typeof SealedCredentials>[0], box: SecretBox, plugin: string, slug: string) {
-    this.#sealed = new SealedCredentials(db, box)
-    this.#key = credentialKey(plugin, slug)
-  }
+/** How bots and notes name an account: its plugin's display name, then its own, e.g. "Notion (Work)". */
+const accountLabel = (plugin: { displayName: string }, displayName: string) => `${plugin.displayName} (${displayName})`
 
-  load(): Promise<McpOAuthState | undefined> {
-    return this.#sealed.read(this.#key)
-  }
+/** What each bot granted a disconnected account reads in its history, e.g. "Notion (Work) was disconnected". */
+export const disconnectedNote = (plugin: { displayName: string }, account: { plugin: string; slug: string; displayName: string }) =>
+  `[${accountLabel(plugin, account.displayName)} was disconnected by the owner: its tools (${toolPrefix(account.plugin, account.slug)}…) are gone.]`
 
-  save(state: McpOAuthState): Promise<void> {
-    return this.#sealed.write(this.#key, state)
-  }
-
-  delete(): Promise<void> {
-    return this.#sealed.delete(this.#key)
+/** An account's tool as a bot calls it: `mcp__<plugin>_<accountN>__<tool>`, under the `mcp` surface. */
+function pluginTool(connections: PluginConnections, account: AccountServer, label: string, tool: Tool): BotTool {
+  return {
+    surface: 'mcp',
+    server: serverName(account.plugin, account.slug),
+    tool: defineTool({
+      name: toolName(account.plugin, account.slug, tool.name),
+      description: `${label}: ${tool.description ?? tool.title ?? tool.name}`,
+      // Providers require an object schema, and some reject one without `properties`.
+      parameters: Type.Unsafe<JsonObject>({ ...tool.inputSchema, type: 'object', properties: tool.inputSchema.properties ?? {} }),
+      execute: async (args, _api, context) => {
+        const result = await connections.call(account, tool.name, args, context.abortSignal)
+        // MCP reports a tool's failure in its result, not as an error.
+        return { output: toLlmContent(result), isError: result.isError === true }
+      },
+    }),
   }
 }
 
@@ -66,23 +82,104 @@ type PendingSignIn = { plugin: string; state: string; promptId?: string; respond
 export class PluginAccounts {
   readonly #db: Db
   readonly #box: SecretBox
+  /** The catalog's plugins bots can call, by name. */
+  readonly #plugins: Map<string, ConnectablePlugin>
+  readonly #connections: PluginConnections
   readonly #signIns = new Map<string, PendingSignIn>()
   /** New accounts are saved one at a time, so two sign-ins finishing together get different slugs. */
   #saving: Promise<unknown> = Promise.resolve()
 
-  constructor({ db, box }: { db: Db; box: SecretBox }) {
+  constructor({ db, box, plugins = [] }: { db: Db; box: SecretBox; plugins?: readonly ConnectablePlugin[] }) {
     this.#db = db
     this.#box = box
+    this.#plugins = new Map(plugins.map((plugin) => [plugin.name, plugin]))
+    this.#connections = new PluginConnections({ db, box })
   }
 
-  /** Connected accounts, oldest first; of `plugin` only, when given. */
+  /** Connected accounts, oldest first, with the bots granted each; of `plugin` only, when given. */
   async list(plugin?: string): Promise<PluginAccountSummary[]> {
     const rows = await this.#db
       .select()
       .from(pluginAccounts)
       .where(and(isNull(pluginAccounts.disconnectedAt), plugin === undefined ? undefined : eq(pluginAccounts.plugin, plugin)))
       .orderBy(asc(pluginAccounts.id))
-    return rows.map(toSummary)
+    const grants = await this.#db
+      .select()
+      .from(pluginGrants)
+      .where(plugin === undefined ? undefined : eq(pluginGrants.plugin, plugin))
+      .orderBy(asc(pluginGrants.id))
+    return rows.map((row) =>
+      toSummary(
+        row,
+        grants.filter((grant) => grant.plugin === row.plugin && grant.account === row.slug).map((grant) => grant.botId),
+      ),
+    )
+  }
+
+  /** Lets bot `botId` use the connected account; granting it again changes nothing. Returns the account. */
+  async grant(botId: string, plugin: string, slug: string): Promise<PluginAccountSummary> {
+    await this.#mustBeConnected(plugin, slug)
+    await this.#db.insert(pluginGrants).values({ botId, plugin, account: slug }).onConflictDoNothing()
+    return this.#summary(plugin, slug)
+  }
+
+  /** Takes the account back from bot `botId`, from its next call; a call in flight finishes. Returns the account. */
+  async revoke(botId: string, plugin: string, slug: string): Promise<PluginAccountSummary> {
+    await this.#mustBeConnected(plugin, slug)
+    await this.#db
+      .delete(pluginGrants)
+      .where(and(eq(pluginGrants.botId, botId), eq(pluginGrants.plugin, plugin), eq(pluginGrants.account, slug)))
+    return this.#summary(plugin, slug)
+  }
+
+  /**
+   * The tools of every account bot `botId` is granted, each `mcp__<plugin>_<accountN>__<tool>`, as its server listed them
+   * when it last connected (connecting it the first time). A tool whose name another took, once cut to fit, is left out.
+   */
+  async botTools(botId: string): Promise<BotTool[]> {
+    const granted = await this.#db
+      .select({ plugin: pluginAccounts.plugin, slug: pluginAccounts.slug, displayName: pluginAccounts.displayName })
+      .from(pluginGrants)
+      .innerJoin(pluginAccounts, and(eq(pluginAccounts.plugin, pluginGrants.plugin), eq(pluginAccounts.slug, pluginGrants.account)))
+      .where(and(eq(pluginGrants.botId, botId), isNull(pluginAccounts.disconnectedAt)))
+      .orderBy(asc(pluginGrants.id))
+    const tools = await Promise.all(
+      granted.map(async ({ plugin: name, slug, displayName }) => {
+        const plugin = this.#plugins.get(name)
+        // A plugin gone from the catalog with a release.
+        if (!plugin) return []
+        const account = { plugin: name, slug, serverUrl: plugin.serverUrl }
+        const label = accountLabel(plugin, displayName)
+        try {
+          return (await this.#connections.tools(account)).map((tool) => pluginTool(this.#connections, account, label, tool))
+        } catch (error) {
+          console.error(`[plugins] Couldn't list the tools of ${label}:`, error)
+          return []
+        }
+      }),
+    )
+    const names = new Set<string>()
+    return tools.flat().filter(({ tool }) => !names.has(tool.name) && names.add(tool.name))
+  }
+
+  /** Closes every account's connection; when the server stops. */
+  close(): Promise<void> {
+    return this.#connections.closeAll()
+  }
+
+  async #mustBeConnected(plugin: string, slug: string): Promise<void> {
+    const [account] = await this.#db
+      .select({ id: pluginAccounts.id })
+      .from(pluginAccounts)
+      .where(and(eq(pluginAccounts.plugin, plugin), eq(pluginAccounts.slug, slug), isNull(pluginAccounts.disconnectedAt)))
+    if (!account) throw new PluginAccountNotFoundError(`No ${plugin} account ${slug}`)
+  }
+
+  /** The connected account, as `list` gives it. */
+  async #summary(plugin: string, slug: string): Promise<PluginAccountSummary> {
+    const account = (await this.list(plugin)).find((summary) => summary.slug === slug)
+    if (!account) throw new PluginAccountNotFoundError(`No ${plugin} account ${slug}`)
+    return account
   }
 
   /**
@@ -151,12 +248,17 @@ export class PluginAccounts {
       .where(and(eq(pluginAccounts.plugin, plugin), eq(pluginAccounts.slug, slug), isNull(pluginAccounts.disconnectedAt)))
       .returning()
     if (!account) throw new PluginAccountNotFoundError(`No ${plugin} account ${slug}`)
-    return toSummary(account)
+    return this.#summary(plugin, slug)
   }
 
-  /** Deletes the account's tokens; its row stays, so its slug isn't given again. */
-  async disconnect(plugin: string, slug: string): Promise<void> {
-    await this.#db.transaction(async (tx) => {
+  /**
+   * Deletes the account's tokens and every grant to it, and closes its connection; its row stays, so its slug isn't
+   * given again. Returns it as it was, with the bots that were granted it.
+   */
+  async disconnect(plugin: string, slug: string): Promise<PluginAccountSummary> {
+    // First, so no call through it refreshes its tokens back after they are deleted.
+    await this.#connections.close(plugin, slug)
+    return this.#db.transaction(async (tx) => {
       const [account] = await tx
         .update(pluginAccounts)
         .set({ disconnectedAt: new Date() })
@@ -164,6 +266,11 @@ export class PluginAccounts {
         .returning()
       if (!account) throw new PluginAccountNotFoundError(`No ${plugin} account ${slug}`)
       await new AccountCredentials(tx, this.#box, plugin, slug).delete()
+      const grants = await tx
+        .delete(pluginGrants)
+        .where(and(eq(pluginGrants.plugin, plugin), eq(pluginGrants.account, slug)))
+        .returning()
+      return toSummary(account, grants.map((grant) => grant.botId))
     })
   }
 

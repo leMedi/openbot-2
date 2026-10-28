@@ -110,6 +110,8 @@ describe('system credentials', () => {
       'plugins.oauthCallback': null,
       'plugins.renameAccount': await server.client.plugins.renameAccount({ name: 'notes', account: 'account1', displayName: 'Work' }),
       'plugins.disconnectAccount': null,
+      'plugins.grant': await server.client.plugins.grant({ name: 'notes', account: 'account1', botId: bot.id }),
+      'plugins.revoke': await server.client.plugins.revoke({ name: 'notes', account: 'account1', botId: bot.id }),
       'models.list': await server.client.models.list(),
       'models.getSettings': await server.client.models.getSettings(),
       'models.updateSettings': settings,

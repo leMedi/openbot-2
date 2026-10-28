@@ -14,6 +14,7 @@ export { type InputOutcome, type Watchdog } from './run-scheduler.ts'
 export { BotComputer, botUser, ComputerUnavailableError, openBotComputer, userExists } from './computer.ts'
 export {
   type ConnectablePlugin,
+  disconnectedNote,
   InvalidAccountNameError,
   InvalidRedirectError,
   PluginAccountNotFoundError,

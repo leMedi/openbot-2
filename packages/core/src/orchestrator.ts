@@ -1,4 +1,4 @@
-import { type AuditEntry, type AuditKind, auditLog, bots, type Db, type OrchestratorMode, settings, type Surface, surfaces, type Verdict } from '@openbot/db'
+import { type ActionOutcome, type AuditEntry, type AuditKind, auditLog, bots, type Db, type OrchestratorMode, settings, type Surface, surfaces, type Verdict } from '@openbot/db'
 import { asc, eq } from 'drizzle-orm'
 import type { Orchestrator, ProposedAction } from './ports/orchestrator.ts'
 
@@ -109,22 +109,31 @@ async function surfaceMode(db: Db, botId: string, surface: Surface): Promise<Orc
 
 /**
  * Reviews a bot's side-effecting tool call (secrets not yet redacted) in the mode of its surface for that bot, and writes it to the audit log,
- * with the verdict, whatever the mode: off means not reviewed, not unrecorded. Returns why the call is blocked, or undefined to let it run. Only
- * enforce mode blocks.
+ * with the verdict, whatever the mode: off means not reviewed, not unrecorded. Returns its entry, and why the call is blocked, or undefined to
+ * let it run. Only enforce mode blocks.
  */
 export async function reviewAction(
   db: Db,
   orchestrator: Orchestrator,
   botId: string,
   call: ProposedAction,
-): Promise<string | undefined> {
+): Promise<{ entryId: string; blocked: string | undefined }> {
   const mode = await surfaceMode(db, botId, call.surface)
   const action: ProposedAction = { ...call, input: redactSecrets(call.input) }
   const verdict = mode === 'off' ? null : await orchestrator.review(action, { botId })
-  await db.insert(auditLog).values({ botId, kind: 'action', surface: action.surface, tool: action.tool, action: action.input, verdict, mode })
-  if (mode !== 'enforce' || !verdict || verdict.decision === 'allow') return undefined
+  const [entry] = await db
+    .insert(auditLog)
+    .values({ botId, kind: 'action', surface: action.surface, tool: action.tool, server: action.server, action: action.input, verdict, mode })
+    .returning({ id: auditLog.id })
+  const entryId = entry!.id
+  if (mode !== 'enforce' || !verdict || verdict.decision === 'allow') return { entryId, blocked: undefined }
   // There are no approval cards yet, so an ask blocks like a deny.
-  return `The orchestrator blocked this action: ${verdict.reason}`
+  return { entryId, blocked: `The orchestrator blocked this action: ${verdict.reason}` }
+}
+
+/** Writes how a reviewed action that ran ended to its audit entry. */
+export async function recordOutcome(db: Db, entryId: string, outcome: ActionOutcome): Promise<void> {
+  await db.update(auditLog).set({ outcome }).where(eq(auditLog.id, entryId))
 }
 
 /**

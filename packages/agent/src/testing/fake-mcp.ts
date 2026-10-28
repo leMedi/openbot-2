@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 
-/** A tool the fake MCP server offers; `call` answers it in text. */
+/** A tool the fake MCP server offers; `call` answers it in text, or fails it by throwing. */
 export type FakeMcpTool = {
   name: string
   description?: string
@@ -25,6 +25,8 @@ export type FakeMcpServer = {
   issuedTokens: string[]
   /** Tool calls answered so far. */
   calls: FakeMcpCall[]
+  /** Forgets every session, as a restarted server does: requests in one are answered 404 until the client starts anew. */
+  dropSessions(): void
   /**
    * Plays the owner's browser on the authorization URL: signs in as `user` (the account) and approves, or denies with
    * `deny`; returns the URL the browser ends on, the client's redirect URI with the code (or error) and state.
@@ -46,6 +48,7 @@ export async function startFakeMcpServer({ tools = [] }: { tools?: FakeMcpTool[]
   const codes = new Map<string, Code>()
   const accessTokens = new Map<string, string>()
   const refreshTokens = new Map<string, { clientId: string; user: string }>()
+  const sessions = new Set<string>()
   let origin = ''
 
   function issue(clientId: string, user: string) {
@@ -130,12 +133,21 @@ export async function startFakeMcpServer({ tools = [] }: { tools?: FakeMcpTool[]
           })
         }
         if (req.method !== 'POST') return res.writeHead(405).end()
+        const session = req.headers['mcp-session-id']
+        if (typeof session === 'string' && !sessions.has(session)) return json(404, { error: 'session_not_found' })
         const message = JSON.parse(body) as { id?: number | string; method: string; params?: Record<string, unknown> }
         if (message.id === undefined) return res.writeHead(202).end()
         const reply = (result: unknown) => json(200, { jsonrpc: '2.0', id: message.id, result })
         switch (message.method) {
-          case 'initialize':
-            return reply({ protocolVersion: message.params?.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'fake-mcp', version: '1.0.0' } })
+          case 'initialize': {
+            const id = `session-${randomBytes(8).toString('hex')}`
+            sessions.add(id)
+            return json(
+              200,
+              { jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params?.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'fake-mcp', version: '1.0.0' } } },
+              { 'mcp-session-id': id },
+            )
+          }
           case 'ping':
             return reply({})
           case 'tools/list':
@@ -148,7 +160,12 @@ export async function startFakeMcpServer({ tools = [] }: { tools?: FakeMcpTool[]
             const tool = tools.find((entry) => entry.name === name)
             if (!tool) return json(200, { jsonrpc: '2.0', id: message.id, error: { code: -32602, message: `Unknown tool ${name}` } })
             calls.push({ tool: name, args, user })
-            return reply({ content: [{ type: 'text', text: (await tool.call?.(args)) ?? '' }] })
+            try {
+              return reply({ content: [{ type: 'text', text: (await tool.call?.(args)) ?? '' }] })
+            } catch (error) {
+              // A tool's failure is its result's, as MCP reports it.
+              return reply({ content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }], isError: true })
+            }
           }
           default:
             return json(200, { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: `Unknown method ${message.method}` } })
@@ -168,6 +185,7 @@ export async function startFakeMcpServer({ tools = [] }: { tools?: FakeMcpTool[]
     clients,
     issuedTokens,
     calls,
+    dropSessions: () => sessions.clear(),
     async authorize(authorizationUrl, { user = 'owner', deny = false } = {}) {
       const url = new URL(authorizationUrl)
       url.searchParams.set('user', user)

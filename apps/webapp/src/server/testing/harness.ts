@@ -212,6 +212,7 @@ async function open(
       context.stopSyncingScreens()
       context.rounds.close()
       await context.runtime.close()
+      await context.pluginAccounts.close()
       await context.extraction.close()
       db.$client.close()
     },
@@ -224,6 +225,7 @@ async function open(
       await computer.close()
       context.rounds.close()
       await context.runtime.close()
+      await context.pluginAccounts.close()
       await context.extraction.close()
       db.$client.close()
       await rm(dir, { recursive: true, force: true })

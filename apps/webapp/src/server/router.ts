@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
-import { InvalidAccountNameError, InvalidRedirectError, PluginAccountNotFoundError, SignInNotFoundError } from '@openbot/agent'
+import { disconnectedNote, InvalidAccountNameError, InvalidRedirectError, PluginAccountNotFoundError, SignInNotFoundError } from '@openbot/agent'
 import { contract } from '@openbot/api-contract'
 import { ScreenDaemonError } from '@openbot/computer'
 import {
@@ -612,8 +612,24 @@ export const router = os.router({
     }),
 
     disconnectAccount: os.plugins.disconnectAccount.handler(async ({ context, input }) => {
+      const plugin = pluginMustExist(context, input.name)
+      const account = await accountMustExist(context.pluginAccounts.disconnect(input.name, input.account))
+      // Each bot it was granted to learns why its tools are gone, from its next run.
+      for (const botId of account.grantedTo) {
+        await context.runtime.note(botId, disconnectedNote(plugin, account)).catch((error) => console.error(`[plugins] Couldn't tell bot ${botId} an account was disconnected:`, error))
+      }
+    }),
+
+    grant: os.plugins.grant.handler(async ({ context, input }) => {
       pluginMustExist(context, input.name)
-      await accountMustExist(context.pluginAccounts.disconnect(input.name, input.account))
+      await botMustExist(context, input.botId)
+      return toPluginAccountInfo(await accountMustExist(context.pluginAccounts.grant(input.botId, input.name, input.account)))
+    }),
+
+    revoke: os.plugins.revoke.handler(async ({ context, input }) => {
+      pluginMustExist(context, input.name)
+      await botMustExist(context, input.botId)
+      return toPluginAccountInfo(await accountMustExist(context.pluginAccounts.revoke(input.botId, input.name, input.account)))
     }),
   },
 

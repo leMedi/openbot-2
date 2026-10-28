@@ -83,9 +83,11 @@ export function toAuditEntryInfo(entry: AuditEntry): AuditEntryInfo {
     kind: entry.kind,
     surface: entry.surface,
     tool: entry.tool,
+    server: entry.server,
     input: entry.action,
     verdict: entry.verdict,
     mode: entry.mode,
+    outcome: entry.outcome,
     createdAt: entry.createdAt.getTime(),
   }
 }
@@ -153,5 +155,5 @@ export function toPluginInfo(plugin: Plugin, accounts: PluginAccountSummary[]): 
 
 /** What the owner sees of a plugin account: never its tokens. */
 export function toPluginAccountInfo(account: PluginAccountSummary): PluginAccountInfo {
-  return { slug: account.slug, displayName: account.displayName, connectedAt: account.connectedAt.getTime() }
+  return { slug: account.slug, displayName: account.displayName, connectedAt: account.connectedAt.getTime(), grantedTo: account.grantedTo }
 }
