@@ -907,7 +907,7 @@ export class BotRuntime implements AgentRuntime {
             plugin: plugin.name,
             displayName: plugin.displayName,
             reason,
-            skillsOnly: plugin.skillsGranted !== null,
+            skillsOnly: plugin.skillsOnly,
           }
           await options.requestPlugin(bot, card, `${api.conversationId}:${api.callId}`)
           return {

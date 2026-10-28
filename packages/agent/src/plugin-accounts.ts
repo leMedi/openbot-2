@@ -55,21 +55,24 @@ const accountLabel = (plugin: { displayName: string }, displayName: string) => `
 export const disconnectedNote = (plugin: { displayName: string }, account: { plugin: string; slug: string; displayName: string }) =>
   `[${accountLabel(plugin, account.displayName)} was disconnected by the owner: its tools (${toolPrefix(account.plugin, account.slug)}…) are gone.]`
 
+/** A plugin of the catalog, as `listings` reads it: what it is, and whether it brings skills only (no server, so no account). */
+export type CatalogEntry = { name: string; displayName: string; description: string; skillsOnly: boolean }
+
 /** A catalog plugin as `search_plugins` shows it to one bot, with that bot's status for it. */
-export type PluginListing = {
-  name: string
-  displayName: string
-  description: string
-  /** Its connected accounts, oldest first, each granted to the bot or not; none for a plugin of skills only. */
-  accounts: { slug: string; displayName: string; granted: boolean }[]
-  /** For a plugin of skills only, whether the bot is granted it; null for a plugin with a server. */
-  skillsGranted: boolean | null
-}
+export type PluginListing = Omit<CatalogEntry, 'skillsOnly'> &
+  (
+    | {
+        skillsOnly: false
+        /** Its connected accounts, oldest first, each granted to the bot or not. */
+        accounts: { slug: string; displayName: string; granted: boolean }[]
+      }
+    | { skillsOnly: true; granted: boolean }
+  )
 
 /** One plugin's lines in `search_plugins`' answer: what it is, then the bot's status for it. */
 function describeListing(listing: PluginListing): string {
   const head = `- ${listing.name} (${listing.displayName}): ${listing.description}`
-  if (listing.skillsGranted !== null) return `${head}\n  Skills only, ${listing.skillsGranted ? 'granted to you' : 'not granted to you'}`
+  if (listing.skillsOnly) return `${head}\n  Skills only, ${listing.granted ? 'granted to you' : 'not granted to you'}`
   const granted = listing.accounts.filter((account) => account.granted)
   const others = listing.accounts.filter((account) => !account.granted)
   const lines = [head]
@@ -206,6 +209,23 @@ export class PluginAccounts {
     const byPlugin = new Map<string, string[]>()
     for (const grant of grants) byPlugin.set(grant.plugin, [...(byPlugin.get(grant.plugin) ?? []), grant.botId])
     return byPlugin
+  }
+
+  /** The plugins of `catalog`, in its order, each with bot `botId`'s status for it, as `search_plugins` shows them. */
+  async listings(botId: string, catalog: readonly CatalogEntry[]): Promise<PluginListing[]> {
+    const accounts = await this.list()
+    const withoutAccount = await this.grantedWithoutAccount()
+    return catalog.map(({ skillsOnly, ...plugin }) =>
+      skillsOnly
+        ? { ...plugin, skillsOnly, granted: (withoutAccount.get(plugin.name) ?? []).includes(botId) }
+        : {
+            ...plugin,
+            skillsOnly,
+            accounts: accounts
+              .filter((account) => account.plugin === plugin.name)
+              .map((account) => ({ slug: account.slug, displayName: account.displayName, granted: account.grantedTo.includes(botId) })),
+          },
+    )
   }
 
   /** The plugins bot `botId` holds a grant to, with an account or without, in the order first granted. */

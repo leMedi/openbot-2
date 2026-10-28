@@ -265,19 +265,11 @@ export async function createServerContext({
           filePath: installedSkillFile(pluginsDir, name, skill),
         })),
       ),
-    searchPlugins: async (botId) => {
-      const accounts = await pluginAccounts.list()
-      const skillGrants = await pluginAccounts.grantedWithoutAccount()
-      return plugins.map((plugin) => ({
-        name: plugin.name,
-        displayName: plugin.displayName,
-        description: plugin.description,
-        accounts: accounts
-          .filter((account) => account.plugin === plugin.name)
-          .map((account) => ({ slug: account.slug, displayName: account.displayName, granted: account.grantedTo.includes(botId) })),
-        skillsGranted: plugin.servers.length ? null : (skillGrants.get(plugin.name) ?? []).includes(botId),
-      }))
-    },
+    searchPlugins: (botId) =>
+      pluginAccounts.listings(
+        botId,
+        plugins.map(({ name, displayName, description, servers }) => ({ name, displayName, description, skillsOnly: !servers.length })),
+      ),
     watchdog,
     fetch,
     compaction,

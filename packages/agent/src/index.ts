@@ -13,6 +13,7 @@ export { BotRuntime, type BotStatus, type BotTool, type ToolSurface, interrupted
 export { type InputOutcome, type Watchdog } from './run-scheduler.ts'
 export { BotComputer, botUser, ComputerUnavailableError, openBotComputer, userExists } from './computer.ts'
 export {
+  type CatalogEntry,
   type ConnectablePlugin,
   disconnectedNote,
   InvalidAccountNameError,
