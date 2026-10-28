@@ -177,7 +177,8 @@ export class PluginAccounts {
 
   /**
    * `onNeedsReconnect` gets an account once its sign-in expired and couldn't be refreshed, the first time a call finds
-   * out, with the bots granted it.
+   * out, with the bots granted it; and again each time it is granted to another bot until reconnected, so it must
+   * tell each bot once per expiry (`needsReconnectAt`).
    */
   constructor({
     db,
@@ -217,11 +218,16 @@ export class PluginAccounts {
     )
   }
 
-  /** Lets bot `botId` use the connected account; granting it again changes nothing. Returns the account. */
+  /**
+   * Lets bot `botId` use the connected account; granting it again changes nothing. Returns the account. Granted while
+   * it needs reconnecting, it is told to `onNeedsReconnect` again, with the new bot.
+   */
   async grant(botId: string, plugin: string, slug: string): Promise<PluginAccountSummary> {
     await this.#mustBeConnected(plugin, slug)
-    await this.#db.insert(pluginGrants).values({ botId, plugin, account: slug }).onConflictDoNothing()
-    return this.#summary(plugin, slug)
+    const [granted] = await this.#db.insert(pluginGrants).values({ botId, plugin, account: slug }).onConflictDoNothing().returning()
+    const account = await this.#summary(plugin, slug)
+    if (granted && account.needsReconnectAt) await this.#tellNeedsReconnect(account)
+    return account
   }
 
   /** Takes the account back from bot `botId`, from its next call; a call in flight finishes. Returns the account. */
@@ -347,9 +353,14 @@ export class PluginAccounts {
       .set({ needsReconnectAt: new Date() })
       .where(and(eq(pluginAccounts.plugin, plugin), eq(pluginAccounts.slug, slug), isNull(pluginAccounts.disconnectedAt), isNull(pluginAccounts.needsReconnectAt)))
       .returning()
-    if (!marked || !this.#onNeedsReconnect) return
-    const account = await this.#summary(plugin, slug)
-    await this.#onNeedsReconnect(account).catch((error) => console.error(`[plugins] Couldn't tell the owner ${plugin} ${slug} needs reconnecting:`, error))
+    if (marked) await this.#tellNeedsReconnect(await this.#summary(plugin, slug))
+  }
+
+  /** Tells `onNeedsReconnect` the account needs reconnecting; a failure is logged, as the bot's call goes on. */
+  async #tellNeedsReconnect(account: PluginAccountSummary): Promise<void> {
+    await this.#onNeedsReconnect?.(account).catch((error) =>
+      console.error(`[plugins] Couldn't tell the owner ${account.plugin} ${account.slug} needs reconnecting:`, error),
+    )
   }
 
   /** Closes every account's connection; when the server stops. */
@@ -534,6 +545,8 @@ export class PluginAccounts {
     })
     // The client, tokens and discovery; the verifier and state were for this sign-in only.
     const { codeVerifier: _, oauthState: __, ...kept } = store.load()!
+    // Its connection signed in with the old tokens: closed first, so none of its refreshes overwrites the new ones.
+    if (reconnect) await this.#connections.close(plugin.name, reconnect)
     const save = this.#saving.then(() =>
       this.#db.transaction(async (tx) => {
         if (reconnect) {
@@ -558,7 +571,7 @@ export class PluginAccounts {
     )
     this.#saving = save.catch(() => {})
     const slug = await save
-    // Its connection signed in with the expired tokens: the next call connects with the new ones.
+    // Closed again, should a call have connected while the tokens were saved: the next call connects with them.
     if (reconnect) await this.#connections.close(plugin.name, slug)
     return slug
   }

@@ -32,6 +32,11 @@ export type FakeMcpServer = {
   /** Expires every sign-in so far, access and refresh tokens alike: the client can't refresh, and must sign in again. */
   expireSignIns(): void
   /**
+   * Holds every refresh from now until `release`, answering it then as of that moment; `held` settles once one waits,
+   * e.g. to race a refresh against a new sign-in.
+   */
+  holdRefreshes(): { held: Promise<void>; release(): void }
+  /**
    * Plays the owner's browser on the authorization URL: signs in as `user` (the account) and approves, or denies with
    * `deny`; returns the URL the browser ends on, the client's redirect URI with the code (or error) and state.
    */
@@ -54,6 +59,8 @@ export async function startFakeMcpServer({ tools = [] }: { tools?: FakeMcpTool[]
   const refreshTokens = new Map<string, { clientId: string; user: string }>()
   const sessions = new Set<string>()
   let origin = ''
+  /** While refreshes are held: tells the test one waits, and settles when they are released. */
+  let hold: { arrived(): void; released: Promise<void> } | undefined
 
   function issue(clientId: string, user: string) {
     const access = `fake-access-${randomBytes(12).toString('hex')}`
@@ -122,6 +129,10 @@ export async function startFakeMcpServer({ tools = [] }: { tools?: FakeMcpTool[]
           return json(200, issue(code.clientId, code.user))
         }
         if (params.get('grant_type') === 'refresh_token') {
+          if (hold) {
+            hold.arrived()
+            await hold.released
+          }
           const grant = refreshTokens.get(params.get('refresh_token') ?? '')
           if (!grant || grant.clientId !== params.get('client_id')) return json(400, { error: 'invalid_grant' })
           refreshTokens.delete(params.get('refresh_token')!)
@@ -191,6 +202,19 @@ export async function startFakeMcpServer({ tools = [] }: { tools?: FakeMcpTool[]
     calls,
     dropSessions: () => sessions.clear(),
     expireAccessTokens: () => accessTokens.clear(),
+    holdRefreshes() {
+      let arrived!: () => void
+      let release!: () => void
+      const held = new Promise<void>((resolve) => (arrived = resolve))
+      hold = { arrived, released: new Promise<void>((resolve) => (release = resolve)) }
+      return {
+        held,
+        release: () => {
+          hold = undefined
+          release()
+        },
+      }
+    },
     expireSignIns: () => {
       accessTokens.clear()
       refreshTokens.clear()

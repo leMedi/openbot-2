@@ -183,4 +183,45 @@ describe('an expired plugin sign-in', () => {
 
     expect(toolResults(restarted).at(-1)!.text).toContain('Granted to you: Work (needs reconnecting by the owner)')
   })
+
+  it("isn't marked again, nor its new tokens lost, by a call that started before the reconnect and fails after it", async () => {
+    const { server, fake } = await start()
+    const rex = await grantedBot(server, 'Rex')
+    searches(server, 'trip')
+    await send(server, rex, 'Find my trip notes')
+
+    // The sign-in expires, and the next call's refresh is still on its way when the owner reconnects the account.
+    fake.expireSignIns()
+    const refresh = fake.holdRefreshes()
+    server.providers.script(callsTools([notesSearch, { query: 'budget' }]), endsSilently())
+    await server.client.chats.send({ chatId: rex.chatId, text: 'And my budget notes' })
+    await refresh.held
+    await connectAccount(server, fake, { account: 'account1' })
+    refresh.release()
+    await untilIdle(server, rex)
+
+    server.providers.script(callsTools([notesSearch, { query: 'roadmap' }]), endsSilently())
+    await send(server, rex, 'And my roadmap')
+
+    expect((await server.client.plugins.get({ name: 'notes' })).accounts).toMatchObject([{ slug: 'account1', needsReconnect: false }])
+    expect((await server.client.chats.messages({ chatId: rex.chatId })).filter((message) => message.card?.type === 'plugin_reconnect')).toEqual([])
+    expect(toolResults(server).at(-1)).toEqual({ tool: notesSearch, isError: false, text: 'Found 2 pages about roadmap.' })
+  })
+
+  it('posts a Reconnect card to a bot granted the account while it needs reconnecting', async () => {
+    const { server, fake } = await start()
+    const rex = await grantedBot(server, 'Rex')
+    searches(server, 'trip')
+    await send(server, rex, 'Find my trip notes')
+    fake.expireSignIns()
+    searches(server, 'budget')
+    await send(server, rex, 'And my budget notes')
+
+    const ada = await grantedBot(server, 'Ada')
+    // Granting it again posts no second card.
+    await server.client.plugins.grant({ name: 'notes', account: 'account1', botId: ada.id })
+
+    const cards = (await server.client.chats.messages({ chatId: ada.chatId })).filter((message) => message.card?.type === 'plugin_reconnect')
+    expect(cards).toMatchObject([{ authorName: 'Ada', card: { account: { slug: 'account1' }, outcome: null } }])
+  })
 })

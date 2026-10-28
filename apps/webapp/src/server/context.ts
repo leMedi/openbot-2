@@ -180,7 +180,8 @@ export async function createServerContext({
     db,
     box,
     plugins: connectable(plugins),
-    // One Reconnect card in the DM of each bot granted the account, whose sign-in expired.
+    // One Reconnect card in the DM of each bot granted the account, whose sign-in expired: once per expiry, as it is told
+    // again when another bot is granted it.
     async onNeedsReconnect({ plugin: name, slug, displayName, needsReconnectAt, grantedTo }) {
       const plugin = plugins.find((entry) => entry.name === name)
       const card: PluginReconnectCard = { type: 'plugin_reconnect', plugin: name, displayName: plugin?.displayName ?? name, account: { slug, displayName } }

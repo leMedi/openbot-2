@@ -1,5 +1,11 @@
 import { type CallToolResult, McpClient, StreamableHttpTransport, type Tool } from '@earendil-works/pi-mcp'
-import { adaptOAuthProvider, McpOAuthProvider, type McpOAuthState, type McpOAuthStateStore } from '@earendil-works/pi-mcp/oauth'
+import {
+  adaptOAuthProvider,
+  McpOAuthAuthorizationRequiredError,
+  McpOAuthProvider,
+  type McpOAuthState,
+  type McpOAuthStateStore,
+} from '@earendil-works/pi-mcp/oauth'
 import type { SecretBox } from '@openbot/core'
 import type { Db } from '@openbot/db'
 import { SealedCredentials } from './credential-store.ts'
@@ -48,6 +54,11 @@ export class PluginConnections {
   readonly #db: Db
   readonly #box: SecretBox
   readonly #connections = new Map<string, Promise<Connection>>()
+  /**
+   * Connections closed by `close` (the account reconnected or disconnected): they no longer write the account's OAuth
+   * state, so a refresh of theirs that ends after a new sign-in can't overwrite or delete its tokens.
+   */
+  readonly #retired = new WeakSet<Promise<Connection>>()
   /** The tools each account's server listed when it last connected. */
   readonly #listed = new Map<string, Tool[]>()
 
@@ -72,11 +83,17 @@ export class PluginConnections {
     return this.#listed.get(serverName(account.plugin, account.slug)) ?? []
   }
 
-  async call(account: AccountServer, tool: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<CallToolResult> {
+  /**
+   * Calls `tool` as the account. Throws `McpOAuthAuthorizationRequiredError` when its tokens can't be refreshed; a call
+   * that finds so on a connection closed meanwhile (e.g. by a new sign-in) is made again, once, on a new one.
+   */
+  async call(account: AccountServer, tool: string, args: Record<string, unknown>, signal?: AbortSignal, again = true): Promise<CallToolResult> {
     const connection = this.#connection(account)
     try {
       return await (await connection).client.callTool(tool, args, { signal })
     } catch (error) {
+      // The server refused it before running it, with the sign-in the account had then.
+      if (again && error instanceof McpOAuthAuthorizationRequiredError && this.#retired.has(connection)) return this.call(account, tool, args, signal, false)
       // MCP answers a tool's own failure in its result: this one never reached an answer. Unless the bot's run was
       // interrupted, the connection is suspect, and the next call connects anew.
       if (!signal?.aborted) await this.#drop(serverName(account.plugin, account.slug), connection)
@@ -84,12 +101,17 @@ export class PluginConnections {
     }
   }
 
-  /** Closes the account's connection and forgets its tools, e.g. once it is disconnected. */
+  /**
+   * Closes the account's connection and forgets its tools, e.g. once it is disconnected or signed in to again; the
+   * connection no longer writes the account's OAuth state.
+   */
   async close(plugin: string, slug: string): Promise<void> {
     const key = serverName(plugin, slug)
     this.#listed.delete(key)
     const connection = this.#connections.get(key)
-    if (connection) await this.#drop(key, connection)
+    if (!connection) return
+    this.#retired.add(connection)
+    await this.#drop(key, connection)
   }
 
   async closeAll(): Promise<void> {
@@ -100,7 +122,7 @@ export class PluginConnections {
     const key = serverName(account.plugin, account.slug)
     const existing = this.#connections.get(key)
     if (existing) return existing
-    const connecting = this.#connect(account)
+    const connecting: Promise<Connection> = this.#connect(account, () => this.#retired.has(connecting))
     this.#connections.set(key, connecting)
     const forget = () => {
       if (this.#connections.get(key) === connecting) this.#connections.delete(key)
@@ -114,14 +136,16 @@ export class PluginConnections {
     await connection.then(({ client }) => client.close()).catch(() => {})
   }
 
-  async #connect({ plugin, slug, serverUrl }: AccountServer): Promise<Connection> {
+  /** Connects to the account's server, signed in with its stored OAuth state, which it writes unless `retired()`. */
+  async #connect({ plugin, slug, serverUrl }: AccountServer, retired: () => boolean): Promise<Connection> {
+    const credentials = new AccountCredentials(this.#db, this.#box, plugin, slug)
     const provider = new McpOAuthProvider({
       serverUrl,
       // Only a new sign-in redirects, and this connection never starts one: an account whose tokens can't be refreshed
       // must be connected again by the owner.
       redirectUrl: 'http://127.0.0.1:8976/callback',
       clientMetadata: { client_name: 'OpenBot' },
-      store: new AccountCredentials(this.#db, this.#box, plugin, slug),
+      store: { load: () => credentials.load(), save: async (state) => void (retired() || (await credentials.save(state))) },
       onRedirect: () => {},
     })
     const client = new McpClient({ name: 'openbot', version: '1.0.0' })
