@@ -20,12 +20,14 @@ import {
   createRegistry,
   defineExtension,
   defineTool,
+  type Extension,
   hook,
   section,
   type ToolRegistration,
   ToolTask,
 } from '@earendil-works/pi-durable'
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node'
+import { createToolSearchExtension, TOOL_SEARCH_TOOL_NAME } from '@earendil-works/pi-durable/tool-search'
 import { createNodePhotonImages } from '@earendil-works/pi-durable/images/node'
 import {
   createBashTool,
@@ -194,6 +196,12 @@ export type BotRuntimeOptions = {
   desktop: Desktop & { close?(): Promise<void> }
   /** Tools beyond the built-in ones, e.g. a test's. */
   tools?: BotTool[]
+  /**
+   * The tools only this bot has, e.g. the plugin tools the owner granted it: deferred, so the bot is offered them once
+   * it loads them with tool_search. Asked before each of its runs, and again at each call of one of them, so a tool it
+   * lost since (a grant revoked) fails cleanly.
+   */
+  botTools?(botId: string): Promise<BotTool[]>
   /**
    * Posts a bot's message, with copies of the files it attached, to chat `chatId`: its DM, or the group chat whose turn
    * it is taking. `idempotencyKey` makes a replayed tool call post once.
@@ -410,6 +418,12 @@ const isReminder = (entry: EntryRecord) =>
 /** The tools that reach the owner; any of them answers the owner, and the owner's newer message holds them all back. */
 const ownerTools = new Set(['sendMessage', 'askQuestion'])
 
+/** What a bot reads when it calls one of its own tools that it no longer has. */
+const lostTool = (name: string) => `${name} isn't available to you any more: the owner may have revoked it.`
+
+/** The extension holding the tools only bot `botId` has (see `BotRuntimeOptions.botTools`). */
+const ownToolsExtension = (botId: string) => `openbot-bot:${botId}`
+
 /** A sendMessage or askQuestion call that succeeded, or a use_computer call that posted a take-over card; a failed one reached nobody. */
 const reachedOwner = (entry: EntryRecord) =>
   entry.kind === 'pi.tool-result' &&
@@ -425,15 +439,15 @@ const reachedOwner = (entry: EntryRecord) =>
 const sendingTools = new Set(['sendMessage', 'message_bot', 'askQuestion'])
 
 /**
- * A tool call of the bot's as extraction reads it: a message it sent, or context, marked when the tool is one of
- * `actingTools`.
+ * A tool call of the bot's as extraction reads it: a message it sent, or context, marked when `acts` says the tool
+ * acts.
  */
-function sentOrCalled(name: string, args: Record<string, unknown>, actingTools: ReadonlySet<string>): ExchangePart {
+function sentOrCalled(name: string, args: Record<string, unknown>, acts: (name: string) => boolean): ExchangePart {
   const text = (key: string) => (typeof args[key] === 'string' ? (args[key] as string) : '')
   if (name === 'sendMessage') return { from: 'bot', text: text('text') }
   if (name === 'message_bot') return { from: 'bot', text: text('text'), to: text('to') }
   if (name === 'askQuestion') return { from: 'bot', text: text('prompt') }
-  return { from: 'context', kind: 'tool_call', label: `your call of ${name}`, text: JSON.stringify(args), ...(actingTools.has(name) && { acts: true as const }) }
+  return { from: 'context', kind: 'tool_call', label: `your call of ${name}`, text: JSON.stringify(args), ...(acts(name) && { acts: true as const }) }
 }
 
 /**
@@ -459,6 +473,21 @@ const describeInputSource = (input: BotInput) =>
 /** Why a run ended without an answer, from its submission's record. */
 function describeFailure({ detail, reason }: { detail?: unknown; reason?: string }): string {
   return typeof detail === 'string' ? detail : detail === undefined ? String(reason) : JSON.stringify(detail)
+}
+
+/**
+ * The tools only some bots have (`BotRuntimeOptions.botTools`), each bot's in an extension of its own that only its
+ * history selects, so no other bot finds or calls them.
+ */
+type OwnTools = {
+  /**
+   * Installs the bot's tools as they are now: the extensions its history selects, null for the default, or undefined
+   * to leave them as they were when its tools can't be read.
+   */
+  install(botId: string): Promise<Extension[] | null | undefined>
+  /** Whether a call of the bot's own tool `name` acts: it is reviewed under a fixed surface. */
+  acts(botId: string, name: string): boolean
+  forget(botId: string): void
 }
 
 /** What an input's entry in the history records: its lane, and the group chat whose turn it is. */
@@ -507,11 +536,13 @@ export class BotRuntime implements AgentRuntime {
   readonly #clock: Clock
   /** The tools that act: those whose calls are reviewed under a fixed surface (see `ExchangePart`'s `acts`). */
   readonly #actingTools: ReadonlySet<string>
+  readonly #ownTools: OwnTools
   /** Closing: a run that can't start now is queued still, for the next start. */
   #closing = false
 
-  private constructor(harness: Harness, options: BotRuntimeOptions, images: ImageProcessor, actingTools: ReadonlySet<string>) {
+  private constructor(harness: Harness, options: BotRuntimeOptions, images: ImageProcessor, actingTools: ReadonlySet<string>, ownTools: OwnTools) {
     this.#harness = harness
+    this.#ownTools = ownTools
     this.#actingTools = actingTools
     this.#options = options
     this.#images = images
@@ -993,6 +1024,7 @@ export class BotRuntime implements AgentRuntime {
       // Sessions don't select this extension, so its hooks shouldn't see their browser and desktop tools; if they ever
       // do, those calls were covered by the session's review.
       ...computerUseSessions.sessionToolNames.map((name) => [name, null] as const),
+      [TOOL_SEARCH_TOOL_NAME, null],
     ])
     const bots = defineExtension({
       name: 'openbot',
@@ -1011,11 +1043,17 @@ export class BotRuntime implements AgentRuntime {
         // it reviews the arguments the call will run with, and no other hook may rewrite arguments after it.
         hook(ToolTask, {
           beforeTool: async (call, api) => {
-            const declared = toolSurfaces.get(call.name)
+            let declared = toolSurfaces.get(call.name)
             if (declared === null) return
+            const bot = await botOf(api.conversationId)
+            if (!toolSurfaces.has(call.name)) {
+              // One of the bot's own tools, checked against those it has now: one it lost since loading it fails cleanly.
+              const own = (await options.botTools?.(bot.id))?.find(({ tool }) => tool.name === call.name)
+              if (!own) return { block: lostTool(call.name) }
+              declared = own.surface
+            }
             // Fails closed: a tool that never declared its surface can't run unreviewed.
             if (declared === undefined) return { block: `${call.name} declares no surface, so it can't be reviewed` }
-            const bot = await botOf(api.conversationId)
             const { surface, arguments: pinned } = typeof declared === 'function' ? await declared(call.arguments, bot.id) : { surface: declared }
             const replaced = pinned && { arguments: pinned }
             if (surface === null) return replaced
@@ -1027,8 +1065,37 @@ export class BotRuntime implements AgentRuntime {
     })
     // Bots' histories select only their own extension; the browser and desktop tools are only in computer-use sessions
     // (ADR 0008).
+    const toolSearch = createToolSearchExtension()
     registry.install(bots)
+    registry.install(toolSearch)
     registry.install(computerUseSessions.extension)
+    const actingTools = new Set([...toolSurfaces].flatMap(([name, surface]) => (typeof surface === 'string' ? [name] : [])))
+    /** The names of each bot's own tools that act. */
+    const ownActing = new Map<string, Set<string>>()
+    const ownTools: OwnTools = {
+      install: async (botId) => {
+        let own: BotTool[]
+        try {
+          own = ((await options.botTools?.(botId)) ?? []).map(({ surface, tool }) => detachable({ surface, tool: { ...tool, deferred: true } }))
+        } catch (error) {
+          console.error(`[agent] Couldn't read bot ${botId}'s own tools:`, error)
+          return undefined
+        }
+        ownActing.set(botId, new Set(own.flatMap(({ surface, tool }) => (typeof surface === 'string' ? [tool.name] : []))))
+        if (!own.length) {
+          registry.uninstall({ name: ownToolsExtension(botId) })
+          return null
+        }
+        const extension = defineExtension({ name: ownToolsExtension(botId), tools: own.map(({ tool }) => tool) })
+        registry.install(extension)
+        return [bots, toolSearch, extension]
+      },
+      acts: (botId, name) => ownActing.get(botId)?.has(name) ?? false,
+      forget: (botId) => {
+        ownActing.delete(botId)
+        registry.uninstall({ name: ownToolsExtension(botId) })
+      },
+    }
     const storage: Storage = options.storagePath ? await openNodeSqliteStorage(options.storagePath) : new MemoryStorage()
     harness = await Harness.open(
       storage,
@@ -1042,8 +1109,9 @@ export class BotRuntime implements AgentRuntime {
       },
       context,
     )
-    const actingTools = new Set([...toolSurfaces].flatMap(([name, surface]) => (typeof surface === 'string' ? [name] : [])))
-    runtime = new BotRuntime(harness, options, images, actingTools)
+    runtime = new BotRuntime(harness, options, images, actingTools, ownTools)
+    // Before pi-durable resumes runs, which may call them.
+    for (const bot of await listBots(options.db)) await ownTools.install(bot.id)
     // Read before pi-durable resumes runs, whose replayed calls may queue inputs: those are woken as they are queued.
     await pruneTakenInputs(options.db)
     const queued = await queuedInputs(options.db)
@@ -1197,6 +1265,7 @@ export class BotRuntime implements AgentRuntime {
 
   async forget({ id, name, historyId }: { id: string; name: string; historyId: string | null }): Promise<void> {
     this.#scheduler.forget(id)
+    this.#ownTools.forget(id)
     if (historyId) await (await this.#harness.conversation(toConversationId(historyId), context))?.abort(context)
     try {
       await this.#options.computer.removeFolder({ id, name })
@@ -1360,7 +1429,8 @@ export class BotRuntime implements AgentRuntime {
     const instructions = [botPrompt(bot), computerPrompt(this.#options.computer, bot, others), teamPrompt(others), groupsPrompt(bot, groups), routines, memory]
       .filter(Boolean)
       .join('\n\n')
-    await history.configure({ model: await this.#model(bot), instructions }, context)
+    const extensions = await this.#ownTools.install(bot.id)
+    await history.configure({ model: await this.#model(bot), instructions, extensions }, context)
     // A detached run is still ending: an input queued behind it now would wait in pi's inbox once it has.
     await history.waitForIdle(context)
     const unanswered = first.groupChatId ? [] : await unansweredQuestions(this.#options.db, bot.chatId)
@@ -1438,7 +1508,7 @@ export class BotRuntime implements AgentRuntime {
           if (message.role === 'assistant') {
             for (const block of message.content) {
               if (block.type === 'text' && block.text.trim()) parts.push({ from: 'context', kind: 'thought', label: 'your private text', text: block.text })
-              if (block.type === 'toolCall') parts.push(sentOrCalled(block.name, block.arguments, this.#actingTools))
+              if (block.type === 'toolCall') parts.push(sentOrCalled(block.name, block.arguments, (name) => this.#actingTools.has(name) || this.#ownTools.acts(botId, name)))
             }
           }
           if (message.role === 'toolResult' && !sendingTools.has(message.toolName)) {

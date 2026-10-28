@@ -43,6 +43,8 @@ export type TestServerOptions = {
   orchestrator?: Orchestrator
   /** Tools bots get beyond the built-in ones. */
   tools?: BotTool[]
+  /** The tools only some bots have, asked for each bot before its runs and at its calls, e.g. a test's plugin tools. */
+  botTools?: BotRuntimeOptions['botTools']
   /** Results of bots' shell commands; empty successes otherwise. */
   shell?: FakeShellScript
   /** Pages bots' browsers show, by URL. */

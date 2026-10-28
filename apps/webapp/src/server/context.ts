@@ -107,6 +107,7 @@ export async function createServerContext({
   screens,
   screenTickets,
   tools,
+  botTools,
   watchdog,
   fetch,
   compaction,
@@ -136,6 +137,8 @@ export async function createServerContext({
   screenTickets: ScreenTickets
   /** Tools beyond the built-in ones, e.g. a test's. */
   tools?: BotTool[]
+  /** The tools only some bots have, e.g. a test's plugin tools: deferred until each bot loads them with tool_search. */
+  botTools?: BotRuntimeOptions['botTools']
   /** When a run the owner's message waits for is interrupted again, then detached; Grok's timings by default. */
   watchdog?: Watchdog
   /** Downloads the https:// images bots send each other; the global `fetch` by default. */
@@ -225,6 +228,7 @@ export async function createServerContext({
     browser,
     desktop,
     tools,
+    botTools,
     watchdog,
     fetch,
     compaction,
