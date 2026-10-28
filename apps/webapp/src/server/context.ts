@@ -121,6 +121,7 @@ export async function createServerContext({
   fetch,
   compaction,
   clock = systemClock,
+  memoryModel,
   memoryExtraction = true,
   memoryConsolidation = true,
   catalog,
@@ -161,6 +162,8 @@ export async function createServerContext({
   compaction?: BotRuntimeOptions['compaction']
   /** The server's time; the system's by default, a fake one tests move forward. */
   clock?: Clock
+  /** Tests only: memory's side calls run on this model, scripted apart from the bots', instead of each bot's own. */
+  memoryModel?: string
   /** Extracts memory after every run of a bot (design §5.3); tests leave it off unless they script the memory model. */
   memoryExtraction?: boolean
   /** Consolidates memory nightly (design §5.3); tests leave it off unless they script the memory model. */
@@ -203,10 +206,10 @@ export async function createServerContext({
   const memoryModelOptions = {
     db,
     clock,
-    // The memory model, else the default; none while its provider isn't connected.
-    model: async () => {
-      const { memoryModel, defaultModel } = await readModelSettings(db)
-      const ref = memoryModel ?? defaultModel
+    // The bot's own model, else the default (the default alone for shared memory); none while its provider isn't connected.
+    model: async (botId?: string) => {
+      const own = botId === undefined ? null : ((await getBot(db, botId))?.model ?? null)
+      const ref = memoryModel ?? own ?? (await readModelSettings(db)).defaultModel
       return ref && (await providers.findModel(ref)) ? ref : undefined
     },
     complete: (ref: string, request: { systemPrompt: string; prompt: string }) => providers.complete(ref, request),

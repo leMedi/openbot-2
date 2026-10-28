@@ -1,6 +1,5 @@
 import { callsTools, endsSilently, fails, held, says } from '@openbot/agent/testing'
 import type { BotInfo, NewBot } from '@openbot/api-contract'
-import { writeModelSettings } from '@openbot/core'
 import { memories } from '@openbot/db'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createTestServer, type TestServer, type TestServerOptions } from './testing/harness.ts'
@@ -764,22 +763,21 @@ describe('extraction', () => {
     expect(await server.client.bots.audit({ botId: bot.id })).toEqual([])
   })
 
-  it('runs on the default model when no memory model is set, and not at all while the memory model has no working provider', async () => {
-    const { server, bot } = await startExtracting()
-    await writeModelSettings(server.db, { memoryModel: 'fake-device/fake-text' })
-    server.providers.script(callsTools(['sendMessage', { text: 'Fridays, noted.' }]), endsSilently())
+  it("runs on the bot's own model, else the default", async () => {
+    const { server, bot } = await startWithRex({ extraction: true, memoryModel: false })
+    server.providers.script(callsTools(['sendMessage', { text: 'Fridays, noted.' }]), endsSilently(), says('new shared profile 3: The owner ships on Fridays.'))
 
     await chat(server, bot, 'We ship on Fridays.')
     await server.extraction.idle()
-    expect(server.providers.requests).toHaveLength(2)
+    expect(server.providers.requests.map((request) => request.model)).toEqual(Array(3).fill('fake/fake-model'))
 
-    await server.client.models.updateSettings({ memoryModel: null })
+    await server.client.bots.update({ botId: bot.id, model: 'fake/fake-mini' })
     server.providers.script(callsTools(['sendMessage', { text: 'Tea, noted.' }]), endsSilently(), says('new shared profile 3: The owner drinks tea.'))
     await chat(server, bot, 'I drink tea, never coffee.')
     await server.extraction.idle()
 
-    expect(server.providers.requests.map((request) => request.model)).toEqual(Array(5).fill('fake/fake-model'))
-    expect(await server.client.sharedMemory.list()).toMatchObject([{ content: 'The owner drinks tea.' }])
+    expect(server.providers.requests.slice(3).map((request) => request.model)).toEqual(Array(3).fill('fake/fake-mini'))
+    expect(await server.client.sharedMemory.list()).toMatchObject([{ content: 'The owner ships on Fridays.' }, { content: 'The owner drinks tea.' }])
   })
 })
 

@@ -430,10 +430,10 @@ function ProviderStep({ onDone, onBack }: { onDone: () => void; onBack: () => vo
 /** The model setting a bot follows unless it has its own: shown as "same as …", saved as null. */
 const unset = ''
 
-/** The default model, picked from connected providers' models, and, if the owner wants, the computer-use and memory models. */
+/** The default model, picked from connected providers' models, and, if the owner wants, the computer-use model. */
 function ModelsStep({ onDone, onBack }: { onDone: () => void; onBack: () => void }) {
   const [models, setModels] = useState<ModelInfo[]>()
-  const [choice, setChoice] = useState<Pick<ModelSettings, 'defaultModel'> & { computerUseModel: string; memoryModel: string }>()
+  const [choice, setChoice] = useState<Pick<ModelSettings, 'defaultModel'> & { computerUseModel: string }>()
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
@@ -445,7 +445,6 @@ function ModelsStep({ onDone, onBack }: { onDone: () => void; onBack: () => void
         setChoice({
           defaultModel: models.some((model) => model.ref === settings.defaultModel) ? settings.defaultModel : (models[0]?.ref ?? null),
           computerUseModel: settings.computerUseModel ?? unset,
-          memoryModel: settings.memoryModel ?? unset,
         })
       },
       (caught) => setError(errorMessage(caught)),
@@ -461,7 +460,6 @@ function ModelsStep({ onDone, onBack }: { onDone: () => void; onBack: () => void
       await api().models.updateSettings({
         defaultModel: choice.defaultModel,
         computerUseModel: choice.computerUseModel || null,
-        memoryModel: choice.memoryModel || null,
       })
       onDone()
     } catch (caught) {
@@ -528,7 +526,7 @@ function ModelsStep({ onDone, onBack }: { onDone: () => void; onBack: () => void
             >
               <path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <span className="font-medium">Screens and memory</span>
+            <span className="font-medium">Screens</span>
             <span className="text-sm text-muted-foreground">Optional</span>
           </summary>
           <div className="flex flex-col gap-4 px-3 pb-3">
@@ -546,15 +544,6 @@ function ModelsStep({ onDone, onBack }: { onDone: () => void; onBack: () => void
                 {defaultModel.name} can't see images: bots on it work their screens from snapshots alone.
               </p>
             )}
-            <ModelChoice
-              id="memory-model"
-              label="Memory model"
-              hint="Picks out what bots should remember after each run; a small, cheap model does."
-              value={choice.memoryModel}
-              models={models}
-              placeholder="Same as the default"
-              onChange={(memoryModel) => setChoice({ ...choice, memoryModel })}
-            />
           </div>
         </details>
       )}

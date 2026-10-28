@@ -242,16 +242,16 @@ export type MemoryExtractionOptions = {
   /** The server's time, which facts are dated by. */
   clock: Clock
   /**
-   * The memory model's ref (`provider/modelId`): the `memoryModel` setting, else the default model; undefined while it
-   * has no working provider, when extraction doesn't run.
+   * The ref (`provider/modelId`) of the model bot `botId` runs on, which its extraction runs on too: its own, else the
+   * default; undefined while it has no working provider, when extraction doesn't run.
    */
-  model(): Promise<string | undefined>
+  model(botId: string): Promise<string | undefined>
   /** One text request to model `ref`; throws when it fails. */
   complete(ref: string, request: { systemPrompt: string; prompt: string }): Promise<string>
 }
 
 /**
- * Extraction (design §5.3): after each run of a bot settles, a side call on the memory model picks out facts worth
+ * Extraction (design §5.3): after each run of a bot settles, a side call on the bot's own model picks out facts worth
  * remembering, from the owner's own words and the bot's own messages only; every `runsPerEpisode` runs that sent a
  * message or acted, another sums them up in an episode, a log fact of its bot memory. A bot's extractions run one at a
  * time, in the order its runs settled, never holding up its next run. A failed call is tried once more, then the
@@ -320,7 +320,7 @@ export class MemoryExtraction {
     const learns = exchange.some((part) => part.from !== 'context')
     const counts = countsTowardsEpisode(exchange)
     if (!learns && !counts) return
-    const ref = await this.#options.model()
+    const ref = await this.#options.model(bot.id)
     if (!ref) return
     const answered = learns ? await this.#learn(bot, ref, exchange) : true
     if (!counts) return

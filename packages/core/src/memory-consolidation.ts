@@ -205,15 +205,18 @@ export type MemoryConsolidationOptions = {
   db: Db
   /** The server's time: notes expire by it, and changes are dated by it. */
   clock: Clock
-  /** The memory model's ref, as for extraction; undefined while it has no working provider, when only notes expire. */
-  model(): Promise<string | undefined>
+  /**
+   * The ref of the model a scope is consolidated on: bot `botId`'s own, else the default, as for extraction; the default
+   * for shared memory (no `botId`). Undefined while it has no working provider, when the scope's notes only expire.
+   */
+  model(botId?: string): Promise<string | undefined>
   /** One text request to model `ref`; throws when it fails. */
   complete(ref: string, request: { systemPrompt: string; prompt: string }): Promise<string>
 }
 
 /**
  * Consolidation (design §5.3): the nightly tidy-up of memory, a server job. Each run deletes the notes older than a week,
- * then, on the memory model, consolidates each scope (shared memory, then each bot's bot memory) whose facts changed
+ * then consolidates each scope (shared memory on the default model, then each bot's bot memory on the bot's model) whose facts changed
  * since that scope was last consolidated (a bot's also once shared memory did): one call proposes changes by fact id, a second verifies them, and only those it
  * accepts are applied, through the ownership check of the scope worked on. A failed call is tried once more, then the
  * scope waits for the next run. No change is reviewed or audited. Nothing runs without a bot: no one reads memory then.
@@ -233,8 +236,6 @@ export class MemoryConsolidation {
     if (!bots.length) return
     const scopes: Scope[] = [{ scope: 'shared' }, ...bots.map((bot) => ({ scope: 'bot' as const, bot: { id: bot.id, name: bot.name } }))]
     for (const scope of scopes) await expireNotes(db, reachOf(scope), now)
-    const ref = await this.#options.model()
-    if (!ref) return
     const timeZone = await ownerTimeZone(db)
     const consolidatedAt = await readConsolidatedAt(db)
     const changedSince = (facts: readonly Fact[], since: number) => facts.some((fact) => fact.updatedAt.getTime() > since)
@@ -245,6 +246,8 @@ export class MemoryConsolidation {
       const changed =
         since === undefined || changedSince(facts, since) || (scope.scope === 'bot' && changedSince(await listSharedFacts(db), since))
       if (!facts.length || !changed) continue
+      const ref = await this.#options.model(scope.scope === 'bot' ? scope.bot.id : undefined)
+      if (!ref) continue
       try {
         if (!(await this.#consolidate(scope, facts, ref, now, timeZone))) continue
       } catch (error) {

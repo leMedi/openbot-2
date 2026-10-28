@@ -3,15 +3,14 @@ import { eq, inArray } from 'drizzle-orm'
 
 /**
  * Model refs (`provider/modelId`). A null computer-use model is "same as each bot's model" (its own, else the default);
- * a null memory model, which memory extraction runs on, is "same as default"; a null default is not chosen yet.
+ * a null default is not chosen yet.
  */
 export type ModelSettings = {
   defaultModel: string | null
   computerUseModel: string | null
-  memoryModel: string | null
 }
 
-const modelSettingKeys = ['defaultModel', 'computerUseModel', 'memoryModel'] as const satisfies (keyof ModelSettings)[]
+const modelSettingKeys = ['defaultModel', 'computerUseModel'] as const satisfies (keyof ModelSettings)[]
 
 export async function readModelSettings(db: Db): Promise<ModelSettings> {
   const rows = await db.select().from(settings).where(inArray(settings.key, modelSettingKeys))
@@ -19,7 +18,6 @@ export async function readModelSettings(db: Db): Promise<ModelSettings> {
   return {
     defaultModel: stored.get('defaultModel') ?? null,
     computerUseModel: stored.get('computerUseModel') ?? null,
-    memoryModel: stored.get('memoryModel') ?? null,
   }
 }
 

@@ -766,7 +766,6 @@ export const router = os.router({
       for (const [setting, ref] of [
         ['defaultModel', input.defaultModel],
         ['computerUseModel', input.computerUseModel],
-        ['memoryModel', input.memoryModel],
       ] as const) {
         if (ref == null) continue
         const model = await context.providers.findModel(ref)

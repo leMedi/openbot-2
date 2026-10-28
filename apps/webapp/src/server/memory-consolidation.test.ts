@@ -90,6 +90,22 @@ describe('memory consolidation', () => {
     expect(consolidationPrompts(server)[2]).toContain('<facts scope=\\"shared\\"')
   })
 
+  it("consolidates shared memory on the default model and a bot's memory on the bot's own", async () => {
+    const { server, bot } = await startWithRex({ memoryModel: false })
+    await server.client.bots.update({ botId: bot.id, model: 'fake/fake-mini' })
+    await updateState(server, bot, { action: 'write', scope: 'bot', tier: 'profile', text: 'Rex deploys with ./deploy.sh.' })
+    await updateState(server, bot, { action: 'write', scope: 'shared', tier: 'profile', text: 'The owner is called Sam.' })
+    const before = server.providers.requests.length
+    server.providers.script(says('NONE'), says('NONE'))
+
+    await server.clock.advanceTo(fourAm('2026-10-29'))
+
+    const asked = server.providers.requests.slice(before).map((request) => [request.model, JSON.stringify(request.messages)] as const)
+    expect(asked.map(([model]) => model)).toEqual(['fake/fake-model', 'fake/fake-mini'])
+    expect(asked[0]![1]).toContain('<facts scope=\\"shared\\"')
+    expect(asked[1]![1]).toContain('<facts scope=\\"bot\\"')
+  })
+
   it('merges duplicate shared facts written by two bots into one, once the verification call accepts it', async () => {
     const { server, bot } = await startWithRex()
     const ana = await server.client.bots.create({ ...rex, name: 'Ana', instructions: 'Ana reviews code.' })

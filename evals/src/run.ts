@@ -97,6 +97,8 @@ export async function runScenario(scenario: Scenario, models: EvalModels, { run 
     tools: scenario.world.tools.map((tool) => recordingTool(tool.name, 'mcp', tool).tool),
     modelProviders: models.kind === 'faux' ? [fauxJudgeProvider()] : models.providers,
     extraction: scenario.extraction,
+    // On real models, memory is extracted on each bot's model; on the faux one, on the faux memory model.
+    memoryModel: models.kind === 'faux' && scenario.extraction,
     ...(scenario.world.clock && { now: new Date(scenario.world.clock) }),
     // Forced compactions summarize all but the newest entries, so even a short chat compacts.
     ...(scenario.script.some((step) => 'compact' in step) && { compaction: { keepRecentTokens: 1 } }),
@@ -276,11 +278,7 @@ async function setUp(server: TestServer, scenario: Scenario, models: EvalModels)
     const refs = [models.model, models.judge, ...scenario.bots.flatMap((bot) => (bot.model && !bot.scripted ? [bot.model] : []))]
     for (const provider of new Set(refs.map(providerOf))) await server.connectProviderFromEnv(provider, models.env)
   }
-  await server.client.models.updateSettings({
-    defaultModel: models.kind === 'faux' ? fauxModel : models.model,
-    // On real models, memory is extracted on the bots' model; on the faux one, on the faux memory model.
-    ...(models.kind === 'real' && { memoryModel: null }),
-  })
+  await server.client.models.updateSettings({ defaultModel: models.kind === 'faux' ? fauxModel : models.model })
   const bots = new Map<string, BotInfo>()
   for (const bot of scenario.bots) {
     const created = await server.client.bots.create({

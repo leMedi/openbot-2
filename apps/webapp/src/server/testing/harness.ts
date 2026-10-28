@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { botUser, type BotRuntimeOptions, type BotTool, type ModelProvider, openBotComputer, type Watchdog } from '@openbot/agent'
 import { createFakeModel, createFakeProviders, fakeBotComputer, type FakeBotComputer, type FakeProviders, type FakeShellScript } from '@openbot/agent/testing'
 import { connectBrowser, connectDesktop, connectScreens, defaultDaemonSocket } from '@openbot/computer'
-import { type Orchestrator, type Screens, type ScreenStatus, writeModelSettings } from '@openbot/core'
+import { type Orchestrator, type Screens, type ScreenStatus } from '@openbot/core'
 import { createFakeClock, createFakeComputer, type FakeClock, type FakeComputer, type FakeComputerScript } from '@openbot/core/testing'
 import { openDb } from '@openbot/db'
 import { bundledCatalog } from '@openbot/plugins'
@@ -69,16 +69,19 @@ export type TestServerOptions = {
   compaction?: BotRuntimeOptions['compaction']
   /** Where the server's fake clock starts; the real time by default. Kept across a restart, as the clock moves on. */
   now?: Date
-  /** Adds `fake/fake-memory`, scripted apart from the bots' models through `providers.memoryModel`. */
+  /**
+   * Adds `fake/fake-memory`, scripted apart from the bots' models through `providers.memoryModel`, which memory's side
+   * calls then run on instead of each bot's model. On by default with `extraction` or `consolidation`.
+   */
   memoryModel?: boolean
   /**
-   * Extracts memory after every run, on `fake/fake-memory` (implied), set as the memory model; off otherwise, so tests
-   * script only their bots' runs.
+   * Extracts memory after every run, on `fake/fake-memory` unless `memoryModel: false`; off otherwise, so tests script
+   * only their bots' runs.
    */
   extraction?: boolean
   /**
-   * Consolidates memory nightly at 04:00 in the owner's time zone, on `fake/fake-memory` (implied), set as the memory
-   * model; off otherwise, so tests that move the clock across nights script only their bots' runs.
+   * Consolidates memory nightly at 04:00 in the owner's time zone, on `fake/fake-memory` unless `memoryModel: false`;
+   * off otherwise, so tests that move the clock across nights script only their bots' runs.
    */
   consolidation?: boolean
   /** The plugin catalog's folder, e.g. a fixture; the release's bundled catalog by default. */
@@ -99,12 +102,11 @@ type KeptFakes = { computer: FakeComputer; botComputer: FakeBotComputer; clock: 
 async function open(
   dir: string,
   secretKey: string,
-  { shell, pages, realComputer, outsideImage, modelProviders = [], script, memoryModel, extraction = false, consolidation = false, compaction, now, catalog = bundledCatalog, ...options }: TestServerOptions,
+  { shell, pages, realComputer, outsideImage, modelProviders = [], script, extraction = false, consolidation = false, memoryModel = extraction || consolidation, compaction, now, catalog = bundledCatalog, ...options }: TestServerOptions,
   kept?: KeptFakes,
 ) {
   const db = await openDb(join(dir, 'openbot.db'))
-  const providers = createFakeProviders({ memoryModel: memoryModel || extraction || consolidation })
-  if (extraction || consolidation) await writeModelSettings(db, { memoryModel: providers.memoryModel.ref })
+  const providers = createFakeProviders({ memoryModel })
   script?.(providers)
   const home = realComputer ? process.env.OPENBOT_HOME! : join(dir, 'home')
   // The computer outlives the server, as the screen daemon does.
@@ -131,6 +133,7 @@ async function open(
     screenTickets,
     compaction,
     clock,
+    ...(memoryModel && { memoryModel: providers.memoryModel.ref }),
     memoryExtraction: extraction,
     memoryConsolidation: consolidation,
     catalog,
