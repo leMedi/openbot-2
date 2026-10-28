@@ -36,9 +36,9 @@ async function untilIdle(server: TestServer, bot: BotInfo) {
   await expect.poll(async () => (await server.client.bots.list()).find((entry) => entry.id === bot.id)?.working).toBe(false)
 }
 
-/** The last message the model read in each of the bot's requests. */
+/** The last message the model read in each of the bot's requests, past its instructions' updates. */
 function readByBot(server: TestServer) {
-  return server.providers.requests.map((request) => JSON.stringify(request.messages.at(-1)?.content))
+  return server.providers.requests.map((request) => JSON.stringify(request.messages.filter((message) => message.role !== 'system').at(-1)?.content))
 }
 
 /** The routine's runs as the owner sees them, oldest first, without ids. */
@@ -183,7 +183,7 @@ describe('a routine fires', () => {
 
   it("wakes the bot with its own note's cue for a routine it wrote, and the owner's once the owner edits it", async () => {
     const { server, bot } = await startWithRex()
-    // As the bot's own update_state will (#65); no procedure creates a bot's routine.
+    // As the bot's own update_state does; no procedure creates a bot's routine.
     const routine = await server.routines.create(bot.id, { name: 'Tidy', prompt: 'Tidy your folder.', schedule: '@every 15m' }, 'bot')
     expect((await server.client.routines.list({ botId: bot.id }))[0]!.createdBy).toBe('bot')
     server.providers.script(endsSilently(), endsSilently())

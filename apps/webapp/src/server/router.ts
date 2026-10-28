@@ -348,17 +348,17 @@ export const router = os.router({
 
     pause: os.routines.pause.handler(async ({ context, input }) => {
       await botMustExist(context, input.botId)
-      return toRoutineInfo(await routineMustFit(context.routines.pause(input.botId, input.routineId)))
+      return toRoutineInfo(await routineMustFit(context.routines.pause(input.botId, input.routineId, 'owner')))
     }),
 
     resume: os.routines.resume.handler(async ({ context, input }) => {
       await botMustExist(context, input.botId)
-      return toRoutineInfo(await routineMustFit(context.routines.resume(input.botId, input.routineId)))
+      return toRoutineInfo(await routineMustFit(context.routines.resume(input.botId, input.routineId, 'owner')))
     }),
 
     delete: os.routines.delete.handler(async ({ context, input }) => {
       await botMustExist(context, input.botId)
-      await routineMustFit(context.routines.delete(input.botId, input.routineId))
+      await routineMustFit(context.routines.delete(input.botId, input.routineId, 'owner'))
     }),
 
     testRun: os.routines.testRun.handler(async ({ context, input }) => {

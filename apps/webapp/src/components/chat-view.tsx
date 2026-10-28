@@ -1,4 +1,4 @@
-import { type BotInfo, type BotMessageInfo, type MessageInfo, maxAttachmentBytes, maxAttachments } from '@openbot/api-contract'
+import { type BotInfo, type BotMessageInfo, type MessageInfo, type RoutineChangeCardInfo, maxAttachmentBytes, maxAttachments } from '@openbot/api-contract'
 import { cn } from '@openbot/ui/lib/utils'
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
@@ -61,6 +61,7 @@ export function ChatView({
   allowFiles,
   showAuthors,
   onScreen,
+  onOpenRoutine,
 }: {
   chatId: string
   /** The sticky bar at the top of the transcript. */
@@ -79,6 +80,8 @@ export function ChatView({
   showAuthors: boolean
   /** Opens the bot's screen fullscreen, where the owner controls it, from a take-over card; DMs only. */
   onScreen?: () => void
+  /** Opens a routine in the Routines pane, from a timeline row's clock chip; DMs only. */
+  onOpenRoutine?: (routineId: string) => void
 }) {
   const live = useLive()
   const [loaded, setLoaded] = useState(false)
@@ -252,6 +255,7 @@ export function ChatView({
             onDiscard={(entry) => setOutgoing((list) => list.filter((other) => other.key !== entry.key))}
             onAnswered={(message) => live.addMessage(message)}
             onScreen={onScreen}
+            onOpenRoutine={onOpenRoutine}
           />
         </div>
         {unseen && (
@@ -298,6 +302,7 @@ function MessageList({
   onDiscard,
   onAnswered,
   onScreen,
+  onOpenRoutine,
 }: {
   rows: Row[]
   emptyText: string
@@ -309,6 +314,7 @@ function MessageList({
   /** A card was answered, dismissed or handed back: the server's message as it is now. */
   onAnswered: (message: MessageInfo) => void
   onScreen?: () => void
+  onOpenRoutine?: (routineId: string) => void
 }) {
   // Letter keys answer the newest open question only, skipping dismissed ones.
   const newestOpenQuestion = [...rows]
@@ -345,6 +351,17 @@ function MessageList({
                 onHandedBack={onAnswered}
               />
             </div>
+          )
+        }
+        if (card?.type === 'routine_change') {
+          return (
+            <TimelineRow
+              key={row.key}
+              message={row.message!}
+              card={card}
+              enter={row.enter}
+              onOpenRoutine={onOpenRoutine}
+            />
           )
         }
         if (card?.type === 'question') {
@@ -430,6 +447,70 @@ function MessageList({
         </div>
       )}
     </div>
+  )
+}
+
+const changeVerbs: Record<RoutineChangeCardInfo['change'], string> = {
+  created: 'created',
+  updated: 'changed',
+  paused: 'paused',
+  resumed: 'resumed',
+  deleted: 'deleted',
+}
+
+/**
+ * Grok's timeline event: a thin row noting a bot's change to one of its routines ("Rex created routine"), with a clock
+ * chip naming the routine that opens it, and the time at the right.
+ */
+function TimelineRow({
+  message,
+  card,
+  enter,
+  onOpenRoutine,
+}: {
+  message: MessageInfo
+  card: RoutineChangeCardInfo
+  enter?: boolean
+  onOpenRoutine?: (routineId: string) => void
+}) {
+  const chip = (
+    <>
+      <ClockIcon />
+      <span className="truncate">{card.name}</span>
+    </>
+  )
+  const chipClass = 'inline-flex max-w-[240px] min-w-0 items-center gap-1 rounded-full border border-border bg-card px-2 py-0.5 text-foreground'
+  return (
+    <div
+      role="article"
+      className={cn(
+        'mb-[22px] flex min-h-8 items-center gap-1.5 text-sm text-muted-foreground',
+        enter && 'animate-fade-in',
+      )}
+    >
+      <span className="shrink-0">
+        {message.authorName} {changeVerbs[card.change]} routine
+      </span>
+      {onOpenRoutine && card.change !== 'deleted' ? (
+        <button type="button" onClick={() => onOpenRoutine(card.routineId)} className={cn('pressable hover:bg-secondary-hover', chipClass)}>
+          {chip}
+        </button>
+      ) : (
+        <span className={chipClass}>{chip}</span>
+      )}
+      <time dateTime={new Date(message.createdAt).toISOString()} className="ml-auto shrink-0 text-xs tabular-nums">
+        {new Date(message.createdAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+      </time>
+    </div>
+  )
+}
+
+function ClockIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden className="shrink-0 text-muted-foreground">
+      <circle cx="8" cy="8" r="6.25" />
+      <path d="M8 4.75V8l2.25 1.5" />
+    </svg>
   )
 }
 

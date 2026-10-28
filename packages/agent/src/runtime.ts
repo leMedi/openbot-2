@@ -51,6 +51,16 @@ import {
   factTiers,
   forgetFact,
   frozenMemoryBlock,
+  frozenRoutinesBlock,
+  InvalidRoutineError,
+  localTime,
+  maxRoutineNameLength,
+  maxRoutinesPerBot,
+  NoSuchRoutineError,
+  type RoutineChangeCard,
+  type RoutineChangeKind,
+  type Routines,
+  type RoutineState,
   maxFactLength,
   maxImportance,
   minImportance,
@@ -211,6 +221,10 @@ export type BotRuntimeOptions = {
     message: { text: string; attachments: AttachmentFile[] },
     idempotencyKey: string,
   ): Promise<Message>
+  /** Bots' routines, which each bot manages through `update_state`'s `routine` target (design §5.4): only its own. */
+  routines: Pick<Routines, 'get' | 'create' | 'update' | 'pause' | 'resume' | 'delete'>
+  /** Posts the timeline row of a bot's change to its own routine in its DM, as `askQuestion` posts a card. */
+  postRoutineChange(bot: BotWithChat, card: RoutineChangeCard, idempotencyKey: string): Promise<void>
   /** Posts a bot's question card to its DM, as `sendMessage` posts a message. */
   askQuestion(bot: BotWithChat, card: QuestionCard, idempotencyKey: string): Promise<void>
   /** Posts a take-over card to a bot's DM when its computer-use session is stuck on what only the owner can do. */
@@ -798,12 +812,14 @@ export class BotRuntime implements AgentRuntime {
         },
       }),
     }
-    // Grok's update_state, with the memory target only for now. The bot is always the run's, never an argument.
+    // Grok's update_state, with the memory and routine targets. The bot is always the run's, never an argument.
     const updateState: BotTool = {
       // Bot memory isn't reviewed; every write, edit or forget of shared memory is the memory_shared_write surface. An
       // edit or forget runs pinned to the scope its fact had when reviewed, so a shared fact written in between under an id
       // the bot guessed isn't changed unreviewed. A fact the bot can't reach isn't reviewed: the call answers "no such fact".
-      surface: async (args: { action: string; scope?: MemoryScope; id?: number }, botId) => {
+      // Every change to a routine is the routine_change surface, whichever routine it names.
+      surface: async (args: { target: string; action: string; scope?: MemoryScope; id?: number }, botId) => {
+        if (args.target === 'routine') return { surface: 'routine_change' }
         if (args.action === 'write') return { surface: args.scope === 'shared' ? 'memory_shared_write' : null }
         const scope = (args.id !== undefined && (await reachableFactScope(options.db, botId, args.id))) || 'bot'
         return { surface: scope === 'shared' ? 'memory_shared_write' : null, arguments: { ...args, scope } }
@@ -811,20 +827,33 @@ export class BotRuntime implements AgentRuntime {
       tool: defineTool({
         name: 'update_state',
         description:
-          'Change your own lasting state. target "memory": the facts you keep across conversations, shown in your ' +
+          'Change your own lasting state.\n\n' +
+          'target "memory": the facts you keep across conversations, shown in your ' +
           'instructions with their ids: your bot memory (scope "bot", only yours, mostly about your own work) and shared ' +
           'memory (scope "shared", every bot knows it, mostly about the owner). Save what will matter later (the owner\'s ' +
           'preferences, decisions, how things are done), never secrets or passwords. A fact you write joins your ' +
           'instructions later; until then it is in this conversation. Changes to shared memory are reviewed.\n' +
           '- write: save a new fact (a scope, a tier, the text, an importance).\n' +
           '- edit: change a fact of either scope by its id: its text, tier or importance. A fact never changes scope: forget it and write it anew.\n' +
-          '- forget: delete a fact of either scope for good by its id.',
+          '- forget: delete a fact of either scope for good by its id.\n\n' +
+          'target "routine": your routines, each an instruction that wakes you on a schedule in the owner\'s time zone, ' +
+          'silently: you message the owner only if there is something worth telling. Your routines that are on are listed ' +
+          'in your instructions with their ids. When the owner asks for something repeated or for a reminder, set it up; ' +
+          'when you notice work that could repeat, offer the owner a routine and create it only once they agree, never ' +
+          `unasked. At most ${maxRoutinesPerBot} routines. Changes are reviewed, and the owner sees each one in your chat.\n` +
+          '- create: a new routine (a name, a prompt, a schedule).\n' +
+          '- update: change a routine\'s name, prompt or schedule by its routineId.\n' +
+          '- pause, resume: stop a routine firing, or start it again, by its routineId.\n' +
+          '- delete: delete a routine and its history for good by its routineId.',
         parameters: Type.Object({
-          target: Type.Literal('memory'),
-          action: Type.Union([Type.Literal('write'), Type.Literal('edit'), Type.Literal('forget')]),
+          target: Type.Union([Type.Literal('memory'), Type.Literal('routine')]),
+          action: Type.Union(
+            ['write', 'edit', 'forget', 'create', 'update', 'pause', 'resume', 'delete'].map((action) => Type.Literal(action)),
+            { description: 'memory: write, edit or forget. routine: create, update, pause, resume or delete' },
+          ),
           scope: Type.Optional(
             Type.Union([Type.Literal('bot'), Type.Literal('shared')], {
-              description: 'write: whose memory; "bot", your own, or "shared", every bot\'s. edit, forget: leave it out, the fact\'s own is used',
+              description: 'memory write: whose memory; "bot", your own, or "shared", every bot\'s. edit, forget: leave it out, the fact\'s own is used',
             }),
           ),
           tier: Type.Optional(
@@ -832,33 +861,50 @@ export class BotRuntime implements AgentRuntime {
               factTiers.map((tier) => Type.Literal(tier)),
               {
                 description:
-                  'write, edit: profile for what is always true and always relevant; log for a dated event, which fades but is kept; ' +
+                  'memory write, edit: profile for what is always true and always relevant; log for a dated event, which fades but is kept; ' +
                   'note for what matters only for about a week',
               },
             ),
           ),
-          text: Type.Optional(Type.String({ description: `write, edit: the fact, one statement, at most ${maxFactLength} characters`, maxLength: maxFactLength })),
+          text: Type.Optional(Type.String({ description: `memory write, edit: the fact, one statement, at most ${maxFactLength} characters`, maxLength: maxFactLength })),
           importance: Type.Optional(
             Type.Integer({
-              description: `write, edit: from ${minImportance} (trivia) to ${maxImportance} (essential); ${defaultImportance} by default`,
+              description: `memory write, edit: from ${minImportance} (trivia) to ${maxImportance} (essential); ${defaultImportance} by default`,
               minimum: minImportance,
               maximum: maxImportance,
             }),
           ),
-          id: Type.Optional(Type.Integer({ description: 'edit, forget: the fact\'s id, as in [12]' })),
+          id: Type.Optional(Type.Integer({ description: 'memory edit, forget: the fact\'s id, as in [12]' })),
+          routineId: Type.Optional(Type.String({ description: 'routine update, pause, resume, delete: the routine\'s id, as in brackets in your instructions' })),
+          name: Type.Optional(Type.String({ description: `routine create, update: a short name, e.g. "Morning digest"; at most ${maxRoutineNameLength} characters` })),
+          prompt: Type.Optional(
+            Type.String({
+              description: 'routine create, update: the instruction you read when it wakes you, e.g. "Send the owner a digest of the night\'s build failures."',
+            }),
+          ),
+          schedule: Type.Optional(
+            Type.String({
+              description:
+                'routine create, update: in the owner\'s time zone, one of a 5-field cron expression ("0 8 * * 1-5" every weekday at 08:00), ' +
+                '@hourly, @daily, @weekly, @monthly, @yearly, "@every <n>m|h|d" (at least 5 minutes), or a one-off reminder ' +
+                '"at YYYY-MM-DDTHH:MM" (e.g. "at 2026-10-29T09:00")',
+            }),
+          ),
         }),
-        // Replaying a write would save it twice; an edit or forget already done would answer "no such fact".
+        // Replaying a write or a create would make it twice; a change already done might answer "no such fact".
         replay: 'unsafe',
         execute: async (args, api) => {
           const bot = await botOf(api.conversationId)
-          const now = runtime!.#clock.now()
           const answer = (text: string) => ({ output: [{ type: 'text' as const, text }] })
+          if (args.target === 'routine') return answer(await changeRoutine(bot, args, `${api.conversationId}:${api.callId}`))
+          const now = runtime!.#clock.now()
           if (args.action === 'write') {
             if (!args.scope) throw new Error('Say whose memory to write to: scope "bot" (yours) or "shared" (every bot\'s).')
             if (!args.tier || args.text === undefined) throw new Error('A new fact needs a tier and a text.')
             const fact = await writeFact(options.db, bot, { scope: args.scope, tier: args.tier, text: args.text, importance: args.importance }, now)
             return answer(`Saved as [${fact.id}].`)
           }
+          if (args.action !== 'edit' && args.action !== 'forget') throw new Error('target "memory" takes action write, edit or forget.')
           if (args.id === undefined) throw new Error(`Say which fact to ${args.action} by its id.`)
           if (args.action === 'edit') {
             const fact = await editFact(options.db, { botId: bot.id, scope: args.scope }, args.id, { text: args.text, tier: args.tier, importance: args.importance }, now)
@@ -868,6 +914,59 @@ export class BotRuntime implements AgentRuntime {
           return answer(`Forgot [${args.id}].`)
         },
       }),
+    }
+    /**
+     * Makes the bot's change to one of its own routines, answers what the tool says, and posts the change's timeline row
+     * in its DM. A routine of another bot answers as a missing one does.
+     */
+    const changeRoutine = async (
+      bot: BotWithChat,
+      args: { action: string; routineId?: string; name?: string; prompt?: string; schedule?: string },
+      idempotencyKey: string,
+    ): Promise<string> => {
+      const { routines } = options
+      const timeZone = await ownerTimeZone(options.db)
+      const nextRun = (routine: RoutineState) => (routine.nextRunAt ? `; next run ${localTime(routine.nextRunAt.getTime(), timeZone)} (${timeZone})` : '')
+      const posted = async (change: RoutineChangeKind, routine: { id: string; name: string }) =>
+        options.postRoutineChange(bot, { type: 'routine_change', change, routineId: routine.id, name: routine.name }, idempotencyKey)
+      try {
+        if (args.action === 'create') {
+          if (args.name === undefined || args.prompt === undefined || args.schedule === undefined) throw new Error('A new routine needs a name, a prompt and a schedule.')
+          const routine = await routines.create(bot.id, { name: args.name, prompt: args.prompt, schedule: args.schedule }, 'bot')
+          await posted('created', routine)
+          return `Created routine [${routine.id}] ${JSON.stringify(routine.name)}${nextRun(routine)}.`
+        }
+        if (!['update', 'pause', 'resume', 'delete'].includes(args.action)) throw new Error('target "routine" takes action create, update, pause, resume or delete.')
+        if (args.routineId === undefined) throw new Error(`Say which routine to ${args.action} by its routineId.`)
+        if (args.action === 'update') {
+          const changes = { name: args.name, prompt: args.prompt, schedule: args.schedule }
+          if (Object.values(changes).every((value) => value === undefined)) throw new Error("Say what to change: the routine's name, prompt or schedule.")
+          const routine = await routines.update(bot.id, args.routineId, changes, 'bot')
+          await posted('updated', routine)
+          return `Updated routine [${routine.id}]${nextRun(routine)}.`
+        }
+        // Already so: nothing changes, and nothing is posted.
+        if ((args.action === 'pause' || args.action === 'resume') && (await routines.get(bot.id, args.routineId)).enabled === (args.action === 'resume')) {
+          return `Routine [${args.routineId}] is already ${args.action === 'pause' ? 'paused' : 'on'}.`
+        }
+        if (args.action === 'pause') {
+          const routine = await routines.pause(bot.id, args.routineId, 'bot')
+          await posted('paused', routine)
+          return `Paused routine [${routine.id}].`
+        }
+        if (args.action === 'resume') {
+          const routine = await routines.resume(bot.id, args.routineId, 'bot')
+          await posted('resumed', routine)
+          return `Resumed routine [${routine.id}]${nextRun(routine)}.`
+        }
+        const routine = await routines.delete(bot.id, args.routineId, 'bot')
+        await posted('deleted', routine)
+        return `Deleted routine [${routine.id}].`
+      } catch (error) {
+        if (error instanceof NoSuchRoutineError) throw new Error(`There is no routine [${args.routineId}] of yours.`)
+        if (error instanceof InvalidRoutineError) throw new Error(error.message)
+        throw error
+      }
     }
     // A computer-use session is reviewed, and logged with its reason, as a whole; its browser and desktop tools are not
     // one by one.
@@ -1253,12 +1352,12 @@ export class BotRuntime implements AgentRuntime {
     const history = await this.#history(bot)
     const others = (await listBots(this.#options.db)).filter((other) => other.id !== bot.id)
     const groups = await listGroups(this.#options.db, bot.id)
-    // Last, so what comes before it stays cached when a new compaction epoch renders it anew.
-    const memory = await frozenMemoryBlock(this.#options.db, bot.id, await this.compactionEpoch(bot.id), {
-      now: this.#clock.now(),
-      timeZone: await ownerTimeZone(this.#options.db),
-    })
-    const instructions = [botPrompt(bot), computerPrompt(this.#options.computer, bot, others), teamPrompt(others), groupsPrompt(bot, groups), memory]
+    // Last, so what comes before them stays cached when a new compaction epoch renders them anew.
+    const epoch = await this.compactionEpoch(bot.id)
+    const timeZone = await ownerTimeZone(this.#options.db)
+    const routines = await frozenRoutinesBlock(this.#options.db, bot.id, epoch, { timeZone })
+    const memory = await frozenMemoryBlock(this.#options.db, bot.id, epoch, { now: this.#clock.now(), timeZone })
+    const instructions = [botPrompt(bot), computerPrompt(this.#options.computer, bot, others), teamPrompt(others), groupsPrompt(bot, groups), routines, memory]
       .filter(Boolean)
       .join('\n\n')
     await history.configure({ model: await this.#model(bot), instructions }, context)

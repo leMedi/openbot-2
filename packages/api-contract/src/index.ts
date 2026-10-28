@@ -102,8 +102,24 @@ export const takeOverCard = z.object({
 })
 export type TakeOverCardInfo = z.infer<typeof takeOverCard>
 
-/** An interactive item in a chat that asks the owner for something. */
-export const card = z.discriminatedUnion('type', [questionCard, takeOverCard])
+/** What a bot did to one of its own routines. */
+export const routineChangeKinds = ['created', 'updated', 'paused', 'resumed', 'deleted'] as const
+
+/**
+ * A timeline row in a bot's DM: the bot created, changed, paused, resumed or deleted one of its routines. The message's
+ * text says so ("Rex created routine *Morning digest*"); its clock chip opens the routine in the Routines pane.
+ */
+export const routineChangeCard = z.object({
+  type: z.literal('routine_change'),
+  change: z.enum(routineChangeKinds),
+  routineId: z.string(),
+  /** The routine's name when changed. */
+  name: z.string(),
+})
+export type RoutineChangeCardInfo = z.infer<typeof routineChangeCard>
+
+/** An item in a chat that isn't a plain message: a card that asks the owner for something, or a timeline row. */
+export const card = z.discriminatedUnion('type', [questionCard, takeOverCard, routineChangeCard])
 export type CardInfo = z.infer<typeof card>
 
 /** At most this many files go with one message (Grok's composer limit); the server enforces the same. */

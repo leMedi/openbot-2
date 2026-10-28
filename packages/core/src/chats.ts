@@ -2,6 +2,7 @@ import { type Chat, type Db, type Message, type NewChat, type NewMessage, bots, 
 import { asc, eq, inArray, sql } from 'drizzle-orm'
 import { groupName } from './groups.ts'
 import { oweReply, replied } from './owed-replies.ts'
+import { isRoutineChangeCard } from './routines.ts'
 
 /** The longest text one bot can send another (Grok's limit). */
 export const maxBotMessageLength = 8_000
@@ -30,7 +31,8 @@ export async function postMessage(db: Db, values: NewMessage): Promise<{ message
   const inserted = await db.transaction(async (tx) => {
     const [message] = await tx.insert(messages).values(values).onConflictDoNothing({ target: messages.idempotencyKey }).returning()
     if (message && values.author === 'owner') await oweReply(tx, values.chatId)
-    else if (message && !values.direction) await replied(tx, values.chatId)
+    // A timeline row (a bot's change to its routines) notes what it did; it is no reply to the owner.
+    else if (message && !values.direction && !isRoutineChangeCard(values.card)) await replied(tx, values.chatId)
     return message
   })
   if (inserted) return { message: inserted, created: true }

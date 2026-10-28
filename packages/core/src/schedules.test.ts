@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { InvalidScheduleError, nextOccurrence, parseSchedule } from './schedules.ts'
+import { describeSchedule, InvalidScheduleError, nextOccurrence, parseSchedule } from './schedules.ts'
 
 /** The next time `schedule` fires after `after` (an ISO instant) in `timeZone`, as an ISO instant. */
 function next(schedule: string, after: string, timeZone = 'UTC') {
@@ -79,5 +79,27 @@ describe('a schedule', () => {
   ])('%j is refused', (schedule, message) => {
     expect(() => parseSchedule(schedule)).toThrow(InvalidScheduleError)
     expect(() => parseSchedule(schedule)).toThrow(message)
+  })
+})
+
+describe('a schedule in words', () => {
+  it.each([
+    ['0 8 * * 1-5', 'every weekday at 08:00'],
+    ['30 9 * * *', 'every day at 09:30'],
+    ['0 8,17 * * *', 'every day at 08:00 and 17:00'],
+    ['0 18 * * 0,6', 'every weekend day at 18:00'],
+    ['0 12 * JAN-MAR MON', 'every Monday at 12:00, in January, February and March'],
+    ['30 9 1,15 * *', 'on day 1 and 15 of the month at 09:30'],
+    ['15 * * * *', 'every hour at :15'],
+    ['@daily', 'every day at 00:00'],
+    ['@hourly', 'every hour at :00'],
+    ['@weekly', 'every Sunday at 00:00'],
+    ['@every 15m', 'every 15 minutes'],
+    ['@every 1h', 'every hour'],
+    ['@every 2d', 'every 2 days'],
+    ['at 2026-10-29T09:00', 'once, on 2026-10-29 at 09:00'],
+    ['*/15 * * * *', 'on cron schedule "*/15 * * * *"'],
+  ])('reads %s as %j', (schedule, words) => {
+    expect(describeSchedule(schedule)).toBe(words)
   })
 })

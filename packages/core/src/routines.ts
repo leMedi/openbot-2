@@ -1,9 +1,10 @@
-import { type Db, type Routine, type RoutineAuthor, type RoutineRun, routineRuns, routines } from '@openbot/db'
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, ne, notInArray } from 'drizzle-orm'
+import { bots, type Db, type Routine, type RoutineAuthor, type RoutineRun, routineRuns, routines } from '@openbot/db'
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, ne, notInArray, sql } from 'drizzle-orm'
+import { uuidv7 } from 'uuidv7'
 import { recordUnreviewed } from './orchestrator.ts'
 import type { Clock, ClockTimer } from './ports/clock.ts'
 import type { BotInput } from './ports/agent-runtime.ts'
-import { InvalidScheduleError, nextOccurrence, parseSchedule, type Schedule } from './schedules.ts'
+import { describeSchedule, InvalidScheduleError, nextOccurrence, parseSchedule, type Schedule } from './schedules.ts'
 import { instantAt } from './server-jobs.ts'
 
 export type { Routine, RoutineAuthor, RoutineRun }
@@ -92,13 +93,34 @@ function checkedSchedule(schedule: string): { text: string; schedule: Schedule }
 }
 
 /** `instant` as the owner's clocks read it, e.g. `2026-10-29 09:00`. */
-function localTime(instant: number, timeZone: string): string {
+export function localTime(instant: number, timeZone: string): string {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
       .formatToParts(instant)
       .map((part) => [part.type, part.value]),
   )
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`
+}
+
+/** What a bot did to one of its routines, as its timeline row in its DM says. */
+export const routineChangeKinds = ['created', 'updated', 'paused', 'resumed', 'deleted'] as const
+export type RoutineChangeKind = (typeof routineChangeKinds)[number]
+
+/**
+ * The timeline row a bot's change to its own routine posts in its DM (design §5.4), as stored in `messages.card`: not a
+ * reply to the owner, only a note of what the bot set up, with a chip that opens the routine.
+ */
+export type RoutineChangeCard = { type: 'routine_change'; change: RoutineChangeKind; routineId: string; name: string }
+
+export function isRoutineChangeCard(card: unknown): card is RoutineChangeCard {
+  return typeof card === 'object' && card !== null && (card as { type?: unknown }).type === 'routine_change'
+}
+
+const changeVerbs: Record<RoutineChangeKind, string> = { created: 'created', updated: 'changed', paused: 'paused', resumed: 'resumed', deleted: 'deleted' }
+
+/** A timeline row's text, e.g. `Rex created routine *Morning digest*`. */
+export function describeRoutineChange(botName: string, card: Pick<RoutineChangeCard, 'change' | 'name'>): string {
+  return `${botName} ${changeVerbs[card.change]} routine *${card.name.replace(/[\\*_`[\]]/g, '\\$&')}*`
 }
 
 /** How late a run is, in words. */
@@ -134,6 +156,56 @@ function auditFailure(db: Db, routine: Routine, run: RoutineRun, error: string):
     tool: 'routine',
     input: { routineId: routine.id, name: routine.name, runId: run.id, status: 'failed', error },
   })
+}
+
+/**
+ * The routines block of a bot's instructions (design §5.4): its enabled `routines`, each with its id, who set it, its
+ * schedule in words and its next run in the owner's `timeZone`; empty when none is enabled.
+ */
+export function renderRoutinesBlock(rows: readonly Routine[], timeZone: string): string {
+  const lines = rows
+    .filter((routine) => routine.enabled)
+    .map((routine) => {
+      const who = routine.createdBy === 'owner' ? 'set by the owner' : 'your own note'
+      const next = routine.nextRunAt ? `; next run ${localTime(routine.nextRunAt.getTime(), timeZone)}` : ''
+      return `- [${routine.id}] ${routine.name} (${who}): ${describeSchedule(routine.schedule)}${next}`
+    })
+  if (!lines.length) return ''
+  return [
+    '<routines>',
+    `Your routines that are on: each wakes you on its schedule, in the owner's time zone (${timeZone}), with its ` +
+      'instruction. Change, pause, resume or delete one with update_state target "routine" by its id in brackets; ' +
+      "don't create one that is already here.",
+    ...lines,
+    '</routines>',
+  ].join('\n')
+}
+
+/**
+ * The bot's routines block for its compaction epoch `epoch`, frozen as the memory block is (see `frozenMemoryBlock`):
+ * rendered the first time the epoch is asked for, then the same until the epoch changes. The bot's own changes are in
+ * its history already; the owner's thaw it (see `thawRoutinesBlocks`).
+ */
+export async function frozenRoutinesBlock(db: Db, botId: string, epoch: string | null, { timeZone }: { timeZone: string }): Promise<string> {
+  const [row] = await db.select({ routinesBlock: bots.routinesBlock }).from(bots).where(eq(bots.id, botId))
+  if (row?.routinesBlock && row.routinesBlock.epoch === epoch) return row.routinesBlock.text
+  const rows = await db.select().from(routines).where(eq(routines.botId, botId)).orderBy(asc(routines.createdAt), asc(routines.id))
+  const text = renderRoutinesBlock(rows, timeZone)
+  // Kept only if the block is still the one read: an owner change meanwhile thawed it, and the next run renders anew.
+  const unchanged = row?.routinesBlock ? sql`${bots.routinesBlock} = ${JSON.stringify(row.routinesBlock)}` : isNull(bots.routinesBlock)
+  await db
+    .update(bots)
+    .set({ routinesBlock: { epoch, text } })
+    .where(and(eq(bots.id, botId), unchanged))
+  return text
+}
+
+/** Thaws the routines block of bot `botId`, or of every bot: its next run renders it anew, epoch or not. */
+async function thawRoutinesBlocks(db: Db, botId?: string): Promise<void> {
+  await db
+    .update(bots)
+    .set({ routinesBlock: { epoch: `thawed-${uuidv7()}`, text: '' } })
+    .where(botId === undefined ? undefined : eq(bots.id, botId))
 }
 
 /**
@@ -238,7 +310,7 @@ export class Routines {
         .insert(routines)
         .values({ botId, name, prompt, schedule: text, enabled, nextRunAt: nextRunAt === null ? null : new Date(nextRunAt), createdBy: author, createdAt: new Date(now), updatedAt: new Date(now) })
         .returning()
-      return this.#changed(routine!)
+      return this.#changed(routine!, author)
     })
   }
 
@@ -252,35 +324,38 @@ export class Routines {
       const { text, schedule } = checkedSchedule(changes.schedule ?? routine.schedule)
       let { nextRunAt } = routine
       if (rescheduled && routine.enabled) nextRunAt = new Date(await this.#firstRun(schedule))
-      return this.#changed(await this.#save(routine.id, { name, prompt, schedule: text, nextRunAt, createdBy: author, updatedAt: new Date(this.#now()) }))
+      return this.#changed(await this.#save(routine.id, { name, prompt, schedule: text, nextRunAt, createdBy: author, updatedAt: new Date(this.#now()) }), author)
     })
   }
 
-  /** Pauses the routine: it doesn't fire until resumed. Doesn't change whose it is. */
-  pause(botId: string, id: string): Promise<RoutineState> {
+  /** Pauses the routine for `by`: it doesn't fire until resumed. Doesn't change whose it is. */
+  pause(botId: string, id: string, by: RoutineAuthor): Promise<RoutineState> {
     return this.#serially(async () => {
       const routine = await this.#routine(botId, id)
-      return this.#changed(await this.#save(routine.id, { enabled: false, nextRunAt: null, updatedAt: new Date(this.#now()) }))
+      if (!routine.enabled) return (await this.#withState([routine]))[0]!
+      return this.#changed(await this.#save(routine.id, { enabled: false, nextRunAt: null, updatedAt: new Date(this.#now()) }), by)
     })
   }
 
-  /** Resumes the routine, its next run computed from now; a reminder whose time has passed can't be. */
-  resume(botId: string, id: string): Promise<RoutineState> {
+  /** Resumes the routine for `by`, its next run computed from now; a reminder whose time has passed can't be. */
+  resume(botId: string, id: string, by: RoutineAuthor): Promise<RoutineState> {
     return this.#serially(async () => {
       const routine = await this.#routine(botId, id)
       if (routine.enabled) return (await this.#withState([routine]))[0]!
       const nextRunAt = await this.#firstRun(checkedSchedule(routine.schedule).schedule)
-      return this.#changed(await this.#save(routine.id, { enabled: true, nextRunAt: new Date(nextRunAt), updatedAt: new Date(this.#now()) }))
+      return this.#changed(await this.#save(routine.id, { enabled: true, nextRunAt: new Date(nextRunAt), updatedAt: new Date(this.#now()) }), by)
     })
   }
 
-  /** Deletes the routine and its runs for good. */
-  delete(botId: string, id: string): Promise<void> {
+  /** Deletes the routine and its runs for good, for `by`; answers it as it was. */
+  delete(botId: string, id: string, by: RoutineAuthor): Promise<Routine> {
     return this.#serially(async () => {
       const routine = await this.#routine(botId, id)
       await this.#options.db.delete(routines).where(eq(routines.id, routine.id))
+      if (by === 'owner') await thawRoutinesBlocks(this.#options.db, botId)
       this.#options.onRoutineDeleted?.(routine)
       await this.#arm()
+      return routine
     })
   }
 
@@ -306,6 +381,8 @@ export class Routines {
       const { db } = this.#options
       const timeZone = await this.#options.timeZone()
       const now = this.#now()
+      // Every bot's routines block names the time zone and its next runs there: the owner changed them.
+      await thawRoutinesBlocks(db)
       for (const routine of await db.select().from(routines).where(eq(routines.enabled, true))) {
         // Already due: it fires next, as it would have, and its next run is computed from then.
         if (routine.nextRunAt && routine.nextRunAt.getTime() <= now) continue
@@ -397,8 +474,12 @@ export class Routines {
     return rows.map((row) => ({ ...row, running: busy.has(row.id) }))
   }
 
-  /** Tells of the change and sets the timer again; returns the routine as the owner sees it. */
-  async #changed(routine: Routine): Promise<RoutineState> {
+  /**
+   * Tells of `by`'s change and sets the timer again; returns the routine as the owner sees it. The owner's change shows in
+   * the bot's prompt on its next run; the bot's own waits for its next compaction epoch, being in its history already.
+   */
+  async #changed(routine: Routine, by: RoutineAuthor): Promise<RoutineState> {
+    if (by === 'owner') await thawRoutinesBlocks(this.#options.db, routine.botId)
     const [state] = await this.#withState([routine])
     this.#options.onRoutine?.(state!)
     await this.#arm()

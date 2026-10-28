@@ -94,6 +94,11 @@ export const bots = sqliteTable(
      * starts from; null before its first compaction), kept until the epoch changes so its prompt stays cached.
      */
     memoryBlock: text('memory_block', { mode: 'json' }).$type<{ epoch: string | null; text: string }>(),
+    /**
+     * The routines block of the bot's instructions (its enabled routines), frozen per compaction epoch as `memoryBlock`
+     * is, and thawed by the owner's changes to its routines.
+     */
+    routinesBlock: text('routines_block', { mode: 'json' }).$type<{ epoch: string | null; text: string }>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

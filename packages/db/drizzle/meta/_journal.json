@@ -85,6 +85,13 @@
       "when": 1793158781476,
       "tag": "0011_routines",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1793159663372,
+      "tag": "0012_bot_routines_block",
+      "breakpoints": true
     }
   ]
 }

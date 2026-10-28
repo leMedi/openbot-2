@@ -6,6 +6,7 @@ import {
   AttachmentStore,
   type BotWithChat,
   type ChatSummary,
+  describeRoutineChange,
   type Clock,
   instantAt,
   type LocalDateTime,
@@ -228,6 +229,7 @@ export async function createServerContext({
     fetch,
     compaction,
     clock,
+    routines,
     ...(memoryExtraction && { onRunSettled: (botId, exchange) => extraction.extract(botId, exchange) }),
     async sendMessage(bot, chatId, { text, attachments: files }, idempotencyKey, inputId) {
       const message = await postBotMessage(bot, chatId, text, files, idempotencyKey)
@@ -283,6 +285,21 @@ export async function createServerContext({
         authorName: bot.name,
         // The prompt doubles as the message's text, e.g. for previews.
         text: card.prompt,
+        card,
+        idempotencyKey,
+      })
+      if (!created) return
+      bus.publish({ type: 'message.created', message: toMessageInfo(message) })
+      await publish(bot.chatId)
+    },
+    async postRoutineChange(bot, card, idempotencyKey) {
+      const { message, created } = await postMessage(db, {
+        chatId: bot.chatId,
+        author: 'bot',
+        authorBotId: bot.id,
+        authorName: bot.name,
+        // The row's sentence doubles as the message's text, e.g. for previews.
+        text: describeRoutineChange(bot.name, card),
         card,
         idempotencyKey,
       })

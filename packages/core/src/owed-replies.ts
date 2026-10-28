@@ -47,13 +47,20 @@ export async function redriveReply(db: Db, botId: string): Promise<boolean> {
   return false
 }
 
-/** The owner's messages in DM `chatId` since the bot's latest message or card there, oldest first. */
+/** The owner's messages in DM `chatId` since the bot's latest message or card there (not a timeline row), oldest first. */
 export async function sinceLastReply(db: Db, chatId: string): Promise<Message[]> {
   const [last] = await db
     .select({ id: messages.id })
     .from(messages)
-    // A bot's message to another, shown in its DM, isn't one to the owner.
-    .where(and(eq(messages.chatId, chatId), eq(messages.author, 'bot'), isNull(messages.direction)))
+    // A bot's message to another, shown in its DM, isn't one to the owner; nor is a timeline row of its routine changes.
+    .where(
+      and(
+        eq(messages.chatId, chatId),
+        eq(messages.author, 'bot'),
+        isNull(messages.direction),
+        sql`coalesce(json_extract(${messages.card}, '$.type'), '') <> 'routine_change'`,
+      ),
+    )
     .orderBy(desc(messages.id))
     .limit(1)
   return db

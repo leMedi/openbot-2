@@ -164,3 +164,47 @@ export function nextOccurrence(schedule: Schedule, after: number, timeZone: stri
   }
   return undefined
 }
+
+const weekdayWords = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const monthWords = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const unitWords: Record<string, string> = { m: 'minute', h: 'hour', d: 'day' }
+
+/** `items` joined as a sentence lists them: `a`, `a and b`, `a, b and c`. */
+function listed(items: readonly string[]): string {
+  return items.length < 2 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`
+}
+
+const sorted = (values: ReadonlySet<number>) => [...values].sort((a, b) => a - b)
+const twoDigits = (value: number) => String(value).padStart(2, '0')
+const sameSet = (values: ReadonlySet<number>, expected: readonly number[]) => values.size === expected.length && expected.every((value) => values.has(value))
+
+/**
+ * `text`, a valid schedule (`parseSchedule`), in words for a bot's prompt, e.g. `every weekday at 08:00`; a cron
+ * expression too intricate to put in a few words reads as itself. Times are the owner's.
+ */
+export function describeSchedule(text: string): string {
+  const trimmed = text.trim()
+  const schedule = parseSchedule(trimmed)
+  if (schedule.kind === 'at') return `once, on ${schedule.local.replace('T', ' at ')}`
+  if (schedule.kind === 'every') {
+    const [, amount, unit] = /^@every\s+(\d+)([mhd])$/.exec(trimmed)!
+    return Number(amount) === 1 ? `every ${unitWords[unit!]}` : `every ${amount} ${unitWords[unit!]}s`
+  }
+  const { minutes, hours, days, months, weekdays, anyDay, anyWeekday } = schedule
+  const asCron = `on cron schedule ${JSON.stringify(trimmed)}`
+  let time: string
+  if (minutes.size === 1 && hours.size === 24) time = `every hour at :${twoDigits(sorted(minutes)[0]!)}`
+  else if (minutes.size * hours.size <= 4) time = `at ${listed(sorted(hours).flatMap((hour) => sorted(minutes).map((minute) => `${twoDigits(hour)}:${twoDigits(minute)}`)))}`
+  else return asCron
+  let day: string
+  const weekdayNames = sorted(weekdays).map((weekday) => weekdayWords[weekday]!)
+  const monthDays = `on day ${listed(sorted(days).map(String))} of the month`
+  if (anyDay && anyWeekday) day = 'every day'
+  else if (anyDay) day = sameSet(weekdays, [1, 2, 3, 4, 5]) ? 'every weekday' : sameSet(weekdays, [0, 6]) ? 'every weekend day' : `every ${listed(weekdayNames)}`
+  else if (anyWeekday) day = monthDays
+  else day = `${monthDays} and every ${listed(weekdayNames)}`
+  const inMonths = months.size === 12 ? '' : `, in ${listed(sorted(months).map((month) => monthWords[month - 1]!))}`
+  // "every hour at :15" already says the day when it is every day.
+  if (time.startsWith('every hour')) return day === 'every day' ? `${time}${inMonths}` : `${time}, ${day}${inMonths}`
+  return `${day} ${time}${inMonths}`
+}
