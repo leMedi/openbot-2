@@ -118,8 +118,39 @@ export const routineChangeCard = z.object({
 })
 export type RoutineChangeCardInfo = z.infer<typeof routineChangeCard>
 
+/** How the owner decided on a bot's plugin request: granted an account (none for a plugin of skills only), or denied. */
+export const pluginRequestDecision = z.discriminatedUnion('outcome', [
+  z.object({ outcome: z.literal('granted'), account: z.object({ slug: z.string(), displayName: z.string() }).nullable() }),
+  z.object({ outcome: z.literal('denied') }),
+])
+export type PluginRequestDecisionInfo = z.infer<typeof pluginRequestDecision>
+
+/** The owner's decision on a bot's plugin request: grant a connected account (null for a plugin of skills only), or deny. */
+export const pluginRequestChoice = z.discriminatedUnion('outcome', [
+  z.object({ outcome: z.literal('granted'), account: z.string().nullable() }),
+  z.object({ outcome: z.literal('denied') }),
+])
+export type PluginRequestChoice = z.infer<typeof pluginRequestChoice>
+
+/**
+ * A bot asking the owner for a plugin (design §5.5): they connect a new account, which is granted, or pick a connected
+ * one to grant, or deny; the decision wakes the bot. A plugin of skills only is allowed or denied as a whole.
+ */
+export const pluginRequestCard = z.object({
+  type: z.literal('plugin_request'),
+  /** The plugin's catalog name. */
+  plugin: z.string(),
+  displayName: z.string(),
+  /** Why the bot asks, in its words. */
+  reason: z.string(),
+  skillsOnly: z.boolean(),
+  /** Null while it waits for the owner; once decided, it can't be decided again. */
+  decision: pluginRequestDecision.nullable(),
+})
+export type PluginRequestCardInfo = z.infer<typeof pluginRequestCard>
+
 /** An item in a chat that isn't a plain message: a card that asks the owner for something, or a timeline row. */
-export const card = z.discriminatedUnion('type', [questionCard, takeOverCard, routineChangeCard])
+export const card = z.discriminatedUnion('type', [questionCard, takeOverCard, pluginRequestCard, routineChangeCard])
 export type CardInfo = z.infer<typeof card>
 
 /** At most this many files go with one message (Grok's composer limit); the server enforces the same. */
@@ -199,8 +230,8 @@ export const chat = z.object({
   /** A bot posted since the owner last opened the chat. */
   unread: z.boolean(),
   /**
-   * The prompt of the newest question card still open (neither answered nor dismissed), or the instruction of a
-   * take-over card still waiting: the chat needs the owner. Null when nothing waits.
+   * The prompt of the newest question card still open (neither answered nor dismissed), the instruction of a take-over
+   * card still waiting, or the text of a plugin request card still waiting: the chat needs the owner. Null when nothing waits.
    */
   waitingFor: z.string().nullable(),
   /** The newest message, for the sidebar's preview line; null when the chat is empty. */
@@ -757,6 +788,21 @@ export const contract = {
       })
       .input(z.object({ messageId: z.string(), outcome: handBackOutcome }))
       .output(message),
+    decidePluginRequest: oc
+      .route({
+        method: 'POST',
+        path: '/messages/{messageId}/plugin-request',
+        summary:
+          "Decide a bot's plugin request card, once: grant it one of the plugin's connected accounts (none for a plugin of " +
+          'skills only), or deny it. Wakes the bot with the decision',
+      })
+      .input(
+        z.object({
+          messageId: z.string(),
+          decision: pluginRequestChoice,
+        }),
+      )
+      .output(message),
   },
   groups: {
     create: oc
@@ -828,9 +874,17 @@ export const contract = {
         summary:
           'Connect a new account with OAuth, streaming the sign-in\'s steps; closing the stream cancels it. The sign-in returns ' +
           'to this API\'s OAuth callback when `origin` (the page\'s) is on localhost or https, and otherwise asks for the URL ' +
-          'the browser ends on',
+          'the browser ends on. From a bot\'s plugin request card (`requestId`), the new account is granted to the bot and the ' +
+          'bot is woken',
       })
-      .input(z.object({ name: z.string(), origin: z.url() }))
+      .input(
+        z.object({
+          name: z.string(),
+          origin: z.url(),
+          /** A bot's plugin request card for this plugin, still waiting: the new account is granted to the bot, which is woken. */
+          requestId: z.string().optional(),
+        }),
+      )
       .output(eventIterator(signInStep)),
     answer: oc
       .route({ method: 'POST', path: '/plugins/sign-ins/{signInId}/answer', summary: 'Answer a prompt of a running plugin sign-in' })

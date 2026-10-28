@@ -20,5 +20,7 @@ export {
   PluginAccountNotFoundError,
   PluginAccounts,
   type PluginAccountSummary,
+  type PluginListing,
+  toolPrefix,
 } from './plugin-accounts.ts'
 export { type PromptSkill } from './skills.ts'

@@ -77,6 +77,11 @@ describe('system credentials', () => {
     await expect.poll(async () => (await server.client.chats.messages({ chatId: bot.chatId })).length).toBe(7)
     await expect.poll(async () => (await server.client.bots.list())[0]!.working).toBe(false)
     const takeOver = (await server.client.chats.messages({ chatId: bot.chatId })).at(-1)!
+    server.providers.script(callsTools(['request_plugin', { plugin: 'notes', reason: 'To read the notes' }]))
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Read my notes' })
+    await expect.poll(async () => (await server.client.chats.messages({ chatId: bot.chatId })).length).toBe(9)
+    await expect.poll(async () => (await server.client.bots.list())[0]!.working).toBe(false)
+    const pluginRequest = (await server.client.chats.messages({ chatId: bot.chatId })).at(-1)!
     const ana = await server.client.bots.create({ name: 'Ana', title: null, instructions: '', avatarShape: 'hex', avatarColor: 'blue', model: null })
     // Both members pass.
     server.providers.script(endsSilently(), endsSilently())
@@ -92,7 +97,7 @@ describe('system credentials', () => {
     const routineRuns = await server.client.routines.runs({ botId: bot.id, routineId: routine.id })
     const routineList = await server.client.routines.list({ botId: bot.id })
     await server.client.routines.delete({ botId: bot.id, routineId: routine.id })
-    server.providers.script(callsTools(['sendMessage', { text: 'OK' }]), endsSilently(), callsTools(['sendMessage', { text: 'OK' }]), endsSilently())
+    server.providers.script(...[1, 2, 3].flatMap(() => [callsTools(['sendMessage', { text: 'OK' }]), endsSilently()]))
 
     // Each procedure that returns data, called once it has something to return. A new procedure fails the check
     // below until it is added here.
@@ -157,6 +162,7 @@ describe('system credentials', () => {
       'chats.answer': await server.client.chats.answer({ messageId: question.id, answer: { option: 0 } }),
       'chats.dismiss': await server.client.chats.dismiss({ messageId: dismissed.id }),
       'chats.handBack': await server.client.chats.handBack({ messageId: takeOver.id, outcome: 'done' }),
+      'chats.decidePluginRequest': await server.client.chats.decidePluginRequest({ messageId: pluginRequest.id, decision: { outcome: 'granted', account: 'account1' } }),
       'groups.create': group,
       'groups.update': await server.client.groups.update({ chatId: group.chat.id, title: 'Team' }),
       'groups.delete': null,

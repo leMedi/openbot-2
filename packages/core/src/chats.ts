@@ -60,8 +60,8 @@ export type ChatSummary = Chat & {
   name: string | null
   unread: boolean
   /**
-   * The prompt of the newest open (unanswered, undismissed) question card, or the instruction of a take-over card still
-   * waiting; else null.
+   * The prompt of the newest open (unanswered, undismissed) question card, the instruction of a take-over card still
+   * waiting, or the text of a plugin request card still waiting; else null.
    */
   waitingFor: string | null
   lastMessage: Message | null
@@ -80,8 +80,8 @@ export async function listChatSummaries(db: Db, chatIds?: readonly string[]): Pr
           and (${chats.lastReadMessageId} is null or ${messages.id} > ${chats.lastReadMessageId})
       )`,
       waitingFor: sql<string | null>`(
-        select coalesce(json_extract(${messages.card}, '$.prompt'), json_extract(${messages.card}, '$.instruction')) from ${messages}
-        where ${messages.chatId} = ${chats.id} and json_extract(${messages.card}, '$.type') in ('question', 'take_over')
+        select coalesce(json_extract(${messages.card}, '$.prompt'), json_extract(${messages.card}, '$.instruction'), ${messages.text}) from ${messages}
+        where ${messages.chatId} = ${chats.id} and json_extract(${messages.card}, '$.type') in ('question', 'take_over', 'plugin_request')
           and json_extract(${messages.cardState}, '$.answer') is null and json_extract(${messages.cardState}, '$.dismissed') is null
           and json_extract(${messages.cardState}, '$.outcome') is null
         order by ${messages.id} desc limit 1

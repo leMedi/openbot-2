@@ -94,6 +94,7 @@ import {
   maxQuestionOptions,
   mimeTypeOf,
   type Orchestrator,
+  type PluginRequestCard,
   type QuestionCard,
   questionOptionStyles,
   queuedInputs,
@@ -113,6 +114,7 @@ import type { Attachment, Db, Message, Surface } from '@openbot/db'
 import { type BotComputer, ComputerUnavailableError } from './computer.ts'
 import { computerUse, type UseComputerDetails } from './computer-use.ts'
 import { type InputOutcome, type QueuedInput, type Run, RunScheduler, type Watchdog } from './run-scheduler.ts'
+import { describePluginSearch, type PluginListing } from './plugin-accounts.ts'
 import { frozenSkillsBlock, type PromptSkill } from './skills.ts'
 
 const context = BACKGROUND_CONTEXT
@@ -241,6 +243,10 @@ export type BotRuntimeOptions = {
   routines: Pick<Routines, 'get' | 'create' | 'update' | 'pause' | 'resume' | 'delete'>
   /** Posts the timeline row of a bot's change to its own routine in its DM, as `askQuestion` posts a card. */
   postRoutineChange(bot: BotWithChat, card: RoutineChangeCard, idempotencyKey: string): Promise<void>
+  /** The plugin catalog, each plugin with bot `botId`'s status for it, for `search_plugins`. */
+  searchPlugins(botId: string): Promise<PluginListing[]>
+  /** Posts a bot's plugin request card to its DM, as `askQuestion` posts a question. */
+  requestPlugin(bot: BotWithChat, card: PluginRequestCard, idempotencyKey: string): Promise<void>
   /** Posts a bot's question card to its DM, as `sendMessage` posts a message. */
   askQuestion(bot: BotWithChat, card: QuestionCard, idempotencyKey: string): Promise<void>
   /** Posts a take-over card to a bot's DM when its computer-use session is stuck on what only the owner can do. */
@@ -301,6 +307,8 @@ function computerPrompt(computer: BotComputer, bot: BotWithChat, others: BotWith
     'You also have a screen with your own web browser and desktop apps, which the owner can watch. You use it only through use_computer, which hands a goal to a computer-use helper and gives you back its summary and a final screenshot. Its work never shows in the chat.',
     '',
     'Choose tools in this order: plugin tools first, then the shell and fetching the web from it (curl, scripts), then the browser through use_computer, then the desktop. The browser is slow and costly: use it only when the shell can\'t do the job, e.g. pages that need JavaScript, signing in or clicking through, and say why in its reason. Desktop apps come last, for what has no command line or web page.',
+    '',
+    "Always check search_plugins before using the browser for a service such as Notion or Linear: a plugin gives you proper tools for it. If one covers the service and you aren't granted it, ask the owner for it with request_plugin.",
   )
   return lines.join('\n')
 }
@@ -424,7 +432,10 @@ const isReminder = (entry: EntryRecord) =>
   entry.kind === 'pi.user' && entry.model?.some((message) => message.role === 'user' && message.content === replyReminder)
 
 /** The tools that reach the owner; any of them answers the owner, and the owner's newer message holds them all back. */
-const ownerTools = new Set(['sendMessage', 'askQuestion'])
+const ownerTools = new Set(['sendMessage', 'askQuestion', 'request_plugin'])
+
+/** The tools that post a card and end the bot's turn until the owner decides. */
+const cardTools = new Set(['askQuestion', 'request_plugin'])
 
 /** What a bot reads when it calls one of its own tools that it no longer has. */
 const lostTool = (name: string) => `${name} isn't available to you any more: the owner may have revoked it.`
@@ -432,7 +443,7 @@ const lostTool = (name: string) => `${name} isn't available to you any more: the
 /** The extension holding the tools only bot `botId` has (see `BotRuntimeOptions.botTools`). */
 const ownToolsExtension = (botId: string) => `openbot-bot:${botId}`
 
-/** A sendMessage or askQuestion call that succeeded, or a use_computer call that posted a take-over card; a failed one reached nobody. */
+/** A sendMessage, askQuestion or request_plugin call that succeeded, or a use_computer call that posted a take-over card; a failed one reached nobody. */
 const reachedOwner = (entry: EntryRecord) =>
   entry.kind === 'pi.tool-result' &&
   entry.model?.some(
@@ -708,9 +719,9 @@ export class BotRuntime implements AgentRuntime {
             release?.()
             throw error
           }
-          // A run ends only when every call of its last round asks it to, so a message sent beside a question must too.
+          // A run ends only when every call of its last round asks it to, so a message sent beside a card must too.
           const round = (await api.snapshot(LiveDoc, api.conversationId, context))?.tools ?? []
-          const asks = round.some((slot) => slot.name === 'askQuestion')
+          const asks = round.some((slot) => cardTools.has(slot.name))
           return { output: [{ type: 'text', text: 'Sent.' }], ...(asks && { control: { terminate: true } }) }
         },
       }),
@@ -846,6 +857,61 @@ export class BotRuntime implements AgentRuntime {
           await options.askQuestion(bot, card, `${api.conversationId}:${api.callId}`)
           return {
             output: [{ type: 'text', text: "Asked. Your turn ends here; the owner's answer will wake you." }],
+            control: { terminate: true },
+          }
+        },
+      }),
+    }
+    const searchPlugins: BotTool = {
+      surface: null,
+      tool: defineTool({
+        name: 'search_plugins',
+        description:
+          "Search OpenBot's plugin catalog: services such as Notion or Linear you can use through proper tools, each with your " +
+          'status: the accounts granted to you, connected but not granted, or not connected. Check it before using the browser for a service.',
+        parameters: Type.Object({
+          query: Type.Optional(Type.String({ description: "Words to find in a plugin's name or description, e.g. notion; the whole catalog when absent" })),
+        }),
+        execute: async (args, api) => {
+          const bot = await botOf(api.conversationId)
+          return { output: [{ type: 'text', text: describePluginSearch(await options.searchPlugins(bot.id), args.query) }] }
+        },
+      }),
+    }
+    const requestPlugin: BotTool = {
+      surface: 'plugin_request',
+      tool: defineTool({
+        name: 'request_plugin',
+        description:
+          "Ask the owner for a plugin from search_plugins that you aren't granted, or for another of its accounts, on a card in " +
+          'your chat: they connect an account or pick one to grant you, or deny. Asking ends your turn; their decision wakes you.',
+        parameters: Type.Object({
+          plugin: Type.String({ description: 'The plugin\'s name, as search_plugins lists it, e.g. notion' }),
+          reason: Type.String({ description: 'Why you need it, in one short line the owner reads on the card' }),
+        }),
+        replay: 'safe',
+        execute: async (args, api) => {
+          const bot = await botOf(api.conversationId)
+          if ((await runtime!.inputOf(api.conversationId))?.groupChatId) {
+            throw new Error("Cards can't be posted in a group chat. Ask for the plugin in your own chat with the owner.")
+          }
+          const reason = args.reason.trim()
+          if (!reason) throw new Error('Say why you need the plugin')
+          const listings = await options.searchPlugins(bot.id)
+          const plugin = listings.find((listing) => listing.name === args.plugin.trim().toLowerCase())
+          if (!plugin) {
+            throw new Error(`There is no plugin named ${args.plugin}. The catalog's plugins: ${listings.map((listing) => listing.name).join(', ') || 'none'}.`)
+          }
+          const card: PluginRequestCard = {
+            type: 'plugin_request',
+            plugin: plugin.name,
+            displayName: plugin.displayName,
+            reason,
+            skillsOnly: plugin.skillsGranted !== null,
+          }
+          await options.requestPlugin(bot, card, `${api.conversationId}:${api.callId}`)
+          return {
+            output: [{ type: 'text', text: "Asked. Your turn ends here; the owner's decision will wake you." }],
             control: { terminate: true },
           }
         },
@@ -1026,7 +1092,7 @@ export class BotRuntime implements AgentRuntime {
         },
       },
     })
-    const tools = [sendMessage, messageBot, askQuestion, updateState, ...computerTools(images), useComputer, ...(options.tools ?? [])].map(detachable)
+    const tools = [sendMessage, messageBot, askQuestion, searchPlugins, requestPlugin, updateState, ...computerTools(images), useComputer, ...(options.tools ?? [])].map(detachable)
     /** The audit entries of reviewed calls that are running, by conversation and call, and when each started. */
     const reviewed = new Map<string, { entryId: string; started: number }>()
     const toolSurfaces = new Map<string, ToolSurface>([

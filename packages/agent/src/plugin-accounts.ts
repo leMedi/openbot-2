@@ -43,7 +43,7 @@ const toSummary = ({ plugin, slug, displayName, connectedAt }: PluginAccount, gr
 })
 
 /** The prefix of an account's tools' names: `mcp__<plugin>_<accountN>__`. */
-const toolPrefix = (plugin: string, slug: string) => `mcp__${serverName(plugin, slug)}__`
+export const toolPrefix = (plugin: string, slug: string) => `mcp__${serverName(plugin, slug)}__`
 
 /** Providers allow tool names of at most 64 characters of `[A-Za-z0-9_-]`. */
 const toolName = (plugin: string, slug: string, tool: string) => `${toolPrefix(plugin, slug)}${tool.replace(/[^A-Za-z0-9_-]/g, '_')}`.slice(0, 64)
@@ -54,6 +54,55 @@ const accountLabel = (plugin: { displayName: string }, displayName: string) => `
 /** What each bot granted a disconnected account reads in its history, e.g. "Notion (Work) was disconnected". */
 export const disconnectedNote = (plugin: { displayName: string }, account: { plugin: string; slug: string; displayName: string }) =>
   `[${accountLabel(plugin, account.displayName)} was disconnected by the owner: its tools (${toolPrefix(account.plugin, account.slug)}…) are gone.]`
+
+/** A catalog plugin as `search_plugins` shows it to one bot, with that bot's status for it. */
+export type PluginListing = {
+  name: string
+  displayName: string
+  description: string
+  /** Its connected accounts, oldest first, each granted to the bot or not; none for a plugin of skills only. */
+  accounts: { slug: string; displayName: string; granted: boolean }[]
+  /** For a plugin of skills only, whether the bot is granted it; null for a plugin with a server. */
+  skillsGranted: boolean | null
+}
+
+/** One plugin's lines in `search_plugins`' answer: what it is, then the bot's status for it. */
+function describeListing(listing: PluginListing): string {
+  const head = `- ${listing.name} (${listing.displayName}): ${listing.description}`
+  if (listing.skillsGranted !== null) return `${head}\n  Skills only, ${listing.skillsGranted ? 'granted to you' : 'not granted to you'}`
+  const granted = listing.accounts.filter((account) => account.granted)
+  const others = listing.accounts.filter((account) => !account.granted)
+  const lines = [head]
+  if (!listing.accounts.length) lines.push('  Not connected')
+  if (granted.length) {
+    lines.push(`  Granted to you: ${granted.map((account) => `${account.displayName} (tools ${toolPrefix(listing.name, account.slug)}…)`).join(', ')}`)
+  }
+  if (others.length) lines.push(`  Connected, not granted to you: ${others.map((account) => account.displayName).join(', ')}`)
+  return lines.join('\n')
+}
+
+/**
+ * `search_plugins`' answer: the plugins matching any word of `query` in their name, display name or description, or the
+ * whole catalog.
+ */
+export function describePluginSearch(listings: readonly PluginListing[], query?: string): string {
+  const words = query?.toLowerCase().split(/\s+/).filter(Boolean) ?? []
+  const found = words.length
+    ? listings.filter((listing) => {
+        const text = [listing.name, listing.displayName, listing.description].join(' ').toLowerCase()
+        return words.some((word) => text.includes(word))
+      })
+    : listings
+  if (!found.length) {
+    const all = listings.map((listing) => listing.name).join(', ') || 'none'
+    return `No plugin matches "${query}". The catalog's plugins: ${all}.`
+  }
+  return [
+    ...found.map(describeListing),
+    '',
+    "Load a granted account's tools with tool_search. For a plugin or account you aren't granted, ask the owner with request_plugin.",
+  ].join('\n')
+}
 
 /** An account's tool as a bot calls it: `mcp__<plugin>_<accountN>__<tool>`, under the `mcp` surface. */
 function pluginTool(connections: PluginConnections, account: AccountServer, label: string, tool: Tool): BotTool {
@@ -219,9 +268,15 @@ export class PluginAccounts {
    * Connects a new account of `plugin`, yielding each step for the wizard. The sign-in returns to `callbackUrl` (the
    * instance's callback route, as the owner's browser reaches it) when it is https or loopback; otherwise to a loopback
    * URL, and a `manual_code` prompt asks for the URL the browser ends on. Ending the iteration early (or aborting
-   * `signal`) cancels the sign-in.
+   * `signal`) cancels the sign-in. `onConnected` gets the new account before the sign-in is `connected`; when it throws,
+   * the account stays connected and the sign-in ends `failed` with why.
    */
-  async *connect(plugin: ConnectablePlugin, callbackUrl: URL, signal?: AbortSignal): AsyncGenerator<SignInStep> {
+  async *connect(
+    plugin: ConnectablePlugin,
+    callbackUrl: URL,
+    signal?: AbortSignal,
+    onConnected?: (account: PluginAccountSummary) => Promise<void>,
+  ): AsyncGenerator<SignInStep> {
     const signInId = crypto.randomUUID()
     const steps = stepQueue()
     const cancel = new AbortController()
@@ -230,7 +285,15 @@ export class PluginAccounts {
 
     steps.push({ type: 'started', signInId })
     this.#signIn(signInId, plugin, reachable(callbackUrl) ? callbackUrl.href : loopbackRedirect, steps.push, cancel.signal).then(
-      () => steps.push({ type: 'connected' }),
+      async (slug) => {
+        if (onConnected) {
+          const account = await this.#summary(plugin.name, slug)
+          await onConnected(account).catch((error: unknown) => {
+            throw new Error(`${accountLabel(plugin, account.displayName)} is connected, but ${error instanceof Error ? error.message : String(error)}`)
+          })
+        }
+        steps.push({ type: 'connected' })
+      },
       (error: unknown) => {
         if (!cancel.signal.aborted) steps.push({ type: 'failed', message: error instanceof Error ? error.message : String(error) })
       },
@@ -307,8 +370,8 @@ export class PluginAccounts {
     })
   }
 
-  /** Signs in to `plugin`'s server through `redirectUrl`, then saves the new account with its tokens. */
-  async #signIn(signInId: string, plugin: ConnectablePlugin, redirectUrl: string, push: (step: SignInStep) => void, signal: AbortSignal) {
+  /** Signs in to `plugin`'s server through `redirectUrl`, then saves the new account with its tokens; returns its slug. */
+  async #signIn(signInId: string, plugin: ConnectablePlugin, redirectUrl: string, push: (step: SignInStep) => void, signal: AbortSignal): Promise<string> {
     const store = new MemoryOAuthStateStore()
     let authorizationUrl: URL | undefined
     const provider = new McpOAuthProvider({
@@ -360,9 +423,10 @@ export class PluginAccounts {
         const slug = `account${number}`
         await tx.insert(pluginAccounts).values({ plugin: plugin.name, slug, displayName: `Account ${number}` })
         await new AccountCredentials(tx, this.#box, plugin.name, slug).save(kept)
+        return slug
       }),
     )
     this.#saving = save.catch(() => {})
-    await save
+    return save
   }
 }

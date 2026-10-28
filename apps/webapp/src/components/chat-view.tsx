@@ -5,6 +5,7 @@ import { api, errorMessage } from '../lib/api.ts'
 import { useLive } from '../lib/live.tsx'
 import { Attachments, FileIcon, formatSize } from './attachments.tsx'
 import { Markdown } from './markdown.tsx'
+import { PluginRequestCard } from './plugin-request-card.tsx'
 import { QuestionCard } from './question-card.tsx'
 import { TakeOverCard } from './take-over-card.tsx'
 
@@ -311,7 +312,7 @@ function MessageList({
   loading: boolean
   onResend: (entry: Outgoing) => void
   onDiscard: (entry: Outgoing) => void
-  /** A card was answered, dismissed or handed back: the server's message as it is now. */
+  /** A card was answered, dismissed, handed back or decided: the server's message as it is now. */
   onAnswered: (message: MessageInfo) => void
   onScreen?: () => void
   onOpenRoutine?: (routineId: string) => void
@@ -350,6 +351,22 @@ function MessageList({
                 onOpenScreen={() => onScreen?.()}
                 onHandedBack={onAnswered}
               />
+            </div>
+          )
+        }
+        if (card?.type === 'plugin_request') {
+          return (
+            <div
+              key={row.key}
+              role="article"
+              className={cn(
+                'max-w-[min(88%,520px)] origin-bottom-left',
+                continuesNext ? 'mb-1' : 'mb-[22px]',
+                row.enter && 'motion-safe:animate-message-in motion-reduce:animate-fade-in',
+              )}
+            >
+              <span className="sr-only">{row.authorName}: </span>
+              <PluginRequestCard message={row.message!} card={card} botName={row.authorName} onDecided={onAnswered} />
             </div>
           )
         }

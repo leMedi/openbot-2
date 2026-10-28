@@ -74,6 +74,19 @@ export {
   type QuestionOptionStyle,
 } from './questions.ts'
 export {
+  decidePluginRequest,
+  describePluginDecision,
+  describePluginRequest,
+  isPluginRequestCard,
+  type PluginRequestCard,
+  type PluginRequestDecision,
+  PluginRequestDecidedError,
+  pluginRequestDecisionOf,
+  PluginRequestNotFoundError,
+  reopenPluginRequest,
+  waitingPluginRequest,
+} from './plugin-requests.ts'
+export {
   describeHandBack,
   findWaitingTakeOver,
   handBack,

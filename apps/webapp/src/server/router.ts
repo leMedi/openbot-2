@@ -1,8 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
-import { disconnectedNote, InvalidAccountNameError, InvalidRedirectError, PluginAccountNotFoundError, SignInNotFoundError } from '@openbot/agent'
+import { disconnectedNote, InvalidAccountNameError, InvalidRedirectError, PluginAccountNotFoundError, SignInNotFoundError, toolPrefix } from '@openbot/agent'
 import type { Plugin } from '@openbot/plugins'
-import { contract } from '@openbot/api-contract'
+import { contract, type PluginRequestChoice } from '@openbot/api-contract'
 import { ScreenDaemonError } from '@openbot/computer'
 import {
   answerQuestion,
@@ -19,7 +19,9 @@ import {
   markChatRead,
   setPinnedChats,
   createBot,
+  decidePluginRequest,
   describeAnswer,
+  describePluginDecision,
   dismissMovedOnQuestions,
   dismissQuestion,
   describeHandBack,
@@ -33,6 +35,11 @@ import {
   getMessage,
   mimeTypeOf,
   NameTakenError,
+  type PluginRequestDecision,
+  PluginRequestDecidedError,
+  PluginRequestNotFoundError,
+  reopenPluginRequest,
+  waitingPluginRequest,
   listAuditEntries,
   addOwnerFact,
   deleteOwnerFact,
@@ -65,6 +72,7 @@ import {
   writeTimeZone,
   type TimeZoneWrite,
 } from '@openbot/core'
+import type { Message } from '@openbot/db'
 import { implement, ORPCError } from '@orpc/server'
 import { generateContentDisposition } from '@orpc/standard-server'
 import { chatInfoOf, publishChat, type ServerContext } from './context.ts'
@@ -119,6 +127,64 @@ const accountMustExist = <T>(work: Promise<T>) =>
     [PluginAccountNotFoundError, 'NOT_FOUND'],
     [InvalidAccountNameError, 'BAD_REQUEST'],
   ])
+
+/** `work`'s result, with a plugin request card that isn't one answered as NOT_FOUND, and one decided already as CONFLICT. */
+const pluginRequestMustFit = <T>(work: Promise<T>) =>
+  answering(() => work, [
+    [PluginRequestNotFoundError, 'NOT_FOUND'],
+    [PluginRequestDecidedError, 'CONFLICT'],
+  ])
+
+/** A bot's plugin request card still waiting for the owner, with its bot, which must be able to run once woken. */
+async function waitingRequest(context: ServerContext, messageId: string) {
+  const message = await pluginRequestMustFit(waitingPluginRequest(context.db, messageId))
+  const bot = message.authorBotId ? await getBot(context.db, message.authorBotId) : undefined
+  if (!bot) throw new ORPCError('NOT_FOUND', { message: 'No such plugin request' })
+  await assertCanRun(context, bot)
+  return { message, card: message.card, bot }
+}
+
+/**
+ * Decides a bot's plugin request card, once: grants it the account (none for a plugin of skills only) or denies it, then
+ * wakes the bot with the decision. A decision the bot never got is taken back, so the owner can decide again; a grant
+ * given stays, as granting again changes nothing.
+ */
+async function decideRequest(
+  context: ServerContext,
+  messageId: string,
+  decision: PluginRequestChoice,
+) {
+  const { card, bot } = await waitingRequest(context, messageId)
+  let decided: PluginRequestDecision = { outcome: 'denied' }
+  if (decision.outcome === 'granted') {
+    if (card.skillsOnly !== (decision.account === null)) {
+      const message = card.skillsOnly ? `${card.displayName} is granted without an account` : `Pick one of ${card.displayName}'s accounts to grant`
+      throw new ORPCError('BAD_REQUEST', { message })
+    }
+    const account = decision.account && (await context.pluginAccounts.list(card.plugin)).find((entry) => entry.slug === decision.account)
+    if (decision.account && !account) throw new ORPCError('NOT_FOUND', { message: `No ${card.plugin} account ${decision.account}` })
+    decided = { outcome: 'granted', account: account ? { slug: account.slug, displayName: account.displayName } : null }
+  }
+  const { message } = await pluginRequestMustFit(decidePluginRequest(context.db, messageId, decided))
+  const publish = async (changed: Message) => {
+    context.bus.publish({ type: 'message.updated', message: toMessageInfo(changed) })
+    await publishChat(context, changed.chatId)
+  }
+  try {
+    if (decided.outcome === 'granted') {
+      if (decided.account) await accountMustExist(context.pluginAccounts.grant(bot.id, card.plugin, decided.account.slug))
+      else await context.pluginAccounts.grantSkills(bot.id, card.plugin)
+    }
+    await publish(message)
+    const tools = decided.outcome === 'granted' && decided.account ? toolPrefix(card.plugin, decided.account.slug) : undefined
+    await context.runtime.wake(bot.id, { lane: 'owner', text: describePluginDecision(card, decided, tools), id: `plugin-request:${message.id}` })
+  } catch (error) {
+    const reopened = await reopenPluginRequest(context.db, message.id)
+    if (reopened) await publish(reopened)
+    throw error
+  }
+  return toMessageInfo(message)
+}
 
 /** Writes the owner's time zone with `write`, refusing an invalid one; a change is published for scheduled jobs. */
 async function setTimeZone(context: ServerContext, write: () => Promise<TimeZoneWrite>) {
@@ -523,6 +589,8 @@ export const router = os.router({
       }
       return info
     }),
+
+    decidePluginRequest: os.chats.decidePluginRequest.handler(({ context, input }) => decideRequest(context, input.messageId, input.decision)),
   },
 
   groups: {
@@ -601,7 +669,11 @@ export const router = os.router({
       if (!server) throw new ORPCError('BAD_REQUEST', { message: `${plugin.displayName} brings skills only: it has no account to connect` })
       if (more.length) throw new ORPCError('BAD_REQUEST', { message: `${plugin.displayName} has several servers, which OpenBot can't sign in to yet` })
       const connectable = { name: plugin.name, displayName: plugin.displayName, serverUrl: server.url }
-      yield* context.pluginAccounts.connect(connectable, new URL(pluginCallbackPath, input.origin), signal)
+      // From a bot's request card: checked before the sign-in, and the new account granted to the bot once connected.
+      const request = input.requestId ? await waitingRequest(context, input.requestId) : undefined
+      if (request && request.card.plugin !== plugin.name) throw new ORPCError('BAD_REQUEST', { message: `That request is for ${request.card.displayName}` })
+      const grant = request && (async (account: { slug: string }) => void (await decideRequest(context, request.message.id, { outcome: 'granted', account: account.slug })))
+      yield* context.pluginAccounts.connect(connectable, new URL(pluginCallbackPath, input.origin), signal, grant)
     }),
 
     answer: os.plugins.answer.handler(({ context, input }) =>

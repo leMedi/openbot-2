@@ -7,6 +7,7 @@ import {
   AttachmentStore,
   type BotWithChat,
   type ChatSummary,
+  describePluginRequest,
   describeRoutineChange,
   type Clock,
   instantAt,
@@ -257,6 +258,19 @@ export async function createServerContext({
           filePath: installedSkillFile(pluginsDir, name, skill),
         })),
       ),
+    searchPlugins: async (botId) => {
+      const accounts = await pluginAccounts.list()
+      const skillGrants = await pluginAccounts.grantedWithoutAccount()
+      return plugins.map((plugin) => ({
+        name: plugin.name,
+        displayName: plugin.displayName,
+        description: plugin.description,
+        accounts: accounts
+          .filter((account) => account.plugin === plugin.name)
+          .map((account) => ({ slug: account.slug, displayName: account.displayName, granted: account.grantedTo.includes(botId) })),
+        skillsGranted: plugin.servers.length ? null : (skillGrants.get(plugin.name) ?? []).includes(botId),
+      }))
+    },
     watchdog,
     fetch,
     compaction,
@@ -317,6 +331,21 @@ export async function createServerContext({
         authorName: bot.name,
         // The prompt doubles as the message's text, e.g. for previews.
         text: card.prompt,
+        card,
+        idempotencyKey,
+      })
+      if (!created) return
+      bus.publish({ type: 'message.created', message: toMessageInfo(message) })
+      await publish(bot.chatId)
+    },
+    async requestPlugin(bot, card, idempotencyKey) {
+      const { message, created } = await postMessage(db, {
+        chatId: bot.chatId,
+        author: 'bot',
+        authorBotId: bot.id,
+        authorName: bot.name,
+        // "Wants to use Notion: <reason>" doubles as the message's text, e.g. for previews.
+        text: describePluginRequest(card),
         card,
         idempotencyKey,
       })
