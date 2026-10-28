@@ -89,6 +89,11 @@ export const bots = sqliteTable(
     replyOwedAt: integer('reply_owed_at', { mode: 'timestamp_ms' }),
     /** How many times a start woke the bot for the reply it owes; it gives up after 3. */
     replyRedrives: integer('reply_redrives').notNull().default(0),
+    /**
+     * The memory block of the bot's instructions as rendered for its compaction epoch (the id of the entry its context
+     * starts from; null before its first compaction), kept until the epoch changes so its prompt stays cached.
+     */
+    memoryBlock: text('memory_block', { mode: 'json' }).$type<{ epoch: string | null; text: string }>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -239,6 +244,47 @@ export const botInputs = sqliteTable(
   (table) => [uniqueIndex('bot_inputs_input_unique').on(table.botId, table.inputId), uniqueIndex('bot_inputs_position_unique').on(table.position)],
 )
 
+/** Whose a fact is: one bot's (bot memory) or every bot's (shared memory). */
+export const memoryScopes = ['bot', 'shared'] as const
+export type MemoryScope = (typeof memoryScopes)[number]
+
+/** How long a fact stays relevant: always (`profile`), fading but kept (`log`), or a week (`note`). */
+export const factTiers = ['profile', 'log', 'note'] as const
+export type FactTier = (typeof factTiers)[number]
+
+/** Who a fact was learned from: the owner, or a bot. */
+export const factSources = ['owner', 'bot'] as const
+export type FactSource = (typeof factSources)[number]
+
+/**
+ * Bots' memory (design §5.3, ADR 0010): one remembered fact per row. Bots reach it only through `update_state`, and see
+ * it only as the memory block in their prompt. Every delete is a hard delete; edits replace in place, keeping the id.
+ */
+export const memories = sqliteTable(
+  'memories',
+  {
+    /** Stable across edits; what bots and the owner name a fact by. */
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    scope: text('scope', { enum: memoryScopes }).notNull(),
+    /** The bot whose bot memory it is; deleting the bot deletes it. Null for shared memory. */
+    botId: text('bot_id').references(() => bots.id, { onDelete: 'cascade' }),
+    tier: text('tier', { enum: factTiers }).notNull(),
+    /** At most 500 characters. */
+    content: text('content').notNull(),
+    /** 1 to 5. */
+    importance: integer('importance').notNull().default(3),
+    source: text('source', { enum: factSources }).notNull(),
+    /** Set when `source` is `bot`; nulled when that bot is deleted. */
+    sourceBotId: text('source_bot_id').references((): AnySQLiteColumn => bots.id, { onDelete: 'set null' }),
+    /** The source bot's name when it wrote the fact. */
+    sourceBotName: text('source_bot_name'),
+    /** Written from the server's clock. */
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [index('memories_bot_idx').on(table.botId)],
+)
+
 export type Setting = typeof settings.$inferSelect
 export type SystemCredential = typeof systemCredentials.$inferSelect
 export type Bot = typeof bots.$inferSelect
@@ -249,3 +295,4 @@ export type Message = typeof messages.$inferSelect
 export type NewMessage = typeof messages.$inferInsert
 export type AuditEntry = typeof auditLog.$inferSelect
 export type NewAuditEntry = typeof auditLog.$inferInsert
+export type Fact = typeof memories.$inferSelect

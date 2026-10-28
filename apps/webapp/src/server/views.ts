@@ -1,7 +1,7 @@
-import { type AuditEntryInfo, type BotInfo, type CardInfo, type ChatInfo, deletedAuthorName, type MessageInfo } from '@openbot/api-contract'
+import { type AuditEntryInfo, type BotInfo, type CardInfo, type ChatInfo, type FactInfo, deletedAuthorName, type MessageInfo } from '@openbot/api-contract'
 import type { BotStatus } from '@openbot/agent'
 import { type BotWithChat, type ChatSummary, handBackOutcomeOf, isQuestionCard, isTakeOverCard, questionAnswerOf, questionDismissedOf } from '@openbot/core'
-import type { AuditEntry, Message } from '@openbot/db'
+import type { AuditEntry, Fact, Message } from '@openbot/db'
 
 /**
  * What the API shows of a message: never its tool call's idempotency key. A bot's message whose bot was deleted keeps
@@ -85,5 +85,19 @@ export function toAuditEntryInfo(entry: AuditEntry): AuditEntryInfo {
     verdict: entry.verdict,
     mode: entry.mode,
     createdAt: entry.createdAt.getTime(),
+  }
+}
+
+/** A fact as the owner sees it in a bot's Memory pane. */
+export function toFactInfo(fact: Fact): FactInfo {
+  return {
+    id: fact.id,
+    tier: fact.tier,
+    content: fact.content,
+    importance: fact.importance,
+    source: fact.source,
+    sourceBotName: fact.source === 'bot' ? fact.sourceBotName : null,
+    createdAt: fact.createdAt.getTime(),
+    updatedAt: fact.updatedAt.getTime(),
   }
 }

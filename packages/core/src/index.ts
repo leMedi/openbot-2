@@ -128,3 +128,17 @@ export {
   stoppedScreen,
 } from './ports/computer.ts'
 export type { Orchestrator, OrchestratorMode, ProposedAction, ReviewContext, Surface, Verdict } from './ports/orchestrator.ts'
+export {
+  defaultImportance,
+  editBotFact,
+  type Fact,
+  factTiers,
+  type FactTier,
+  forgetBotFact,
+  frozenMemoryBlock,
+  listBotFacts,
+  maxFactLength,
+  maxImportance,
+  minImportance,
+  writeBotFact,
+} from './memory.ts'

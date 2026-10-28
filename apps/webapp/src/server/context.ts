@@ -181,6 +181,7 @@ export async function createServerContext({
     watchdog,
     fetch,
     compaction,
+    clock,
     async sendMessage(bot, chatId, { text, attachments: files }, idempotencyKey) {
       await postBotMessage(bot, chatId, text, files, idempotencyKey)
     },

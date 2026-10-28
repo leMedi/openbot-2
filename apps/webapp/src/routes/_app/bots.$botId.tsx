@@ -1,9 +1,10 @@
 import type { BotInfo } from '@openbot/api-contract'
 import { cn } from '@openbot/ui/lib/utils'
 import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { BotAvatar } from '../../components/bot-avatar.tsx'
 import { ChatView } from '../../components/chat-view.tsx'
+import { MemoryPane } from '../../components/memory-pane.tsx'
 import { ProfilePane } from '../../components/profile-pane.tsx'
 import { FullscreenScreen, ScreenPane } from '../../components/screen-pane.tsx'
 import { useLive } from '../../lib/live.tsx'
@@ -13,7 +14,7 @@ export const Route = createFileRoute('/_app/bots/$botId')({
 })
 
 /** The right-hand pane beside a DM: one at a time, the bot's screen by default. */
-type Pane = 'screen' | 'profile'
+type Pane = 'screen' | 'profile' | 'memory'
 
 /** The DM between the owner and one bot, in Grok Bot's layout, with its Screen or Profile pane beside it. */
 function Dm() {
@@ -51,6 +52,7 @@ function Dm() {
       </div>
       {pane === 'screen' && <ScreenPane bot={bot} takeOver={waitingTakeOver} onOpen={() => setFullscreen(true)} />}
       {fullscreen && <FullscreenScreen bot={bot} takeOver={waitingTakeOver} onClose={closeFullscreen} />}
+      {pane === 'memory' && <MemoryPane bot={bot} />}
       {pane === 'profile' && (
         <ProfilePane
           bot={bot}
@@ -84,8 +86,70 @@ function DmHeader({ bot, pane, onTogglePane }: { bot: BotInfo; pane: Pane | null
             {choice === 'screen' ? 'Screen' : 'Profile'}
           </button>
         ))}
+        <MoreMenu pane={pane} onToggle={onTogglePane} />
       </span>
     </header>
+  )
+}
+
+/** "⋯": the bot's other panes, such as its Memory. */
+function MoreMenu({ pane, onToggle }: { pane: Pane | null; onToggle: (pane: Pane) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLSpanElement>(null)
+  useLayoutEffect(() => {
+    if (open) ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
+  }, [open])
+  useEffect(() => {
+    if (!open) return
+    const close = (event: Event) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false)
+    }
+    addEventListener('pointerdown', close, true)
+    return () => removeEventListener('pointerdown', close, true)
+  }, [open])
+  const items: { pane: Pane; label: string }[] = [{ pane: 'memory', label: 'Memory' }]
+  return (
+    <span ref={ref} className="relative">
+      <button
+        type="button"
+        aria-label="More"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((shown) => !shown)}
+        className={cn('pressable rounded-md px-2 py-1 text-base hover:bg-secondary-hover', items.some((item) => item.pane === pane) && 'bg-selected')}
+      >
+        ⋯
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label="More"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' || event.key === 'Tab') {
+              event.preventDefault()
+              setOpen(false)
+            }
+          }}
+          className="absolute top-full right-0 z-40 mt-1 flex min-w-[150px] flex-col rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg motion-safe:animate-pop-in motion-reduce:animate-fade-in"
+        >
+          {items.map((item) => (
+            <button
+              key={item.pane}
+              type="button"
+              role="menuitem"
+              tabIndex={-1}
+              onClick={() => {
+                setOpen(false)
+                onToggle(item.pane)
+              }}
+              className="rounded-md px-2.5 py-1.5 text-left text-base outline-none hover:bg-secondary focus-visible:bg-secondary"
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
   )
 }
 

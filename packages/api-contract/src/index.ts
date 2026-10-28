@@ -381,6 +381,30 @@ export const auditEntry = z.object({
 })
 export type AuditEntryInfo = z.infer<typeof auditEntry>
 
+export const factTiers = ['profile', 'log', 'note'] as const
+export type FactTier = (typeof factTiers)[number]
+
+/** One fact of a bot's memory, as the owner sees it in the bot's Memory pane. */
+export const fact = z.object({
+  /** Stable across edits; how the bot names it, e.g. `[12]`. */
+  id: z.number().int(),
+  /** `profile` (always relevant), `log` (a dated event that fades but is kept) or `note` (out of the prompt after a week). */
+  tier: z.enum(factTiers),
+  /** The fact itself, at most 500 characters. */
+  content: z.string(),
+  /** 1 to 5. */
+  importance: z.number().int(),
+  /** Who it was learned from: the owner or a bot. */
+  source: z.enum(['owner', 'bot']),
+  /** The bot it was learned from, as named when it wrote the fact; null when learned from the owner. */
+  sourceBotName: z.string().nullable(),
+  /** When it was learned, in milliseconds since the epoch. */
+  createdAt: z.number(),
+  /** When it last changed, in milliseconds since the epoch. */
+  updatedAt: z.number(),
+})
+export type FactInfo = z.infer<typeof fact>
+
 export const screenStates = ['stopped', 'starting', 'running', 'crashed'] as const
 
 /** A bot's screen on the computer. */
@@ -453,6 +477,10 @@ export const contract = {
       .route({ method: 'GET', path: '/bots/{botId}/audit', summary: "The bot's audit log: every side-effecting action, reviewed or not, and its computer-use sessions' navigations and summaries, oldest first" })
       .input(z.object({ botId: z.string() }))
       .output(z.array(auditEntry)),
+    memory: oc
+      .route({ method: 'GET', path: '/bots/{botId}/memory', summary: "The bot's bot memory, every fact, oldest first, including those its prompt leaves out" })
+      .input(z.object({ botId: z.string() }))
+      .output(z.array(fact)),
   },
   chats: {
     list: oc

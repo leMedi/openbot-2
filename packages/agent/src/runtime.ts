@@ -41,6 +41,18 @@ import {
   type BotInput,
   type BotWithChat,
   botsOwingReplies,
+  type Clock,
+  defaultImportance,
+  editBotFact,
+  factTiers,
+  forgetBotFact,
+  frozenMemoryBlock,
+  maxFactLength,
+  maxImportance,
+  minImportance,
+  ownerTimeZone,
+  systemClock,
+  writeBotFact,
   describeUnanswered,
   findBotByHistory,
   findBotByName,
@@ -188,6 +200,8 @@ export type BotRuntimeOptions = {
   fetch?: typeof fetch
   /** When and how much bots' histories are compacted; pi-durable's defaults otherwise. Tests keep less verbatim. */
   compaction?: Partial<CompactionPolicy>
+  /** The server's time, which memory facts are dated and ranked by; the system's by default. */
+  clock?: Clock
 }
 
 /** `provider/modelId`, split at the first slash since model ids may contain slashes. */
@@ -402,6 +416,8 @@ export class BotRuntime implements AgentRuntime {
   readonly #errors = new Map<string, string>()
   /** Messages each bot has sent in its current group turn, by the turn's input id. */
   readonly #groupMessages = new Map<string, { inputId: string; sent: number }>()
+  /** The server's time, which memory facts are dated and ranked by. */
+  readonly #clock: Clock
   /** Closing: a run that can't start now is queued still, for the next start. */
   #closing = false
 
@@ -409,6 +425,7 @@ export class BotRuntime implements AgentRuntime {
     this.#harness = harness
     this.#options = options
     this.#images = images
+    this.#clock = options.clock ?? systemClock
     this.#scheduler = new RunScheduler({
       histories: {
         submit: async (botId, inputs) => {
@@ -702,6 +719,67 @@ export class BotRuntime implements AgentRuntime {
         },
       }),
     }
+    // Grok's update_state, with the memory target only for now. The bot is always the run's, never an argument.
+    const updateState: BotTool = {
+      // Bot memory isn't reviewed; shared memory, when it comes, is the memory_shared_write surface.
+      surface: null,
+      tool: defineTool({
+        name: 'update_state',
+        description:
+          'Change your own lasting state. target "memory": your bot memory, the facts you keep across conversations, ' +
+          'shown in your instructions with their ids. Save what will matter later (the owner\'s preferences, decisions, ' +
+          'how things are done), never secrets or passwords. A fact you write joins your instructions later; until then ' +
+          'it is in this conversation.\n' +
+          '- write: save a new fact (scope "bot", a tier, the text, an importance).\n' +
+          '- edit: change a fact by its id: its text, tier or importance.\n' +
+          '- forget: delete a fact for good by its id.',
+        parameters: Type.Object({
+          target: Type.Literal('memory'),
+          action: Type.Union([Type.Literal('write'), Type.Literal('edit'), Type.Literal('forget')]),
+          scope: Type.Optional(Type.Literal('bot', { description: 'write: whose memory; "bot", your own' })),
+          tier: Type.Optional(
+            Type.Union(
+              factTiers.map((tier) => Type.Literal(tier)),
+              {
+                description:
+                  'write, edit: profile for what is always true and always relevant; log for a dated event, which fades but is kept; ' +
+                  'note for what matters only for about a week',
+              },
+            ),
+          ),
+          text: Type.Optional(Type.String({ description: `write, edit: the fact, one statement, at most ${maxFactLength} characters`, maxLength: maxFactLength })),
+          importance: Type.Optional(
+            Type.Integer({
+              description: `write, edit: from ${minImportance} (trivia) to ${maxImportance} (essential); ${defaultImportance} by default`,
+              minimum: minImportance,
+              maximum: maxImportance,
+            }),
+          ),
+          id: Type.Optional(Type.Integer({ description: 'edit, forget: the fact\'s id, as in [12]' })),
+        }),
+        // Replaying a write would save it twice; an edit or forget already done would answer "no such fact".
+        replay: 'unsafe',
+        execute: async (args, api) => {
+          const bot = await botOf(api.conversationId)
+          const now = runtime!.#clock.now()
+          const answer = (text: string) => ({ output: [{ type: 'text' as const, text }] })
+          if (args.action === 'write') {
+            if (args.scope !== 'bot') throw new Error('Write to your own memory: scope "bot".')
+            if (!args.tier || args.text === undefined) throw new Error('A new fact needs a tier and a text.')
+            const fact = await writeBotFact(options.db, bot, { tier: args.tier, text: args.text, importance: args.importance }, now)
+            return answer(`Saved as [${fact.id}].`)
+          }
+          if (args.id === undefined) throw new Error(`Say which fact to ${args.action} by its id.`)
+          if (args.action === 'edit') {
+            // A fact's scope never changes: the only scope there is yet is the bot's own.
+            const fact = await editBotFact(options.db, bot.id, args.id, { text: args.text, tier: args.tier, importance: args.importance }, now)
+            return answer(`Updated [${fact.id}].`)
+          }
+          await forgetBotFact(options.db, bot.id, args.id)
+          return answer(`Forgot [${args.id}].`)
+        },
+      }),
+    }
     // A computer-use session is reviewed, and logged with its reason, as a whole; its browser and desktop tools are not
     // one by one.
     const useComputer: BotTool = { surface: 'computer_session', tool: computerUseSessions.useComputer }
@@ -721,7 +799,7 @@ export class BotRuntime implements AgentRuntime {
         },
       },
     })
-    const tools = [sendMessage, messageBot, askQuestion, ...computerTools(images), useComputer, ...(options.tools ?? [])].map(detachable)
+    const tools = [sendMessage, messageBot, askQuestion, updateState, ...computerTools(images), useComputer, ...(options.tools ?? [])].map(detachable)
     const toolSurfaces = new Map<string, Surface | null>([
       ...tools.map(({ surface, tool }) => [tool.name, surface] as const),
       // Sessions don't select this extension, so its hooks shouldn't see their browser and desktop tools; if they ever
@@ -1081,7 +1159,12 @@ export class BotRuntime implements AgentRuntime {
     const history = await this.#history(bot)
     const others = (await listBots(this.#options.db)).filter((other) => other.id !== bot.id)
     const groups = await listGroups(this.#options.db, bot.id)
-    const instructions = [botPrompt(bot), computerPrompt(this.#options.computer, bot, others), teamPrompt(others), groupsPrompt(bot, groups)]
+    // Last, so what comes before it stays cached when a new compaction epoch renders it anew.
+    const memory = await frozenMemoryBlock(this.#options.db, bot.id, await this.compactionEpoch(bot.id), {
+      now: this.#clock.now(),
+      timeZone: await ownerTimeZone(this.#options.db),
+    })
+    const instructions = [botPrompt(bot), computerPrompt(this.#options.computer, bot, others), teamPrompt(others), groupsPrompt(bot, groups), memory]
       .filter(Boolean)
       .join('\n\n')
     await history.configure({ model: await this.#model(bot), instructions }, context)

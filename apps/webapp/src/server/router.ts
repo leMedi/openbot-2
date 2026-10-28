@@ -32,6 +32,7 @@ import {
   mimeTypeOf,
   NameTakenError,
   listAuditEntries,
+  listBotFacts,
   listBots,
   listMessages,
   postMessage,
@@ -58,7 +59,7 @@ import { implement, ORPCError } from '@orpc/server'
 import { generateContentDisposition } from '@orpc/standard-server'
 import { chatInfoOf, publishChat, type ServerContext } from './context.ts'
 import { screenStreamUrl } from './screen-stream.ts'
-import { toAuditEntryInfo, toBotInfo, toMessageInfo } from './views.ts'
+import { toAuditEntryInfo, toBotInfo, toFactInfo, toMessageInfo } from './views.ts'
 
 const os = implement(contract).$context<ServerContext>()
 
@@ -268,6 +269,11 @@ export const router = os.router({
     audit: os.bots.audit.handler(async ({ context, input }) => {
       if (!(await getBot(context.db, input.botId))) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
       return (await listAuditEntries(context.db, input.botId)).map(toAuditEntryInfo)
+    }),
+
+    memory: os.bots.memory.handler(async ({ context, input }) => {
+      if (!(await getBot(context.db, input.botId))) throw new ORPCError('NOT_FOUND', { message: 'No such bot' })
+      return (await listBotFacts(context.db, input.botId)).map(toFactInfo)
     }),
   },
 
