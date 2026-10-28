@@ -99,6 +99,11 @@ export const bots = sqliteTable(
      * is, and thawed by the owner's changes to its routines.
      */
     routinesBlock: text('routines_block', { mode: 'json' }).$type<{ epoch: string | null; text: string }>(),
+    /**
+     * The skills block of the bot's instructions (the skills of the plugins it is granted), frozen per compaction epoch
+     * as `memoryBlock` is: a grant or revoke shows from the bot's next epoch.
+     */
+    skillsBlock: text('skills_block', { mode: 'json' }).$type<{ epoch: string | null; text: string }>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -416,7 +421,7 @@ export const pluginGrants = sqliteTable(
       .references(() => bots.id, { onDelete: 'cascade' }),
     /** The catalog plugin's name. */
     plugin: text('plugin').notNull(),
-    /** The account's slug, `account1`… */
+    /** The account's slug, `account1`…; empty for a plugin granted without an account, one of skills only. */
     account: text('account').notNull(),
     createdAt: createdAt(),
   },

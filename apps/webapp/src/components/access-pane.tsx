@@ -2,12 +2,12 @@ import type { BotInfo, PluginAccountInfo, PluginInfo } from '@openbot/api-contra
 import { Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
-import { GrantSwitch, PluginIcon, PluginStatus } from './plugins.tsx'
+import { GrantSwitch, PluginIcon, PluginStatus, SkillsGrantSwitch } from './plugins.tsx'
 
 /**
- * The bot's Access pane (design §5.5): every plugin of the catalog with an account to sign in to, and for each of its
- * connected accounts whether the bot may use it, which the owner grants and revokes here. A plugin not connected
- * yet links to its page in Settings → Plugins.
+ * The bot's Access pane (design §5.5): every plugin of the catalog, and whether the bot may use each connected account
+ * of a plugin with one to sign in to, or the skills of a plugin of skills only, which the owner grants and revokes here.
+ * A plugin not connected yet links to its page in Settings → Plugins.
  */
 export function AccessPane({ bot }: { bot: BotInfo }) {
   const [plugins, setPlugins] = useState<PluginInfo[]>()
@@ -36,24 +36,26 @@ export function AccessPane({ bot }: { bot: BotInfo }) {
     )
   }
 
-  const hosted = plugins?.filter((plugin) => plugin.servers.length > 0)
+  const grantable = plugins?.filter((plugin) => plugin.servers.length > 0 || plugin.skills.length > 0)
   return (
     <aside aria-label={`${bot.name}'s access`} className="flex w-[360px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-border-subtle p-5">
       <header className="flex flex-col gap-1">
         <h2 className="text-lg font-semibold">Access</h2>
-        <p className="text-sm text-muted-foreground">The plugin accounts {bot.name} may use. A revoke takes effect from its next call.</p>
+        <p className="text-sm text-muted-foreground">
+          The plugin accounts and skills {bot.name} may use. An account's revoke takes effect from its next call; skills change when its history is next compacted.
+        </p>
       </header>
       {error && <p className="text-sm text-destructive-foreground">Couldn't load the plugins: {error}</p>}
-      {hosted && !hosted.length && <p className="text-sm text-muted-foreground">No plugin has an account to grant.</p>}
+      {grantable && !grantable.length && <p className="text-sm text-muted-foreground">No plugin has an account or skills to grant.</p>}
       <ul className="flex flex-col gap-3">
-        {hosted?.map((plugin) => (
+        {grantable?.map((plugin) => (
           <li key={plugin.name} className="flex flex-col gap-2 rounded-lg border border-border p-3">
             <div className="flex items-center gap-2">
               <PluginIcon plugin={plugin} size={24} />
               <Link to="/settings/plugins/$name" params={{ name: plugin.name }} className="min-w-0 flex-1 truncate font-medium hover:underline">
                 {plugin.displayName}
               </Link>
-              {!plugin.accounts.length && <PluginStatus status={plugin.status} />}
+              {plugin.servers.length > 0 && !plugin.accounts.length && <PluginStatus status={plugin.status} />}
             </div>
             {plugin.accounts.map((account) => (
               <GrantSwitch
@@ -65,6 +67,14 @@ export function AccessPane({ bot }: { bot: BotInfo }) {
                 onChanged={(saved) => changed(plugin, saved)}
               />
             ))}
+            {!plugin.servers.length && (
+              <SkillsGrantSwitch
+                plugin={plugin}
+                bot={bot}
+                label="Its skills"
+                onChanged={(saved) => setPlugins((current) => current?.map((entry) => (entry.name === saved.name ? saved : entry)))}
+              />
+            )}
           </li>
         ))}
       </ul>

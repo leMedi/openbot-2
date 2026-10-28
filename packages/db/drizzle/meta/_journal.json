@@ -113,6 +113,13 @@
       "when": 1793184889143,
       "tag": "0015_plugin_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1793186115569,
+      "tag": "0016_bot_skills_block",
+      "breakpoints": true
     }
   ]
 }

@@ -26,6 +26,9 @@ export class InvalidRedirectError extends Error {}
  */
 const loopbackRedirect = 'http://127.0.0.1:8976/callback'
 
+/** The account of a grant without one: a plugin of skills only, granted as (bot, plugin, none). */
+const noAccount = ''
+
 const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]'])
 
 /** The instance's callback when the catalog's servers accept it: over https, or on this machine's loopback. */
@@ -130,6 +133,36 @@ export class PluginAccounts {
       .delete(pluginGrants)
       .where(and(eq(pluginGrants.botId, botId), eq(pluginGrants.plugin, plugin), eq(pluginGrants.account, slug)))
     return this.#summary(plugin, slug)
+  }
+
+  /** Lets bot `botId` use `plugin`, one of skills only, without an account; granting it again changes nothing. */
+  async grantSkills(botId: string, plugin: string): Promise<void> {
+    await this.#db.insert(pluginGrants).values({ botId, plugin, account: noAccount }).onConflictDoNothing()
+  }
+
+  /** Takes `plugin`, granted without an account, back from bot `botId`. */
+  async revokeSkills(botId: string, plugin: string): Promise<void> {
+    await this.#db
+      .delete(pluginGrants)
+      .where(and(eq(pluginGrants.botId, botId), eq(pluginGrants.plugin, plugin), eq(pluginGrants.account, noAccount)))
+  }
+
+  /** The bots granted each plugin without an account, oldest grant first, by plugin; of `plugin` only, when given. */
+  async grantedWithoutAccount(plugin?: string): Promise<Map<string, string[]>> {
+    const grants = await this.#db
+      .select()
+      .from(pluginGrants)
+      .where(and(eq(pluginGrants.account, noAccount), plugin === undefined ? undefined : eq(pluginGrants.plugin, plugin)))
+      .orderBy(asc(pluginGrants.id))
+    const byPlugin = new Map<string, string[]>()
+    for (const grant of grants) byPlugin.set(grant.plugin, [...(byPlugin.get(grant.plugin) ?? []), grant.botId])
+    return byPlugin
+  }
+
+  /** The plugins bot `botId` holds a grant to, with an account or without, in the order first granted. */
+  async grantedPlugins(botId: string): Promise<string[]> {
+    const grants = await this.#db.select({ plugin: pluginGrants.plugin }).from(pluginGrants).where(eq(pluginGrants.botId, botId)).orderBy(asc(pluginGrants.id))
+    return [...new Set(grants.map((grant) => grant.plugin))]
   }
 
   /**

@@ -61,6 +61,7 @@ describe('the plugin catalog', () => {
       servers: [{ name: 'notes', url: 'https://mcp.notes.test/mcp' }],
       skills: [{ name: 'notes-search', description: 'How to search notes' }],
       accounts: [],
+      grantedTo: [],
     })
     await expect(server.client.plugins.get({ name: 'nope' })).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })

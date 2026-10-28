@@ -88,7 +88,7 @@ _Avoid_: Widget, prompt
 The owner's yes or no on a card asking to let a bot do something.
 
 **Grant**:
-A standing permission for one bot to use one thing (a plugin account, a vault item), given by the owner (directly, or by approving the bot's request) and revocable.
+A standing permission for one bot to use one thing (a plugin account, a plugin of skills only, a vault item), given by the owner (directly, or by approving the bot's request) and revocable.
 _Avoid_: Permission, access
 
 **Take over**:
@@ -120,7 +120,7 @@ _Avoid_: Status, success
 ### Capabilities
 
 **Plugin**:
-A bundle from OpenBot's catalog of a hosted tool server, skills, or both, giving bots a capability such as Notion or Linear. It is connected once it has an account; a bot uses it only through a grant.
+A bundle from OpenBot's catalog of a hosted tool server, skills, or both, giving bots a capability such as Notion or Linear. It is connected once it has an account; a bot uses it only through a grant: of one of its accounts, or, for a plugin of skills only (no server, so no account), of the plugin itself.
 _Avoid_: Connector, integration, extension
 
 **Plugin account**:

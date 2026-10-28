@@ -113,6 +113,7 @@ import type { Attachment, Db, Message, Surface } from '@openbot/db'
 import { type BotComputer, ComputerUnavailableError } from './computer.ts'
 import { computerUse, type UseComputerDetails } from './computer-use.ts'
 import { type InputOutcome, type QueuedInput, type Run, RunScheduler, type Watchdog } from './run-scheduler.ts'
+import { frozenSkillsBlock, type PromptSkill } from './skills.ts'
 
 const context = BACKGROUND_CONTEXT
 
@@ -207,6 +208,8 @@ export type BotRuntimeOptions = {
    * lost since (a grant revoked) fails cleanly.
    */
   botTools?(botId: string): Promise<BotTool[]>
+  /** The skills bot `botId` may read, e.g. those of the plugins it is granted; listed in its prompt from its next compaction epoch. */
+  botSkills?(botId: string): Promise<PromptSkill[]>
   /**
    * Posts a bot's message, with copies of the files it attached, to chat `chatId`: its DM, or the group chat whose turn
    * it is taking. `idempotencyKey` makes a replayed tool call post once.
@@ -1460,7 +1463,8 @@ export class BotRuntime implements AgentRuntime {
     const timeZone = await ownerTimeZone(this.#options.db)
     const routines = await frozenRoutinesBlock(this.#options.db, bot.id, epoch, { timeZone })
     const memory = await frozenMemoryBlock(this.#options.db, bot.id, epoch, { now: this.#clock.now(), timeZone })
-    const instructions = [botPrompt(bot), computerPrompt(this.#options.computer, bot, others), teamPrompt(others), groupsPrompt(bot, groups), routines, memory]
+    const skills = await frozenSkillsBlock(this.#options.db, bot.id, epoch, async () => (await this.#options.botSkills?.(bot.id)) ?? [])
+    const instructions = [botPrompt(bot), computerPrompt(this.#options.computer, bot, others), teamPrompt(others), groupsPrompt(bot, groups), skills, routines, memory]
       .filter(Boolean)
       .join('\n\n')
     const extensions = await this.#ownTools.install(bot.id)

@@ -48,16 +48,41 @@ export function GrantSwitch({
   label: string
   onChanged: (account: PluginAccountInfo) => void
 }) {
+  const input = { name: plugin.name, account: account.slug, botId: bot.id }
+  return (
+    <Switch
+      label={label}
+      on={account.grantedTo.includes(bot.id)}
+      change={async (grant) => onChanged(await (grant ? api().plugins.grant(input) : api().plugins.revoke(input)))}
+    />
+  )
+}
+
+/**
+ * Whether `bot` may read the skills of `plugin`, one of skills only, which the owner switches; a change shows in its
+ * prompt from its next compaction epoch. `onChanged` gets the plugin as it now is.
+ */
+export function SkillsGrantSwitch({ plugin, bot, label, onChanged }: { plugin: PluginInfo; bot: BotInfo; label: string; onChanged: (plugin: PluginInfo) => void }) {
+  const input = { name: plugin.name, botId: bot.id }
+  return (
+    <Switch
+      label={label}
+      on={plugin.grantedTo.includes(bot.id)}
+      change={async (grant) => onChanged(await (grant ? api().plugins.grantSkills(input) : api().plugins.revokeSkills(input)))}
+    />
+  )
+}
+
+/** A grant's checkbox, `on` when granted; `change` grants or revokes, and its error shows below. */
+function Switch({ label, on, change }: { label: string; on: boolean; change: (grant: boolean) => Promise<void> }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string>()
-  const granted = account.grantedTo.includes(bot.id)
 
   async function toggle() {
     setSaving(true)
     setError(undefined)
     try {
-      const input = { name: plugin.name, account: account.slug, botId: bot.id }
-      onChanged(await (granted ? api().plugins.revoke(input) : api().plugins.grant(input)))
+      await change(!on)
     } catch (caught) {
       setError(errorMessage(caught))
     } finally {
@@ -68,7 +93,7 @@ export function GrantSwitch({
   return (
     <label className="flex flex-col gap-0.5">
       <span className="flex items-center gap-2">
-        <input type="checkbox" checked={granted} disabled={saving} onChange={() => void toggle()} className="size-4 accent-primary" />
+        <input type="checkbox" checked={on} disabled={saving} onChange={() => void toggle()} className="size-4 accent-primary" />
         <span className="min-w-0 flex-1 truncate">{label}</span>
       </span>
       {error && <span className="text-sm text-destructive-foreground">{error}</span>}

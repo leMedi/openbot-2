@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
 import { disconnectedNote, InvalidAccountNameError, InvalidRedirectError, PluginAccountNotFoundError, SignInNotFoundError } from '@openbot/agent'
+import type { Plugin } from '@openbot/plugins'
 import { contract } from '@openbot/api-contract'
 import { ScreenDaemonError } from '@openbot/computer'
 import {
@@ -96,6 +97,17 @@ function pluginMustExist(context: ServerContext, name: string) {
   const plugin = context.plugins.find((entry) => entry.name === name)
   if (!plugin) throw new ORPCError('NOT_FOUND', { message: `No plugin named ${name}` })
   return plugin
+}
+
+/** `plugin`, or BAD_REQUEST when it has a server: such a plugin is granted with one of its accounts. */
+function skillsOnly(plugin: Plugin) {
+  if (plugin.servers.length) throw new ORPCError('BAD_REQUEST', { message: `${plugin.displayName} is granted with one of its accounts` })
+  return plugin
+}
+
+/** What the owner sees of `plugin`, with its accounts and grants. */
+async function pluginInfo(context: ServerContext, plugin: Plugin) {
+  return toPluginInfo(plugin, await context.pluginAccounts.list(plugin.name), await context.pluginAccounts.grantedWithoutAccount(plugin.name))
 }
 
 /** Where plugin sign-ins return in the owner's browser: `plugins.oauthCallback` under the API's prefix. */
@@ -564,12 +576,12 @@ export const router = os.router({
   plugins: {
     list: os.plugins.list.handler(async ({ context }) => {
       const accounts = await context.pluginAccounts.list()
-      return context.plugins.map((plugin) => toPluginInfo(plugin, accounts))
+      const grants = await context.pluginAccounts.grantedWithoutAccount()
+      return context.plugins.map((plugin) => toPluginInfo(plugin, accounts, grants))
     }),
 
     get: os.plugins.get.handler(async ({ context, input }) => {
-      const plugin = pluginMustExist(context, input.name)
-      return toPluginInfo(plugin, await context.pluginAccounts.list(plugin.name))
+      return pluginInfo(context, pluginMustExist(context, input.name))
     }),
 
     icon: os.plugins.icon.handler(async ({ context, input }) => {
@@ -630,6 +642,20 @@ export const router = os.router({
       pluginMustExist(context, input.name)
       await botMustExist(context, input.botId)
       return toPluginAccountInfo(await accountMustExist(context.pluginAccounts.revoke(input.botId, input.name, input.account)))
+    }),
+
+    grantSkills: os.plugins.grantSkills.handler(async ({ context, input }) => {
+      const plugin = skillsOnly(pluginMustExist(context, input.name))
+      await botMustExist(context, input.botId)
+      await context.pluginAccounts.grantSkills(input.botId, plugin.name)
+      return pluginInfo(context, plugin)
+    }),
+
+    revokeSkills: os.plugins.revokeSkills.handler(async ({ context, input }) => {
+      const plugin = skillsOnly(pluginMustExist(context, input.name))
+      await botMustExist(context, input.botId)
+      await context.pluginAccounts.revokeSkills(input.botId, plugin.name)
+      return pluginInfo(context, plugin)
     }),
   },
 

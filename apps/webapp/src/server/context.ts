@@ -31,7 +31,7 @@ import {
   getBot,
 } from '@openbot/core'
 import type { Db } from '@openbot/db'
-import { installSkills, loadCatalog, type Plugin } from '@openbot/plugins'
+import { installedSkillFile, installSkills, loadCatalog, type Plugin } from '@openbot/plugins'
 import type { ScreenTickets } from './screen-stream.ts'
 import { toChatInfo, toMessageInfo, toRoutineInfo, toRoutineRunInfo } from './views.ts'
 
@@ -168,7 +168,8 @@ export async function createServerContext({
   home: string
 }): Promise<ServerContext> {
   const bus = new EventBus<LiveEvent>()
-  const plugins = await openCatalog(catalog, home)
+  const pluginsDir = join(home, 'plugins')
+  const plugins = await openCatalog(catalog, pluginsDir)
   const attachments = new AttachmentStore(attachmentsDir)
   const box = new SecretBox(secretKey)
   const providers = new Providers({ db, box, providers: modelProviders })
@@ -247,6 +248,15 @@ export async function createServerContext({
     desktop,
     tools,
     botTools: botTools ?? ((botId) => pluginAccounts.botTools(botId)),
+    // The skills of every plugin the bot is granted, read from the copies in the bots' home.
+    botSkills: async (botId) =>
+      (await pluginAccounts.grantedPlugins(botId)).flatMap((name) =>
+        (plugins.find((plugin) => plugin.name === name)?.skills ?? []).map((skill) => ({
+          name: skill.name,
+          description: skill.description,
+          filePath: installedSkillFile(pluginsDir, name, skill),
+        })),
+      ),
     watchdog,
     fetch,
     compaction,
@@ -389,13 +399,13 @@ const connectable = (plugins: Plugin[]): ConnectablePlugin[] =>
   plugins.flatMap(({ name, displayName, servers: [server, ...more] }) => (server && !more.length ? [{ name, displayName, serverUrl: server.url }] : []))
 
 /**
- * The catalog's plugins, with what the loader refused or ignored logged, and their skills copied into the bots' home,
- * replacing the copies of an earlier release. Bots go without skills, rather than the server failing to start, when
+ * The catalog's plugins, with what the loader refused or ignored logged, and their skills copied into `pluginsDir` in
+ * the bots' home, replacing the copies of an earlier release. Bots go without skills, rather than the server failing to start, when
  * they can't be copied.
  */
-async function openCatalog(catalog: string, home: string): Promise<Plugin[]> {
+async function openCatalog(catalog: string, pluginsDir: string): Promise<Plugin[]> {
   const { plugins, problems } = await loadCatalog(catalog)
   for (const problem of problems) console.warn(`[plugins] ${problem}`)
-  await installSkills(plugins, join(home, 'plugins')).catch((error) => console.error("[plugins] Couldn't copy plugins' skills for bots:", error))
+  await installSkills(plugins, pluginsDir).catch((error) => console.error("[plugins] Couldn't copy plugins' skills for bots:", error))
   return plugins
 }

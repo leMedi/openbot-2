@@ -2,7 +2,7 @@ import { type PluginAccountInfo, type PluginInfo, pluginAccountNameMax } from '@
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { useCallback, useEffect, useState } from 'react'
 import { Dialog } from '../../components/dialog.tsx'
-import { GrantSwitch, PluginIcon, PluginStatus } from '../../components/plugins.tsx'
+import { GrantSwitch, PluginIcon, PluginStatus, SkillsGrantSwitch } from '../../components/plugins.tsx'
 import { SignInWizard } from '../../components/sign-in-wizard.tsx'
 import { api, errorMessage } from '../../lib/api.ts'
 import { useLive } from '../../lib/live.tsx'
@@ -13,10 +13,11 @@ export const Route = createFileRoute('/settings/plugins/$name')({
 
 /**
  * A plugin's detail view in Settings → Plugins: what it is, its status, its accounts (connect, rename, disconnect, and
- * the bots granted each), and the servers and skills it brings.
+ * the bots granted each) or, for a plugin of skills only, the bots granted it, and the servers and skills it brings.
  */
 function PluginDetail() {
   const { name } = Route.useParams()
+  const { bots } = useLive()
   const [plugin, setPlugin] = useState<PluginInfo>()
   const [error, setError] = useState<string>()
   const [connecting, setConnecting] = useState(false)
@@ -74,6 +75,14 @@ function PluginDetail() {
               <p className="text-muted-foreground">
                 {plugin.servers.length ? `No ${plugin.displayName} account is connected yet.` : `${plugin.displayName} needs no account: it brings skills only.`}
               </p>
+            )}
+            {!plugin.servers.length && bots && bots.length > 0 && (
+              <fieldset className="flex flex-col gap-1">
+                <legend className="mb-1 text-sm text-muted-foreground">Bots that may use its skills, from their next compaction</legend>
+                {bots.map((bot) => (
+                  <SkillsGrantSwitch key={bot.id} plugin={plugin} bot={bot} label={bot.name} onChanged={setPlugin} />
+                ))}
+              </fieldset>
             )}
             {plugin.accounts.length > 0 && (
               <ul className="flex flex-col divide-y divide-border-subtle rounded-lg border border-border">

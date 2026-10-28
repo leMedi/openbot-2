@@ -562,6 +562,8 @@ export const plugin = z.object({
   skills: z.array(z.object({ name: z.string(), description: z.string() })),
   /** Its connected accounts, oldest first. */
   accounts: z.array(pluginAccount),
+  /** The ids of the bots granted it without an account, oldest grant first, for a plugin of skills only: they read its skills. */
+  grantedTo: z.array(z.string()),
 })
 export type PluginInfo = z.infer<typeof plugin>
 
@@ -875,6 +877,22 @@ export const contract = {
       })
       .input(z.object({ name: z.string(), account: z.string(), botId: z.string() }))
       .output(pluginAccount),
+    grantSkills: oc
+      .route({
+        method: 'PUT',
+        path: '/plugins/{name}/grants/{botId}',
+        summary: "Let a bot read the skills of a plugin of skills only, which has no account, from the bot's next compaction epoch",
+      })
+      .input(z.object({ name: z.string(), botId: z.string() }))
+      .output(plugin),
+    revokeSkills: oc
+      .route({
+        method: 'DELETE',
+        path: '/plugins/{name}/grants/{botId}',
+        summary: "Take a plugin of skills only back from a bot: its skills leave the bot's prompt from its next compaction epoch",
+      })
+      .input(z.object({ name: z.string(), botId: z.string() }))
+      .output(plugin),
   },
   models: {
     list: oc

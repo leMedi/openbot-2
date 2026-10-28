@@ -21,3 +21,4 @@ export {
   PluginAccounts,
   type PluginAccountSummary,
 } from './plugin-accounts.ts'
+export { type PromptSkill } from './skills.ts'

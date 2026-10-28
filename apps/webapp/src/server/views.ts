@@ -137,8 +137,11 @@ export function toRoutineRunInfo(run: RoutineRun, chatId: string): RoutineRunInf
   }
 }
 
-/** What the owner sees of a catalog plugin, with its accounts (any plugin's may be passed): connected once it has one. */
-export function toPluginInfo(plugin: Plugin, accounts: PluginAccountSummary[]): PluginInfo {
+/**
+ * What the owner sees of a catalog plugin, with its accounts (any plugin's may be passed), connected once it has one, and
+ * the bots granted it without an account, by plugin.
+ */
+export function toPluginInfo(plugin: Plugin, accounts: PluginAccountSummary[], grantedWithoutAccount: Map<string, string[]>): PluginInfo {
   const own = accounts.filter((account) => account.plugin === plugin.name).map(toPluginAccountInfo)
   return {
     name: plugin.name,
@@ -150,6 +153,7 @@ export function toPluginInfo(plugin: Plugin, accounts: PluginAccountSummary[]): 
     servers: plugin.servers,
     skills: plugin.skills.map(({ name, description }) => ({ name, description })),
     accounts: own,
+    grantedTo: grantedWithoutAccount.get(plugin.name) ?? [],
   }
 }
 

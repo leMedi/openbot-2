@@ -1,6 +1,12 @@
 import { chmod, cp, mkdir, readdir, rm } from 'node:fs/promises'
 import { basename, join } from 'node:path'
-import type { Plugin } from './catalog.ts'
+import type { Plugin, PluginSkill } from './catalog.ts'
+
+/** Where `installSkills` copies `plugin`'s `skill` in `pluginsDir`: its folder, as in the catalog. */
+const installedSkillFolder = (pluginsDir: string, plugin: string, skill: PluginSkill) => join(pluginsDir, plugin, 'skills', basename(skill.folder))
+
+/** The `SKILL.md` of `plugin`'s `skill` as `installSkills` copies it in `pluginsDir`, where bots read it. */
+export const installedSkillFile = (pluginsDir: string, plugin: string, skill: PluginSkill) => join(installedSkillFolder(pluginsDir, plugin, skill), 'SKILL.md')
 
 /**
  * Copies every plugin's skills to `<pluginsDir>/<plugin>/skills/<folder>/` (design §2.3), replacing what an earlier
@@ -19,7 +25,7 @@ export async function installSkills(plugins: readonly Plugin[], pluginsDir: stri
     await mkdir(join(folder, 'skills'), { recursive: true, mode: 0o755 })
     for (const skill of plugin.skills) {
       // By the folder's name, as in the catalog: a skill's own name could be anything.
-      const copy = join(folder, 'skills', basename(skill.folder))
+      const copy = installedSkillFolder(pluginsDir, plugin.name, skill)
       await cp(skill.folder, copy, { recursive: true, dereference: true })
       await makeReadOnly(copy)
     }

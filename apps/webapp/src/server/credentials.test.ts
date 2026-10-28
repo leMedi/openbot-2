@@ -39,7 +39,7 @@ function procedurePaths(node: object, prefix = ''): string[] {
 describe('system credentials', () => {
   it('are never returned by any procedure', async () => {
     const { fake, plugin } = await hostedPlugin()
-    const server = await createTestServer({ tools: [recordingTool('runShell', 'shell').tool], catalog: await writeCatalog({ notes: plugin }) })
+    const server = await createTestServer({ tools: [recordingTool('runShell', 'shell').tool], catalog: await writeCatalog({ notes: plugin, recipes: { '.claude-plugin/plugin.json': { name: 'recipes', description: 'Cooking know-how' } } }) })
     servers.push(server)
     // Through a pasted URL, then the callback route.
     const pluginSteps = [...(await connectAccount(server, fake)), ...(await connectAccount(server, fake, { origin: 'http://localhost:3000' }))]
@@ -112,6 +112,8 @@ describe('system credentials', () => {
       'plugins.disconnectAccount': null,
       'plugins.grant': await server.client.plugins.grant({ name: 'notes', account: 'account1', botId: bot.id }),
       'plugins.revoke': await server.client.plugins.revoke({ name: 'notes', account: 'account1', botId: bot.id }),
+      'plugins.grantSkills': await server.client.plugins.grantSkills({ name: 'recipes', botId: bot.id }),
+      'plugins.revokeSkills': await server.client.plugins.revokeSkills({ name: 'recipes', botId: bot.id }),
       'models.list': await server.client.models.list(),
       'models.getSettings': await server.client.models.getSettings(),
       'models.updateSettings': settings,
