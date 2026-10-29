@@ -107,12 +107,14 @@ RUN cua-driver --version
 RUN printf "[org.xfce.mousepad.preferences.file]\nsession-restore='never'\n" > /usr/share/glib-2.0/schemas/90_openbot.gschema.override \
  && "$(find /usr/lib -type f -name glib-compile-schemas | head -n 1)" /usr/share/glib-2.0/schemas
 
-# Bots' desktop (design §4): a wallpaper (blue mountains) and tint2's dock with Files (Thunar), Chrome and Mousepad. The dock draws over a
+# Bots' desktop (design §4): a wallpaper (blue mountains) and tint2's dock with Files (Thunar, under a blue folder), Chrome and Mousepad. The dock draws over a
 # copy of the wallpaper: Xvfb shows no compositor's work in its framebuffer, so a dock needing one (Plank) shows black.
 # Chrome, however it's opened (the browser tools, the dock, a link), runs through openbot-browser with the bot's profile
 # and DevTools, under both of its desktop file names; links open in it and folders in Thunar.
 COPY desktop/tint2rc /etc/openbot/dock.tint2rc
 COPY desktop/wallpaper.png /usr/share/openbot/wallpaper.png
+COPY desktop/files.desktop /usr/share/openbot/files.desktop
+COPY desktop/folder.png /usr/share/openbot/folder.png
 COPY desktop/google-chrome.desktop /usr/local/share/applications/google-chrome.desktop
 COPY desktop/google-chrome.desktop /usr/local/share/applications/com.google.Chrome.desktop
 COPY desktop/mimeapps.list /etc/xdg/mimeapps.list

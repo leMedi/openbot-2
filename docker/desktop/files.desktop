@@ -1,0 +1,13 @@
+# The dock's Files launcher: Thunar under a blue folder (folder.png, drawn from folder.svg) rather than its theme icon.
+# Only the dock reads it; folders still open through Thunar's own desktop file.
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Files
+Comment=Browse the file system
+Exec=thunar %F
+Icon=/usr/share/openbot/folder.png
+Terminal=false
+StartupNotify=true
+StartupWMClass=Thunar
+Categories=System;FileTools;FileManager;
