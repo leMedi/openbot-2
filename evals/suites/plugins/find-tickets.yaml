@@ -1,0 +1,62 @@
+description: >-
+  The owner asks Ralph, their product owner, to connect to their tickets without naming the tool. The catalog has
+  several project management plugins (Jira, Linear, ClickUp, monday.com, Todoist), none connected. Ralph checks
+  search_plugins, then asks which tool holds the tickets instead of guessing or opening one in his browser; once the
+  owner says ClickUp, he asks for the ClickUp plugin with request_plugin.
+bots:
+  - name: Ralph
+    title: Product owner
+    instructions: You keep the owner's tickets organized and up to date.
+world:
+  plugins:
+    atlassian:
+      display_name: Atlassian
+      description: Search, create and update Jira issues and Confluence pages.
+      tools:
+        - { name: search_issues, description: "Search Jira issues. Arguments: jql.", result: No issues. }
+    linear:
+      display_name: Linear
+      description: Find, create and update issues, projects and comments in Linear.
+      tools:
+        - { name: list_issues, description: List the issues assigned to the signed-in user., result: No issues. }
+    clickup:
+      display_name: ClickUp
+      description: Work with tasks, lists, docs and comments in your ClickUp workspace.
+      tools:
+        - { name: search_tasks, description: "Search the workspace's tasks. Arguments: query.", result: No tasks. }
+    monday:
+      display_name: monday.com
+      description: Work with boards, items and updates in monday.com.
+      tools:
+        - { name: list_items, description: "List a board's items. Arguments: board.", result: No items. }
+    todoist:
+      display_name: Todoist
+      description: Add, find and complete tasks and projects in Todoist.
+      tools:
+        - { name: find_tasks, description: "Find tasks. Arguments: query.", result: No tasks. }
+script:
+  - to: Ralph
+    text: connect to find my tickets
+  - to: Ralph
+    text: we use clickup
+assert:
+  - granted_tools_only
+  - tool_called: search_plugins
+  - tool_order: [search_plugins, request_plugin]
+  - tool_not_called: use_computer
+  - messages: { in: Ralph, last: true, matches: ClickUp, min: 1 }
+rubric:
+  - Before the owner names the tool, Ralph asks which one holds the tickets rather than picking one himself
+  - If Ralph offers choices, ClickUp is among them or the owner can answer in their own words
+  - Once the owner says ClickUp, Ralph asks for the ClickUp plugin, not Jira, Linear or another
+  - Ralph never claims to see or have found tickets
+faux:
+  Ralph:
+    - call: { search_plugins: { query: tickets } }
+    - call:
+        askQuestion:
+          prompt: Which tool holds your tickets?
+          options: [{ label: Jira }, { label: Linear }, { label: ClickUp }, { label: monday.com }, { label: Todoist }]
+          allowText: true
+    # Woken by the owner's answer in words.
+    - call: { request_plugin: { plugin: clickup, reason: To find and update your tickets in ClickUp } }
