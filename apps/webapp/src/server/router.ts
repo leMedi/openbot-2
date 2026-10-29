@@ -26,6 +26,18 @@ import {
   listChatSummaries,
   markChatRead,
   setPinnedChats,
+  createSection,
+  deleteSection,
+  hideChats,
+  InvalidSectionError,
+  listSections,
+  moveChats,
+  NoSuchSectionError,
+  renameSection,
+  reorderSections,
+  showChats,
+  searchFiles,
+  searchMessages,
   createBot,
   closePluginReconnects,
   decidePluginRequest,
@@ -88,7 +100,7 @@ import { implement, ORPCError } from '@orpc/server'
 import { generateContentDisposition } from '@orpc/standard-server'
 import { chatInfoOf, publishChat, type ServerContext } from './context.ts'
 import { screenStreamUrl } from './screen-stream.ts'
-import { toAuditEntryInfo, toBotInfo, toFactInfo, toMessageInfo, toPluginAccountInfo, toPluginInfo, toRoutineInfo, toRoutineRunInfo } from './views.ts'
+import { toAuditEntryInfo, toFileHit, toMessageHit, toSectionInfo, toBotInfo, toFactInfo, toMessageInfo, toPluginAccountInfo, toPluginInfo, toRoutineInfo, toRoutineRunInfo } from './views.ts'
 
 const os = implement(contract).$context<ServerContext>()
 
@@ -238,6 +250,27 @@ async function assertCanRun(context: ServerContext, bot: BotWithChat) {
 
 /** `work`'s result, with a missing chat answered as NOT_FOUND. */
 const chatMustExist = <T>(work: Promise<T>) => answering(() => work, [[ChatNotFoundError, 'NOT_FOUND']])
+
+/** `work`'s result, with a missing section answered as NOT_FOUND and a change the sidebar can't make as BAD_REQUEST. */
+const sectionMustFit = <T>(work: Promise<T>) =>
+  answering(() => work, [
+    [NoSuchSectionError, 'NOT_FOUND'],
+    [InvalidSectionError, 'BAD_REQUEST'],
+  ])
+
+/** Tells every tab about the chats `changed` in the sidebar; returns every chat. */
+async function publishChats(context: ServerContext, changed: readonly string[]) {
+  const chats = (await listChatSummaries(context.db)).map((summary) => chatInfoOf(context, summary))
+  for (const chat of chats) if (changed.includes(chat.id)) context.bus.publish({ type: 'chat.updated', chat })
+  return chats
+}
+
+/** Tells every tab the sidebar's sections; returns them. */
+async function publishSections(context: ServerContext) {
+  const sections = (await listSections(context.db)).map(toSectionInfo)
+  context.bus.publish({ type: 'sections.updated', sections })
+  return sections
+}
 
 /** `work`'s result, with members a group chat can't have answered as BAD_REQUEST. */
 const membersMustFit = <T>(work: Promise<T>) => answering(() => work, [[GroupMembersError, 'BAD_REQUEST']])
@@ -487,6 +520,33 @@ export const router = os.router({
     }),
   },
 
+  sections: {
+    list: os.sections.list.handler(async ({ context }) => (await listSections(context.db)).map(toSectionInfo)),
+
+    create: os.sections.create.handler(async ({ context, input }) => {
+      const section = await sectionMustFit(createSection(context.db, input.name))
+      await publishSections(context)
+      return toSectionInfo(section)
+    }),
+
+    rename: os.sections.rename.handler(async ({ context, input }) => {
+      const section = await sectionMustFit(renameSection(context.db, input.sectionId, input.name))
+      await publishSections(context)
+      return toSectionInfo(section)
+    }),
+
+    reorder: os.sections.reorder.handler(async ({ context, input }) => {
+      await sectionMustFit(reorderSections(context.db, input.sectionIds))
+      return publishSections(context)
+    }),
+
+    delete: os.sections.delete.handler(async ({ context, input }) => {
+      const moved = await sectionMustFit(deleteSection(context.db, input.sectionId))
+      await publishSections(context)
+      await publishChats(context, moved)
+    }),
+  },
+
   chats: {
     list: os.chats.list.handler(async ({ context }) => (await listChatSummaries(context.db)).map((summary) => chatInfoOf(context, summary))),
 
@@ -495,12 +555,23 @@ export const router = os.router({
       return (await publishChat(context, input.chatId))!
     }),
 
-    setPinned: os.chats.setPinned.handler(async ({ context, input }) => {
-      const changed = await chatMustExist(setPinnedChats(context.db, input.chatIds))
-      const chats = (await listChatSummaries(context.db)).map((summary) => chatInfoOf(context, summary))
-      for (const chat of chats) if (changed.includes(chat.id)) context.bus.publish({ type: 'chat.updated', chat })
-      return chats
+    setPinned: os.chats.setPinned.handler(async ({ context, input }) =>
+      publishChats(context, await chatMustExist(setPinnedChats(context.db, input.chatIds))),
+    ),
+
+    search: os.chats.search.handler(async ({ context, input }) => {
+      const [messages, files] = await Promise.all([searchMessages(context.db, input.query), searchFiles(context.db, input.query)])
+      return { messages: messages.map(toMessageHit), files: files.map(toFileHit) }
     }),
+
+    move: os.chats.move.handler(async ({ context, input }) => {
+      await sectionMustFit(chatMustExist(moveChats(context.db, input.chatIds, input.sectionId)))
+      return publishChats(context, input.chatIds)
+    }),
+
+    hide: os.chats.hide.handler(async ({ context, input }) => publishChats(context, await chatMustExist(hideChats(context.db, input.chatIds)))),
+
+    show: os.chats.show.handler(async ({ context, input }) => publishChats(context, await chatMustExist(showChats(context.db, input.chatIds)))),
 
     messages: os.chats.messages.handler(async ({ context, input }) => {
       if (!(await getChat(context.db, input.chatId))) throw new ORPCError('NOT_FOUND', { message: 'No such chat' })

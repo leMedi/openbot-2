@@ -53,6 +53,8 @@ describe('unread chats', () => {
         members: [],
         speaking: null,
         pinnedPosition: null,
+        sectionId: 'unassigned',
+        hidden: false,
         unread: false,
         waitingFor: null,
         lastMessage: null,

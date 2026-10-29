@@ -390,6 +390,12 @@ The UI copies Grok Bot's; the full spec is [`grok-bot/05-ui.md`](grok-bot/05-ui.
 - Grok's copy, reworded where it uses terms GLOSSARY.md avoids: the Routines empty state reads "Routines wake {bot} on a schedule to follow an instruction, such as sending you a morning digest." (Grok: "recurring tasks this agent runs").
 - Grok's visual language: black/white primary buttons, blue only for links/focus/unread, no shadows in dark mode, autosave instead of Save buttons, letter keys for question cards.
 
+As built (#80), sidebar sections and the command palette:
+
+- **Sections** are stored on the server (`sections`, with a seeded `unassigned` row that only keeps Unassigned's place; `chats.section_id`, null for Unassigned; `chats.hidden_at`). Order: pinned chats, then the owner's sections and Unassigned in their order (a new section goes to the top; Unassigned moves up and down but can't be renamed or deleted), then **Hidden**, always last, folded by default and quiet. With no section and nothing hidden the list is flat. Deleting a section moves its chats to Unassigned; hiding unpins a chat and keeps its section, so "Show in sidebar" puts it back; moving a hidden chat shows it. Which sections are folded, and the ⌘B rail (88px, forced below 760px), are remembered per browser.
+- **Multi-select and drag** as Grok's: ⌘/Ctrl-click, Shift-click, a header of Move ▾ / Delete / Clear, dragging a row (or the selection) onto a section. Pinned rows only reorder the pinned chats.
+- **⌘K palette**: tabs All · Messages · Chats · Files · Routines · Actions. Messages are found by `chats.search`, an FTS5 index over every chat's messages (`messages_fts`, kept by triggers), each word matched by prefix; files by name. A message or file hit opens its chat scrolled to the message, highlighted a moment (`?message=`); a routine opens its bot's Routines pane (`?routine=`). Shortcuts a web page can claim: ⌘K, ⌘⇧F (Chats tab), ⌘B, ⌥↑/⌥↓ (previous or next chat shown, skipping folded sections and Hidden), ⌘, (Settings); none but ⌘K while typing. Grok's ⌘1–9 quick picks are left out: the browser owns those keys.
+
 ---
 
 ## 7. Code layout

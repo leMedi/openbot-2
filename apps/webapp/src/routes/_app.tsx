@@ -1,5 +1,6 @@
 import { Outlet, createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
+import { CommandPalette } from '../components/command-palette.tsx'
 import { Sidebar } from '../components/sidebar.tsx'
 import { api, errorMessage } from '../lib/api.ts'
 import { LiveProvider } from '../lib/live.tsx'
@@ -33,6 +34,7 @@ function AppShell() {
           <Outlet />
         </main>
       </div>
+      <CommandPalette />
     </LiveProvider>
   )
 }

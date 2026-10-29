@@ -72,6 +72,9 @@ describe('system credentials', () => {
     const questions = (await server.client.chats.messages({ chatId: bot.chatId })).filter((message) => message.card?.type === 'question')
     const question = questions.find((message) => message.text === 'Which one?')!
     const dismissed = questions.find((message) => message.text === 'Why?')!
+    // Answered before the owner moves on, which dismisses the open questions.
+    const answered = await server.client.chats.answer({ messageId: question.id, answer: { option: 0 } })
+    const dismissedNow = await server.client.chats.dismiss({ messageId: dismissed.id })
     server.providers.script(callsTools(['use_computer', { goal: 'Look at the shop', reason: 'Testing' }]), callsTools(['needs_help', { instruction: 'Sign in' }]))
     await server.client.chats.send({ chatId: bot.chatId, text: 'Look at the shop' })
     await expect.poll(async () => (await server.client.chats.messages({ chatId: bot.chatId })).length).toBe(7)
@@ -97,6 +100,7 @@ describe('system credentials', () => {
     const routineRuns = await server.client.routines.runs({ botId: bot.id, routineId: routine.id })
     const routineList = await server.client.routines.list({ botId: bot.id })
     await server.client.routines.delete({ botId: bot.id, routineId: routine.id })
+    const section = await server.client.sections.create({ name: 'Work' })
     server.providers.script(...[1, 2, 3].flatMap(() => [callsTools(['sendMessage', { text: 'OK' }]), endsSilently()]))
 
     // Each procedure that returns data, called once it has something to return. A new procedure fails the check
@@ -160,10 +164,19 @@ describe('system credentials', () => {
       'chats.messages': await server.client.chats.messages({ chatId: bot.chatId }),
       'chats.send': sent,
       'chats.attachment': await (await server.client.chats.attachment({ messageId: sent.id, attachmentId: sent.attachments[0]!.id })).body.text(),
-      'chats.answer': await server.client.chats.answer({ messageId: question.id, answer: { option: 0 } }),
-      'chats.dismiss': await server.client.chats.dismiss({ messageId: dismissed.id }),
+      'chats.answer': answered,
+      'chats.dismiss': dismissedNow,
       'chats.handBack': await server.client.chats.handBack({ messageId: takeOver.id, outcome: 'done' }),
       'chats.decidePluginRequest': await server.client.chats.decidePluginRequest({ messageId: pluginRequest.id, decision: { outcome: 'granted', account: 'account1' } }),
+      'chats.search': await server.client.chats.search({ query: 'hello' }),
+      'chats.move': await server.client.chats.move({ chatIds: [bot.chatId], sectionId: 'unassigned' }),
+      'chats.hide': await server.client.chats.hide({ chatIds: [bot.chatId] }),
+      'chats.show': await server.client.chats.show({ chatIds: [bot.chatId] }),
+      'sections.create': section,
+      'sections.list': await server.client.sections.list(),
+      'sections.rename': await server.client.sections.rename({ sectionId: section.id, name: 'Clients' }),
+      'sections.reorder': await server.client.sections.reorder({ sectionIds: (await server.client.sections.list()).map((section) => section.id).reverse() }),
+      'sections.delete': null,
       'groups.create': group,
       'groups.update': await server.client.groups.update({ chatId: group.chat.id, title: 'Team' }),
       'groups.delete': null,

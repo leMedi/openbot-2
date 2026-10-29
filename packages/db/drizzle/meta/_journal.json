@@ -127,6 +127,20 @@
       "when": 1793212798377,
       "tag": "0017_plugin_accounts_needs_reconnect",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1793272868102,
+      "tag": "0018_sidebar_sections",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1793273063497,
+      "tag": "0019_message_search",
+      "breakpoints": true
     }
   ]
 }

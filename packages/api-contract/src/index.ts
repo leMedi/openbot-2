@@ -244,6 +244,10 @@ export const chat = z.object({
   speaking: z.string().nullable(),
   /** Place among pinned chats, 0 first; null when not pinned. Pinned chats sit above the rest. */
   pinnedPosition: z.number().int().nonnegative().nullable(),
+  /** The section the chat sits in (`unassignedSectionId` for none); a hidden or pinned chat goes back there. */
+  sectionId: z.string(),
+  /** The owner hid it: it sits in the sidebar's Hidden section, never pinned. */
+  hidden: z.boolean(),
   /** A bot posted since the owner last opened the chat. */
   unread: z.boolean(),
   /**
@@ -255,6 +259,38 @@ export const chat = z.object({
   lastMessage: message.pick({ author: true, authorName: true, text: true, attachments: true, botMessage: true, createdAt: true }).nullable(),
 })
 export type ChatInfo = z.infer<typeof chat>
+
+/** The sidebar's Unassigned section, where chats in no section of the owner's sit. */
+export const unassignedSectionId = 'unassigned'
+
+/** A sidebar section: one the owner named, or Unassigned (`unassignedSectionId`, named null). */
+export const section = z.object({ id: z.string(), name: z.string().nullable() })
+export type SectionInfo = z.infer<typeof section>
+
+/** The longest name a section can have (the server enforces the same). */
+export const maxSectionNameLength = 40
+
+/** A section's name as the owner gives it (the server says when it is blank). */
+const sectionName = z.string().max(200)
+
+/** Chats one sidebar action applies to, such as a multi-select's. */
+const chatIds = z.array(z.string()).min(1).max(500)
+
+/** Who posted a search hit's message, where and when: as a message shows it. */
+const hitMessage = message.pick({ chatId: true, author: true, authorName: true, botMessage: true, createdAt: true }).extend({ messageId: z.string() })
+
+/** A message the palette's search found, with a snippet of its text around the matched words. */
+export const messageHit = hitMessage.extend({
+  snippet: z.array(z.object({ text: z.string(), match: z.boolean() })),
+})
+export type MessageHit = z.infer<typeof messageHit>
+
+/** A file the palette's search found by its name. */
+export const fileHit = hitMessage.extend({ attachment })
+export type FileHit = z.infer<typeof fileHit>
+
+export const searchResults = z.object({ messages: z.array(messageHit), files: z.array(fileHit) })
+export type SearchResults = z.infer<typeof searchResults>
 
 /** A group chat is the owner and at least this many bots (the server enforces the same)... */
 export const minGroupMembers = 2
@@ -357,6 +393,8 @@ export const liveEvent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('message.created'), message }),
   /** A chat's sidebar state changed: a message, a read, a pin; `chat` is all of it as it is now. */
   z.object({ type: z.literal('chat.updated'), chat }),
+  /** The sidebar's sections changed: every section, top first. */
+  z.object({ type: z.literal('sections.updated'), sections: z.array(section) }),
   /** A message changed, e.g. the owner answered its card; `message` is all of it as it is now. */
   z.object({ type: z.literal('message.updated'), message }),
   /** The owner's time zone changed (or was first detected); scheduled jobs reschedule in it. */
@@ -765,6 +803,35 @@ export const contract = {
       })
       .input(z.object({ chatIds: z.array(z.string()).max(200) }))
       .output(z.array(chat)),
+    search: oc
+      .route({
+        method: 'GET',
+        path: '/search',
+        summary:
+          "Messages in every chat with a word starting with each word of `query`, and files whose name has each word, newest first (50 of each)",
+      })
+      .input(z.object({ query: z.string().max(500) }))
+      .output(searchResults),
+    move: oc
+      .route({
+        method: 'PUT',
+        path: '/chats/section',
+        summary: 'Move chats to a section (Unassigned for none), showing any of them that were hidden; returns every chat',
+      })
+      .input(z.object({ chatIds, sectionId: z.string() }))
+      .output(z.array(chat)),
+    hide: oc
+      .route({
+        method: 'POST',
+        path: '/chats/hide',
+        summary: "Hide chats: they move to the sidebar's Hidden section, unpinned, keeping their section; returns every chat",
+      })
+      .input(z.object({ chatIds }))
+      .output(z.array(chat)),
+    show: oc
+      .route({ method: 'POST', path: '/chats/show', summary: 'Show hidden chats again, each back in its section; returns every chat' })
+      .input(z.object({ chatIds }))
+      .output(z.array(chat)),
     messages: oc
       .route({ method: 'GET', path: '/chats/{chatId}/messages', summary: "A chat's messages, oldest first" })
       .input(z.object({ chatId: z.string() }))
@@ -837,6 +904,24 @@ export const contract = {
         }),
       )
       .output(message),
+  },
+  sections: {
+    list: oc.route({ method: 'GET', path: '/sections', summary: "The sidebar's sections, top first, Unassigned among them" }).output(z.array(section)),
+    create: oc
+      .route({ method: 'POST', path: '/sections', summary: 'Add a section at the top' })
+      .input(z.object({ name: sectionName }))
+      .output(section),
+    rename: oc
+      .route({ method: 'PATCH', path: '/sections/{sectionId}', summary: 'Rename a section; Unassigned has no name to change' })
+      .input(z.object({ sectionId: z.string(), name: sectionName }))
+      .output(section),
+    reorder: oc
+      .route({ method: 'PUT', path: '/sections/order', summary: 'Put every section, Unassigned included, in this order' })
+      .input(z.object({ sectionIds: z.array(z.string()).max(500) }))
+      .output(z.array(section)),
+    delete: oc
+      .route({ method: 'DELETE', path: '/sections/{sectionId}', summary: "Delete a section; its chats go to Unassigned. Unassigned can't be deleted" })
+      .input(z.object({ sectionId: z.string() })),
   },
   groups: {
     create: oc

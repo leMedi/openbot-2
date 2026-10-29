@@ -110,6 +110,20 @@ export const bots = sqliteTable(
   (table) => [uniqueIndex('bots_name_unique').on(sql`lower(${table.name})`)],
 )
 
+/** The sidebar's Unassigned section: chats in no section of the owner's sit there. Its row only keeps its place. */
+export const unassignedSectionId = 'unassigned'
+
+/** The sidebar's sections, in the owner's order: the ones they named, and Unassigned (`unassignedSectionId`). */
+export const sections = sqliteTable('sections', {
+  id: id(),
+  /** Null for Unassigned only. */
+  name: text('name'),
+  /** 0 is the top, just below pinned chats. */
+  position: integer('position').notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+})
+
 export const chatKinds = ['dm', 'group'] as const
 export type ChatKind = (typeof chatKinds)[number]
 
@@ -139,6 +153,10 @@ export const chats = sqliteTable(
       .default(sql`'{}'`),
     /** Sidebar order of pinned chats; null when not pinned. */
     pinnedPosition: integer('pinned_position'),
+    /** The owner's section the chat sits in; null for Unassigned. A hidden chat keeps it, to go back there when shown. */
+    sectionId: text('section_id').references(() => sections.id, { onDelete: 'set null' }),
+    /** When the owner hid the chat (moved it to the sidebar's Hidden section); null when shown. */
+    hiddenAt: integer('hidden_at', { mode: 'timestamp_ms' }),
     /** The newest message the owner has seen; a bot's message after it, other than one between bots, makes the chat unread. Null: none seen yet. */
     lastReadMessageId: text('last_read_message_id'),
     createdAt: createdAt(),
@@ -434,6 +452,7 @@ export type Setting = typeof settings.$inferSelect
 export type SystemCredential = typeof systemCredentials.$inferSelect
 export type Bot = typeof bots.$inferSelect
 export type NewBot = typeof bots.$inferInsert
+export type Section = typeof sections.$inferSelect
 export type Chat = typeof chats.$inferSelect
 export type NewChat = typeof chats.$inferInsert
 export type Message = typeof messages.$inferSelect

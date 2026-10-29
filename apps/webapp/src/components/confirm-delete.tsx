@@ -96,3 +96,44 @@ export function ConfirmDeleteRoutine({ routine, onCancel, onDeleted }: { routine
     </ConfirmDelete>
   )
 }
+
+/** Asks before deleting several chats for good, then deletes them one after another: a DM with its bot (ADR 0009). */
+export function ConfirmDeleteChats({
+  chats,
+  onCancel,
+  onDeleted,
+}: {
+  /** Each chat, with its bot for a DM. */
+  chats: readonly { chatId: string; bot?: BotInfo }[]
+  onCancel: () => void
+  onDeleted: () => void
+}) {
+  const bots = chats.filter((chat) => chat.bot).length
+  return (
+    <ConfirmDelete
+      title={`Delete ${chats.length} chats?`}
+      // The ones deleted before a failure leave the sidebar through their live events.
+      remove={async () => {
+        for (const chat of chats) {
+          if (chat.bot) await api().bots.delete({ botId: chat.bot.id })
+          else await api().groups.delete({ chatId: chat.chatId })
+        }
+      }}
+      onCancel={onCancel}
+      onDeleted={onDeleted}
+    >
+      {bots > 0 && `This permanently deletes ${bots === 1 ? 'a bot' : `${bots} bots`} with ${bots === 1 ? 'its DM' : 'their DMs'} and history. `}
+      {bots < chats.length && `Group chats lose their messages and files; their members stay. `}
+      This can't be undone.
+    </ConfirmDelete>
+  )
+}
+
+/** Asks before deleting a sidebar section, then deletes it; its chats go to Unassigned. */
+export function ConfirmDeleteSection({ name, remove, onCancel, onDeleted }: { name: string; remove: () => Promise<void>; onCancel: () => void; onDeleted: () => void }) {
+  return (
+    <ConfirmDelete title={`Delete “${name}”?`} remove={remove} onCancel={onCancel} onDeleted={onDeleted}>
+      Its chats move to Unassigned. No chat is deleted.
+    </ConfirmDelete>
+  )
+}

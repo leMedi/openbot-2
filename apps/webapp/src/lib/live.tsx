@@ -1,4 +1,4 @@
-import { type BotInfo, type ChatInfo, deletedAuthorName, type LiveEvent, type MessageInfo, type StampedEvent } from '@openbot/api-contract'
+import { type BotInfo, type ChatInfo, deletedAuthorName, type LiveEvent, type MessageInfo, type SectionInfo, type StampedEvent, unassignedSectionId } from '@openbot/api-contract'
 import { type ReactNode, createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { api } from './api.ts'
 
@@ -47,6 +47,8 @@ export class LiveStore {
   /** Every chat's sidebar state (pinned, unread, waiting), by chat id. */
   chats: ReadonlyMap<string, ChatInfo> = new Map()
   messages: ReadonlyMap<string, MessageInfo[]> = new Map()
+  /** The sidebar's sections, top first, Unassigned among them. */
+  sections: readonly SectionInfo[] = [{ id: unassignedSectionId, name: null }]
   /** What the owner has typed but not sent, per chat; kept in this browser's storage, or while the app is open if it's blocked. */
   drafts: ReadonlyMap<string, string>
   connected = false
@@ -161,8 +163,61 @@ export class LiveStore {
   }
 
   async #refetchChats() {
-    const chats = await api().chats.list()
+    this.#setChats(await api().chats.list())
+  }
+
+  #setChats(chats: readonly ChatInfo[]) {
     this.#update(() => (this.chats = new Map(chats.map((chat) => [chat.id, chat]))))
+  }
+
+  #setSections(sections: readonly SectionInfo[]) {
+    this.#update(() => (this.sections = sections))
+  }
+
+  /** Adds a section at the top of the sidebar. */
+  async createSection(name: string): Promise<SectionInfo> {
+    const section = await api().sections.create({ name })
+    this.#setSections([section, ...this.sections.filter((entry) => entry.id !== section.id)])
+    return section
+  }
+
+  async renameSection(sectionId: string, name: string) {
+    const section = await api().sections.rename({ sectionId, name })
+    this.#setSections(this.sections.map((entry) => (entry.id === section.id ? section : entry)))
+  }
+
+  /** Puts every section, Unassigned included, in the order of `sectionIds`: shown at once, then saved. */
+  async reorderSections(sectionIds: string[]) {
+    const byId = new Map(this.sections.map((section) => [section.id, section]))
+    this.#setSections(sectionIds.flatMap((id) => byId.get(id) ?? []))
+    try {
+      this.#setSections(await api().sections.reorder({ sectionIds }))
+    } catch (error) {
+      this.#setSections(await api().sections.list().catch(() => [...byId.values()]))
+      throw error
+    }
+  }
+
+  /** Deletes a section; its chats go to Unassigned. */
+  async deleteSection(sectionId: string) {
+    await api().sections.delete({ sectionId })
+    this.#setSections(this.sections.filter((section) => section.id !== sectionId))
+    this.#setChats([...this.chats.values()].map((chat) => (chat.sectionId === sectionId ? { ...chat, sectionId: unassignedSectionId } : chat)))
+  }
+
+  /** Moves chats to a section (Unassigned for none), showing any hidden ones. */
+  async moveChats(chatIds: string[], sectionId: string) {
+    this.#setChats(await api().chats.move({ chatIds, sectionId }))
+  }
+
+  /** Hides chats: they go to the sidebar's Hidden section, unpinned. */
+  async hideChats(chatIds: string[]) {
+    this.#setChats(await api().chats.hide({ chatIds }))
+  }
+
+  /** Shows hidden chats again, each back in its section. */
+  async showChats(chatIds: string[]) {
+    this.#setChats(await api().chats.show({ chatIds }))
   }
 
   setDraft(chatId: string, text: string) {
@@ -259,18 +314,22 @@ export class LiveStore {
         return this.setChat(event.chat)
       case 'chat.deleted':
         return this.removeChat(event.chatId)
+      case 'sections.updated':
+        return this.#setSections(event.sections)
     }
   }
 
   async #refetch() {
-    const [bots, summaries, chats] = await Promise.all([
+    const [bots, summaries, sections, chats] = await Promise.all([
       api().bots.list(),
       api().chats.list(),
+      api().sections.list(),
       Promise.all([...this.messages.keys()].map(async (chatId) => [chatId, await api().chats.messages({ chatId })] as const)),
     ])
     this.#update(() => {
       this.bots = bots
       this.chats = new Map(summaries.map((chat) => [chat.id, chat]))
+      this.sections = sections
       for (const [chatId, loaded] of chats) {
         this.#setMessages(chatId, mergeMessages(this.messages.get(chatId) ?? [], loaded))
       }

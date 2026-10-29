@@ -1,7 +1,7 @@
-import { type AuditEntryInfo, type BotInfo, type CardInfo, type ChatInfo, type FactInfo, deletedAuthorName, type MessageInfo, type PluginAccountInfo, type PluginInfo, pluginIconPath, type RoutineInfo, type RoutineRunInfo } from '@openbot/api-contract'
+import { type AuditEntryInfo, type BotInfo, type CardInfo, type ChatInfo, type FactInfo, deletedAuthorName, type MessageInfo, type PluginAccountInfo, type PluginInfo, pluginIconPath, type RoutineInfo, type RoutineRunInfo, type SectionInfo, type MessageHit, type FileHit, unassignedSectionId } from '@openbot/api-contract'
 import type { BotStatus, PluginAccountSummary } from '@openbot/agent'
-import { type BotWithChat, type ChatSummary, type RoutineState, factSourceName, handBackOutcomeOf, isPluginReconnectCard, isPluginRequestCard, isQuestionCard, pluginReconnectOutcomeOf, pluginRequestDecisionOf, isRoutineChangeCard, isTakeOverCard, questionAnswerOf, questionDismissedOf } from '@openbot/core'
-import type { AuditEntry, Fact, Message, RoutineRun } from '@openbot/db'
+import { type BotWithChat, type ChatSummary, type FileMatch, type MessageMatch, type RoutineState, factSourceName, handBackOutcomeOf, isPluginReconnectCard, isPluginRequestCard, isQuestionCard, pluginReconnectOutcomeOf, pluginRequestDecisionOf, isRoutineChangeCard, isTakeOverCard, questionAnswerOf, questionDismissedOf } from '@openbot/core'
+import type { AuditEntry, Fact, Message, RoutineRun, Section } from '@openbot/db'
 import type { Plugin } from '@openbot/plugins'
 
 /**
@@ -50,6 +50,8 @@ export function toChatInfo(chat: ChatSummary, speaking: string | null): ChatInfo
     members: chat.members,
     speaking,
     pinnedPosition: chat.pinnedPosition,
+    sectionId: chat.sectionId ?? unassignedSectionId,
+    hidden: chat.hiddenAt !== null,
     unread: chat.unread,
     waitingFor: chat.waitingFor,
     lastMessage: last && {
@@ -61,6 +63,24 @@ export function toChatInfo(chat: ChatSummary, speaking: string | null): ChatInfo
       createdAt: last.createdAt,
     },
   }
+}
+
+/** Who posted a search hit's message, where and when. */
+function hitOf(message: Message) {
+  const { chatId, author, authorName, botMessage, createdAt } = toMessageInfo(message)
+  return { messageId: message.id, chatId, author, authorName, botMessage, createdAt }
+}
+
+export function toMessageHit(hit: MessageMatch): MessageHit {
+  return { ...hitOf(hit.message), snippet: hit.snippet }
+}
+
+export function toFileHit(hit: FileMatch): FileHit {
+  return { ...hitOf(hit.message), attachment: hit.attachment }
+}
+
+export function toSectionInfo(section: Section): SectionInfo {
+  return { id: section.id, name: section.name }
 }
 
 export function toBotInfo(bot: BotWithChat, { working, error }: BotStatus): BotInfo {

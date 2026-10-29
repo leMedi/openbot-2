@@ -9,9 +9,11 @@ import { MemoryPane } from '../../components/memory-pane.tsx'
 import { ProfilePane } from '../../components/profile-pane.tsx'
 import { RoutinesPane, type RoutineToOpen } from '../../components/routines-pane.tsx'
 import { FullscreenScreen, ScreenPane } from '../../components/screen-pane.tsx'
+import { type ChatSearch, chatSearch } from '../../lib/chat-search.ts'
 import { useLive } from '../../lib/live.tsx'
 
 export const Route = createFileRoute('/_app/bots/$botId')({
+  validateSearch: chatSearch,
   component: Dm,
 })
 
@@ -21,6 +23,7 @@ type Pane = 'screen' | 'profile' | 'routines' | 'memory' | 'access'
 /** The DM between the owner and one bot, in Grok Bot's layout, with its Screen, Profile, Routines, Memory or Access pane beside it. */
 function Dm() {
   const { botId } = Route.useParams()
+  const search = Route.useSearch()
   const live = useLive()
   const navigate = useNavigate()
   const [pane, setPane] = useState<Pane | null>('screen')
@@ -32,6 +35,13 @@ function Dm() {
     setFullscreen(false)
     setRoutineToOpen(undefined)
   }, [botId])
+  // A routine the palette opened: shown once, then out of the URL.
+  useEffect(() => {
+    if (!search.routine) return
+    setRoutineToOpen({ routineId: search.routine, requestedAt: Date.now() })
+    setPane('routines')
+    void navigate({ to: '.', search: (previous: ChatSearch) => ({ ...previous, routine: undefined }), replace: true })
+  }, [search.routine, navigate])
   const bot = live.bots?.find((entry) => entry.id === botId)
   const waitingTakeOver = bot && [...(live.messages.get(bot.chatId) ?? [])].reverse().find((message) => message.card?.type === 'take_over' && !message.card.outcome)
   function closeFullscreen() {
@@ -47,6 +57,8 @@ function Dm() {
         <ChatView
           key={bot.chatId}
           chatId={bot.chatId}
+          focusMessage={search.message}
+          onFocused={() => void navigate({ to: '.', search: (previous: ChatSearch) => ({ ...previous, message: undefined }), replace: true })}
           header={
             <DmHeader
               bot={bot}

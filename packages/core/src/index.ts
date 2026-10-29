@@ -39,6 +39,20 @@ export {
   setPinnedChats,
 } from './chats.ts'
 export {
+  createSection,
+  deleteSection,
+  hideChats,
+  InvalidSectionError,
+  listSections,
+  maxSectionNameLength,
+  moveChats,
+  NoSuchSectionError,
+  renameSection,
+  reorderSections,
+  showChats,
+} from './sections.ts'
+export { type FileMatch, maxSearchHits, type MessageMatch, searchFiles, searchMessages, type SnippetPart } from './search.ts'
+export {
   AllowAllOrchestrator,
   type BotOrchestratorModes,
   listAuditEntries,

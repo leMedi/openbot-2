@@ -13,6 +13,9 @@ import { TakeOverCard } from './take-over-card.tsx'
 /** How close to the end still counts as reading the latest messages. */
 const followThresholdPx = 80
 
+/** How long a message the palette opened stays highlighted. */
+const highlightMs = 2000
+
 /** A message the owner sent that the server hasn't returned yet, or that failed. */
 type Outgoing = {
   key: string
@@ -64,6 +67,8 @@ export function ChatView({
   showAuthors,
   onScreen,
   onOpenRoutine,
+  focusMessage,
+  onFocused,
 }: {
   chatId: string
   /** The sticky bar at the top of the transcript. */
@@ -84,6 +89,10 @@ export function ChatView({
   onScreen?: () => void
   /** Opens a routine in the Routines pane, from a timeline row's clock chip; DMs only. */
   onOpenRoutine?: (routineId: string) => void
+  /** A message to scroll to and highlight once the chat has loaded, e.g. a search hit the palette opened. */
+  focusMessage?: string
+  /** The view went to `focusMessage` (or it isn't in this chat). */
+  onFocused?: () => void
 }) {
   const live = useLive()
   const [loaded, setLoaded] = useState(false)
@@ -202,6 +211,26 @@ export function ChatView({
     return () => observer.disconnect()
   }, [])
 
+  // Goes to the message the palette opened, highlighting it a moment; declared after following, so it wins.
+  const [highlighted, setHighlighted] = useState<string>()
+  const focused = useRef(onFocused)
+  focused.current = onFocused
+  useLayoutEffect(() => {
+    if (!loaded || !focusMessage) return
+    const element = scroller.current?.querySelector(`[data-message-id="${CSS.escape(focusMessage)}"]`)
+    if (element) {
+      following.current = false
+      element.scrollIntoView({ block: 'center' })
+      setHighlighted(focusMessage)
+    }
+    focused.current?.()
+  }, [loaded, focusMessage])
+  useEffect(() => {
+    if (!highlighted) return
+    const timer = setTimeout(() => setHighlighted(undefined), highlightMs)
+    return () => clearTimeout(timer)
+  }, [highlighted])
+
   function jumpToEnd() {
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: reduce ? 'auto' : 'smooth' })
@@ -253,6 +282,7 @@ export function ChatView({
             typing={typing}
             showAuthors={showAuthors}
             loading={!loaded && !error}
+            highlighted={highlighted}
             onResend={(entry) => void send(entry.text, entry.files, entry.key)}
             onDiscard={(entry) => setOutgoing((list) => list.filter((other) => other.key !== entry.key))}
             onAnswered={(message) => live.addMessage(message)}
@@ -300,6 +330,7 @@ function MessageList({
   typing,
   showAuthors,
   loading,
+  highlighted,
   onResend,
   onDiscard,
   onAnswered,
@@ -311,6 +342,8 @@ function MessageList({
   typing: BotInfo | undefined
   showAuthors: boolean
   loading: boolean
+  /** The message the palette opened, highlighted a moment. */
+  highlighted: string | undefined
   onResend: (entry: Outgoing) => void
   onDiscard: (entry: Outgoing) => void
   /** A card was answered, dismissed, handed back or decided: the server's message as it is now. */
@@ -322,114 +355,124 @@ function MessageList({
   const newestOpenQuestion = [...rows]
     .reverse()
     .find((row) => row.message?.card?.type === 'question' && !row.message.card.answer && !row.message.card.dismissed)?.key
+  function rowElement(row: Row, index: number) {
+    // Consecutive messages of one author sit close together, with tighter corners on the sender's side.
+    const continuesPrevious = rows[index - 1]?.author === row.author
+    const continuesNext = rows[index + 1]?.author === row.author
+    const failed = row.outgoing?.error
+    const card = row.message?.card
+    if (card?.type === 'take_over') {
+      return (
+        <CardRow key={row.key} row={row} continuesNext={continuesNext}>
+          <TakeOverCard
+            message={row.message!}
+            card={card}
+            botName={row.authorName}
+            onTakeOver={() => onScreen?.()}
+            onOpenScreen={() => onScreen?.()}
+            onHandedBack={onAnswered}
+          />
+        </CardRow>
+      )
+    }
+    if (card?.type === 'plugin_request') {
+      return (
+        <CardRow key={row.key} row={row} continuesNext={continuesNext}>
+          <PluginRequestCard message={row.message!} card={card} botName={row.authorName} onDecided={onAnswered} />
+        </CardRow>
+      )
+    }
+    if (card?.type === 'plugin_reconnect') {
+      return (
+        <CardRow key={row.key} row={row} continuesNext={continuesNext}>
+          <PluginReconnectCard card={card} botName={row.authorName} />
+        </CardRow>
+      )
+    }
+    if (card?.type === 'routine_change') {
+      return (
+        <TimelineRow
+          key={row.key}
+          message={row.message!}
+          card={card}
+          enter={row.enter}
+          onOpenRoutine={onOpenRoutine}
+        />
+      )
+    }
+    if (card?.type === 'question') {
+      return (
+        <CardRow key={row.key} row={row} continuesNext={continuesNext}>
+          <QuestionCard message={row.message!} card={card} letterKeys={row.key === newestOpenQuestion} onAnswered={onAnswered} />
+        </CardRow>
+      )
+    }
+    return (
+      <div key={row.key} role="article" className={cn('flex', row.mine && 'justify-end', continuesNext ? 'mb-1' : 'mb-[22px]')}>
+        <span className="sr-only">{row.authorName}: </span>
+        <div
+          className={cn(
+            'flex max-w-[min(88%,640px)] min-w-0 flex-col gap-1',
+            row.mine ? 'origin-bottom-right items-end' : 'origin-bottom-left items-start',
+            row.enter && 'motion-safe:animate-message-in motion-reduce:animate-fade-in',
+          )}
+        >
+          {showAuthors && !row.mine && !continuesPrevious && <span className="px-3 text-xs text-muted-foreground">{row.authorName}</span>}
+          {row.message?.botMessage && <BotMessageLabel botMessage={row.message.botMessage} />}
+          {row.message && row.message.attachments.length > 0 && (
+            <Attachments messageId={row.message.id} attachments={row.message.attachments} mine={row.mine} />
+          )}
+          {row.outgoing && row.outgoing.files.length > 0 && (
+            <div className={cn('flex max-w-full flex-wrap justify-end gap-1', failed && 'opacity-60')}>
+              {row.outgoing.files.map((file, index) => (
+                <FileChip key={index} file={file} />
+              ))}
+            </div>
+          )}
+          {/* Grok doesn't bubble a message of files only. */}
+          {row.text && (
+            <div
+              className={cn(
+                'max-w-full rounded-[18px] px-3 py-2 text-base/5 transition-opacity duration-100 [overflow-wrap:anywhere]',
+                row.mine ? 'bg-bubble-user text-on-color' : 'bg-bubble-agent',
+                row.mine
+                  ? [continuesPrevious && 'rounded-tr-[6px]', continuesNext && 'rounded-br-[6px]']
+                  : [continuesPrevious && 'rounded-tl-[6px]', continuesNext && 'rounded-bl-[6px]'],
+                failed && 'opacity-60',
+              )}
+            >
+              <Markdown text={row.text} onColor={row.mine} />
+            </div>
+          )}
+          {failed && row.outgoing && (
+            <p role="alert" className="flex gap-2 text-sm text-destructive-foreground motion-safe:animate-rise-in motion-reduce:animate-fade-in">
+              <span title={failed}>Failed to send</span>
+              <button type="button" onClick={() => onResend(row.outgoing!)} className="pressable font-medium underline underline-offset-2">
+                Resend
+              </button>
+              <button type="button" onClick={() => onDiscard(row.outgoing!)} className="pressable font-medium underline underline-offset-2">
+                Delete
+              </button>
+            </p>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="px-[max(30px,calc((100%-690px)/2))] pt-2 pb-7">
       {loading && <p className="text-center text-muted-foreground">Loading…</p>}
       {!loading && rows.length === 0 && <p className="text-center text-muted-foreground">{emptyText}</p>}
-      {rows.map((row, index) => {
-        // Consecutive messages of one author sit close together, with tighter corners on the sender's side.
-        const continuesPrevious = rows[index - 1]?.author === row.author
-        const continuesNext = rows[index + 1]?.author === row.author
-        const failed = row.outgoing?.error
-        const card = row.message?.card
-        if (card?.type === 'take_over') {
-          return (
-            <CardRow key={row.key} row={row} continuesNext={continuesNext}>
-              <TakeOverCard
-                message={row.message!}
-                card={card}
-                botName={row.authorName}
-                onTakeOver={() => onScreen?.()}
-                onOpenScreen={() => onScreen?.()}
-                onHandedBack={onAnswered}
-              />
-            </CardRow>
-          )
-        }
-        if (card?.type === 'plugin_request') {
-          return (
-            <CardRow key={row.key} row={row} continuesNext={continuesNext}>
-              <PluginRequestCard message={row.message!} card={card} botName={row.authorName} onDecided={onAnswered} />
-            </CardRow>
-          )
-        }
-        if (card?.type === 'plugin_reconnect') {
-          return (
-            <CardRow key={row.key} row={row} continuesNext={continuesNext}>
-              <PluginReconnectCard card={card} botName={row.authorName} />
-            </CardRow>
-          )
-        }
-        if (card?.type === 'routine_change') {
-          return (
-            <TimelineRow
-              key={row.key}
-              message={row.message!}
-              card={card}
-              enter={row.enter}
-              onOpenRoutine={onOpenRoutine}
-            />
-          )
-        }
-        if (card?.type === 'question') {
-          return (
-            <CardRow key={row.key} row={row} continuesNext={continuesNext}>
-              <QuestionCard message={row.message!} card={card} letterKeys={row.key === newestOpenQuestion} onAnswered={onAnswered} />
-            </CardRow>
-          )
-        }
-        return (
-          <div key={row.key} role="article" className={cn('flex', row.mine && 'justify-end', continuesNext ? 'mb-1' : 'mb-[22px]')}>
-            <span className="sr-only">{row.authorName}: </span>
-            <div
-              className={cn(
-                'flex max-w-[min(88%,640px)] min-w-0 flex-col gap-1',
-                row.mine ? 'origin-bottom-right items-end' : 'origin-bottom-left items-start',
-                row.enter && 'motion-safe:animate-message-in motion-reduce:animate-fade-in',
-              )}
-            >
-              {showAuthors && !row.mine && !continuesPrevious && <span className="px-3 text-xs text-muted-foreground">{row.authorName}</span>}
-              {row.message?.botMessage && <BotMessageLabel botMessage={row.message.botMessage} />}
-              {row.message && row.message.attachments.length > 0 && (
-                <Attachments messageId={row.message.id} attachments={row.message.attachments} mine={row.mine} />
-              )}
-              {row.outgoing && row.outgoing.files.length > 0 && (
-                <div className={cn('flex max-w-full flex-wrap justify-end gap-1', failed && 'opacity-60')}>
-                  {row.outgoing.files.map((file, index) => (
-                    <FileChip key={index} file={file} />
-                  ))}
-                </div>
-              )}
-              {/* Grok doesn't bubble a message of files only. */}
-              {row.text && (
-                <div
-                  className={cn(
-                    'max-w-full rounded-[18px] px-3 py-2 text-base/5 transition-opacity duration-100 [overflow-wrap:anywhere]',
-                    row.mine ? 'bg-bubble-user text-on-color' : 'bg-bubble-agent',
-                    row.mine
-                      ? [continuesPrevious && 'rounded-tr-[6px]', continuesNext && 'rounded-br-[6px]']
-                      : [continuesPrevious && 'rounded-tl-[6px]', continuesNext && 'rounded-bl-[6px]'],
-                    failed && 'opacity-60',
-                  )}
-                >
-                  <Markdown text={row.text} onColor={row.mine} />
-                </div>
-              )}
-              {failed && row.outgoing && (
-                <p role="alert" className="flex gap-2 text-sm text-destructive-foreground motion-safe:animate-rise-in motion-reduce:animate-fade-in">
-                  <span title={failed}>Failed to send</span>
-                  <button type="button" onClick={() => onResend(row.outgoing!)} className="pressable font-medium underline underline-offset-2">
-                    Resend
-                  </button>
-                  <button type="button" onClick={() => onDiscard(row.outgoing!)} className="pressable font-medium underline underline-offset-2">
-                    Delete
-                  </button>
-                </p>
-              )}
-            </div>
-          </div>
-        )
-      })}
+      {rows.map((row, index) => (
+        <div
+          key={row.key}
+          data-message-id={row.message?.id}
+          className={cn('-mx-2 rounded-2xl px-2 transition-colors duration-700', row.message && row.message.id === highlighted && 'bg-blue-subtle duration-150')}
+        >
+          {rowElement(row, index)}
+        </div>
+      ))}
       {typing && (
         <div
           aria-label={`${typing.name} is working`}

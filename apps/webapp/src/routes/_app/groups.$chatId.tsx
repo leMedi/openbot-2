@@ -9,14 +9,22 @@ import { ConfirmDeleteGroup } from '../../components/confirm-delete.tsx'
 import { api, errorMessage } from '../../lib/api.ts'
 import { membersOf } from '../../lib/groups.ts'
 import { useLive } from '../../lib/live.tsx'
+import { type ChatSearch, chatSearch } from '../../lib/chat-search.ts'
 
 export const Route = createFileRoute('/_app/groups/$chatId')({
+  // A group chat has no Routines pane.
+  validateSearch: (search: Record<string, unknown>): Pick<ChatSearch, 'message'> => {
+    const { message } = chatSearch(search)
+    return message ? { message } : {}
+  },
   component: Group,
 })
 
 /** A group chat: the owner and its members, who answer in rounds, with the Members pane beside it. */
 function Group() {
   const { chatId } = Route.useParams()
+  const search = Route.useSearch()
+  const navigate = useNavigate()
   const live = useLive()
   const [membersOpen, setMembersOpen] = useState(false)
   const chat = live.chats.get(chatId)
@@ -29,6 +37,8 @@ function Group() {
         <ChatView
           key={chat.id}
           chatId={chat.id}
+          focusMessage={search.message}
+          onFocused={() => void navigate({ to: '.', search: {}, replace: true })}
           header={
             <header className="chat-material sticky top-0 z-10 flex min-h-[51px] items-center gap-2 px-4">
               <GroupAvatar members={members} />
