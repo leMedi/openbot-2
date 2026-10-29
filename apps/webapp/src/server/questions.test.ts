@@ -244,32 +244,26 @@ describe('dismissing a question', () => {
 })
 
 describe('a question dismissed when the owner moves on', () => {
-  it('is dismissed by the owner’s next message in the chat, while other cards stay answerable', async () => {
+  it('is dismissed by the owner’s next message in the chat, whatever the bot asked', async () => {
     const { server, bot } = await startWithRex()
     server.providers.script(
-      callsTools(['askQuestion', whichDatabase as never]),
-      callsTools(['askQuestion', { prompt: 'Want a coffee?', options: [{ label: 'Yes' }, { label: 'No' }], dismissOnMoveOn: true }]),
+      callsTools(['askQuestion', whichDatabase as never], ['askQuestion', { prompt: 'Want a coffee?', options: [{ label: 'Yes' }, { label: 'No' }] }]),
     )
     await server.client.chats.send({ chatId: bot.chatId, text: 'Set up storage for the app' })
     await untilIdle(server, bot)
-    await server.client.chats.send({ chatId: bot.chatId, text: 'And a break?' })
-    await untilIdle(server, bot)
-    const [, database, , coffee] = await server.client.chats.messages({ chatId: bot.chatId })
-    expect(coffee!.card).toMatchObject({ prompt: 'Want a coffee?', answer: null, dismissed: false })
+    const cards = (await server.client.chats.messages({ chatId: bot.chatId })).filter((message) => message.card)
+    expect(cards.map((card) => card.card)).toMatchObject([{ dismissed: false }, { dismissed: false }])
 
-    server.providers.script(callsTools(['sendMessage', { text: 'OK.' }]), endsSilently())
-    await server.client.chats.send({ chatId: bot.chatId, text: 'Never mind, back to work' })
+    server.providers.script(callsTools(['sendMessage', { text: 'Postgres it is.' }]), endsSilently())
+    await server.client.chats.send({ chatId: bot.chatId, text: 'We use Postgres everywhere' })
     await untilIdle(server, bot)
 
     const messages = await server.client.chats.messages({ chatId: bot.chatId })
-    expect(messages.find((message) => message.id === coffee!.id)!.card).toMatchObject({ dismissed: true })
-    expect(messages.find((message) => message.id === database!.id)!.card).toMatchObject({ dismissed: false })
-    await expect(server.client.chats.answer({ messageId: coffee!.id, answer: { option: 0 } })).rejects.toMatchObject({
-      code: 'CONFLICT',
-    })
-    server.providers.script(callsTools(['sendMessage', { text: 'SQLite it is.' }]), endsSilently())
-    await server.client.chats.answer({ messageId: database!.id, answer: { option: 0 } })
-    await untilIdle(server, bot)
+    for (const card of cards) {
+      expect(messages.find((message) => message.id === card.id)!.card).toMatchObject({ answer: null, dismissed: true })
+      await expect(server.client.chats.answer({ messageId: card.id, answer: { option: 0 } })).rejects.toMatchObject({ code: 'CONFLICT' })
+    }
+    expect(JSON.stringify(server.providers.requests[1]!.messages)).toContain('Unanswered questions:')
   })
 })
 
@@ -288,7 +282,6 @@ describe('reminding the bot of unanswered questions', () => {
     await server.client.chats.send({ chatId: bot.chatId, text: 'Set up storage and a server' })
     await untilIdle(server, bot)
     const questions = (await server.client.chats.messages({ chatId: bot.chatId })).filter((message) => message.card)
-    const database = questions.find((message) => message.text === 'Which database should I use?')!
     const port = questions.find((message) => message.text === 'Which port?')!
     await server.client.chats.dismiss({ messageId: port.id })
 
@@ -303,12 +296,6 @@ describe('reminding the bot of unanswered questions', () => {
     await server.client.chats.send({ chatId: bot.chatId, text: 'Thanks' })
     await untilIdle(server, bot)
     expect(inputOf(server, 3)).toBe('Thanks')
-
-    // Listed once, the open card stays answerable.
-    server.providers.script(callsTools(['sendMessage', { text: 'SQLite it is.' }]), endsSilently())
-    await server.client.chats.answer({ messageId: database.id, answer: { option: 0 } })
-    await untilIdle(server, bot)
-    expect(inputOf(server, 5)).toContain('The owner answered your question "Which database should I use?"')
   })
 
   it("doesn't list a question the owner answers before the next run", async () => {

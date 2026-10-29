@@ -830,7 +830,7 @@ export class BotRuntime implements AgentRuntime {
         name: 'askQuestion',
         description:
           'Ask the owner to decide, on a card with 1–6 options they answer with one click. Asking ends your turn; ' +
-          'their answer arrives as their next message.',
+          'their answer arrives as their next message. If they write to you instead, the card is dismissed.',
         parameters: Type.Object({
           prompt: Type.String({ description: 'The question, short' }),
           details: Type.Optional(Type.String({ description: 'Help text under the question, if needed' })),
@@ -847,13 +847,6 @@ export class BotRuntime implements AgentRuntime {
             { minItems: 1, maxItems: maxQuestionOptions },
           ),
           allowText: Type.Optional(Type.Boolean({ description: 'Let the owner type their own answer instead' })),
-          dismissOnMoveOn: Type.Optional(
-            Type.Boolean({
-              description:
-                'Dismiss the card when the owner sends a new message without answering it. Set it only for low-stakes ' +
-                'questions that become moot if the owner moves on; keep it off for real decisions.',
-            }),
-          ),
         }),
         replay: 'safe',
         execute: async (args, api) => {
@@ -871,7 +864,6 @@ export class BotRuntime implements AgentRuntime {
               style: option.style ?? 'default',
             })),
             allowText: args.allowText ?? false,
-            dismissOnMoveOn: args.dismissOnMoveOn ?? false,
           }
           await options.askQuestion(bot, card, `${api.conversationId}:${api.callId}`)
           return {

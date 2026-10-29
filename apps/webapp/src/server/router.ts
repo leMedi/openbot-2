@@ -534,7 +534,7 @@ export const router = os.router({
       })
       const info = toMessageInfo(message)
       context.bus.publish({ type: 'message.created', message: info })
-      // The owner moved on: low-stakes questions they left unanswered are moot now.
+      // The owner moved on: the questions they left unanswered close, and the bot's input lists them.
       for (const dismissed of await dismissMovedOnQuestions(context.db, chat!.id, message.id)) {
         context.bus.publish({ type: 'message.updated', message: toMessageInfo(dismissed) })
       }

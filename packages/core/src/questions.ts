@@ -18,8 +18,6 @@ export type QuestionCard = {
   details: string | null
   options: QuestionOption[]
   allowText: boolean
-  /** Dismissed once the owner sends a newer message without answering; absent on cards asked before it existed. */
-  dismissOnMoveOn?: boolean
 }
 
 /** The owner's answer: an option by index, or their own words when the card allows it. */
@@ -115,8 +113,8 @@ export async function dismissQuestion(db: Db, messageId: string): Promise<Messag
 }
 
 /**
- * The owner moved on: their message `messageId` dismisses the chat's open `dismissOnMoveOn` cards posted before it.
- * Returns them.
+ * The owner moved on: their message `messageId` dismisses the chat's open question cards posted before it, which the
+ * bot's next input lists as unanswered. Returns them.
  */
 export async function dismissMovedOnQuestions(db: Db, chatId: string, messageId: string): Promise<Message[]> {
   return db
@@ -127,7 +125,6 @@ export async function dismissMovedOnQuestions(db: Db, chatId: string, messageId:
         eq(messages.chatId, chatId),
         lt(messages.id, messageId),
         isQuestion,
-        sql`json_extract(${messages.card}, '$.dismissOnMoveOn') = 1`,
         isOpen,
       ),
     )

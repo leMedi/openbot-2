@@ -157,8 +157,8 @@ The model's plain text is private. The only way to reach you is `sendMessage` (s
 As built (#40), question cards dismiss as Grok's do:
 
 - The owner can dismiss an open card with its ×: it shows "Dismissed", can't be answered any more, and doesn't wake the bot (`chats.dismiss`). Letter keys skip dismissed cards.
-- `askQuestion({ dismissOnMoveOn: true })`, for low-stakes questions only: the owner's next message in the DM dismisses the card if they left it unanswered. Without it a card stays answerable indefinitely.
-- Each run the scheduler starts in the bot's DM (not a group turn) begins with `Unanswered questions:\n- <prompt>` for every question still unanswered, open or dismissed; `messages.card_state.reminded` then keeps it from being listed again. Open cards stay answerable.
+- The owner's next message in the DM dismisses every card they left open: replying below a card is moving on from it, and the bot reads their message after the list of unanswered questions. (Grok's `dismissOnMoveOn` was a per-card flag, off by default; left open, a card the owner had answered in words stayed answerable.)
+- Each run the scheduler starts in the bot's DM (not a group turn) begins with `Unanswered questions:\n- <prompt>` for every question still unanswered, open or dismissed; `messages.card_state.reminded` then keeps it from being listed again.
 - **Seam 1:** `questions.test.ts`.
 
 As built (#12), attachments:
