@@ -600,6 +600,49 @@ function useMultiline(form: React.RefObject<HTMLFormElement | null>, field: Reac
   return multiline
 }
 
+/** How long the composer takes to move between one line and several. */
+const composerReflowMs = 200
+
+/**
+ * Moves the composer between one line and several instead of letting it jump: the box eases to its new height and the
+ * field, + and Send glide from where they were (FLIP: measured before and after, then played back with transforms).
+ * Only that switch moves, not each new line, and nothing does with reduced motion.
+ */
+function useComposerReflow(multiline: boolean, form: React.RefObject<HTMLFormElement | null>, parts: React.RefObject<HTMLElement | null>[]) {
+  const before = useRef<{ height: number; rects: (DOMRect | undefined)[] }>(undefined)
+  const shown = useRef(multiline)
+
+  useLayoutEffect(() => {
+    const box = form.current
+    const last = before.current
+    const switched = shown.current !== multiline
+    shown.current = multiline
+    if (!box || !last || !switched || matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const elements = [box, ...parts.map((part) => part.current)]
+    // Interrupted mid-way: start again from where things are now, not from where they were headed.
+    for (const element of elements) for (const running of element?.getAnimations() ?? []) running.cancel()
+    const easing = getComputedStyle(document.documentElement).getPropertyValue('--ease-in-out-strong').trim() || 'ease-in-out'
+    const timing = { duration: composerReflowMs, easing }
+    const height = box.getBoundingClientRect().height
+    // Height has no transform equivalent here: scaling the box would stretch its corners and text.
+    if (height !== last.height) box.animate({ height: [`${last.height}px`, `${height}px`], overflow: ['clip', 'clip'] }, timing)
+    parts.forEach((part, index) => {
+      const element = part.current
+      const from = last.rects[index]
+      if (!element || !from) return
+      const to = element.getBoundingClientRect()
+      const [x, y] = [from.left - to.left, from.top - to.top]
+      if (x || y) element.animate({ transform: [`translate(${x}px, ${y}px)`, 'translate(0, 0)'] }, timing)
+    })
+  }, [multiline, form, parts])
+
+  // Where everything is after each render, for the next switch to start from.
+  useLayoutEffect(() => {
+    if (!form.current) return
+    before.current = { height: form.current.getBoundingClientRect().height, rects: parts.map((part) => part.current?.getBoundingClientRect()) }
+  })
+}
+
 /**
  * Writes to the chat. In a DM, a message sent while the bot works supersedes its run: there is no Stop, as in Grok.
  * Files come from the + button, a paste, or a drop anywhere on the chat. The chat's unsent text is kept by the live
@@ -631,6 +674,10 @@ function Composer({
   const form = useRef<HTMLFormElement>(null)
   const field = useRef<HTMLTextAreaElement>(null)
   const multiline = useMultiline(form, field, text, allowFiles ? 2 : 1)
+  const attach = useRef<HTMLButtonElement>(null)
+  const submit = useRef<HTMLButtonElement>(null)
+  const [parts] = useState(() => [field, attach, submit])
+  useComposerReflow(multiline, form, parts)
 
   function send() {
     const draft = text.trim()
@@ -683,6 +730,7 @@ function Composer({
                 }}
               />
               <button
+                ref={attach}
                 type="button"
                 aria-label="Attach files"
                 title="Attach files"
@@ -719,6 +767,7 @@ function Composer({
             className="max-h-60 resize-none bg-transparent px-1 leading-[1.4] outline-none [field-sizing:content] [grid-area:field]"
           />
           <button
+            ref={submit}
             type="submit"
             aria-label="Send"
             disabled={!text.trim() && !files.length}
