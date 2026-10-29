@@ -61,6 +61,32 @@ describe('chatting in a DM', () => {
     expect(server.providers.pendingTurns).toBe(0)
   })
 
+  it("doesn't post a message twice in one run when the model sends it again", async () => {
+    const { server, bot } = await startWithRex()
+    server.providers.script(
+      callsTools(['sendMessage', { text: 'Sunny all week!' }]),
+      callsTools(['sendMessage', { text: 'Sunny all week!' }]),
+      endsSilently(),
+      callsTools(['sendMessage', { text: 'Sunny all week!' }]),
+      endsSilently(),
+    )
+
+    await server.client.chats.send({ chatId: bot.chatId, text: 'The weather is good' })
+    await untilIdle(server, bot)
+    const results = server.providers.requests[2]!.messages.flatMap((message) => (message.role === 'toolResult' ? [JSON.stringify(message.content)] : []))
+    expect(results.at(-1)).toContain('already sent the owner this exact message')
+    // A later run may say it again.
+    await server.client.chats.send({ chatId: bot.chatId, text: 'And tomorrow?' })
+    await untilIdle(server, bot)
+
+    expect(await texts(server, bot)).toEqual([
+      ['owner', 'The weather is good'],
+      ['bot', 'Sunny all week!'],
+      ['owner', 'And tomorrow?'],
+      ['bot', 'Sunny all week!'],
+    ])
+  })
+
   it('tells the model who the bot is', async () => {
     const { server, bot } = await startWithRex()
     server.providers.script(callsTools(['sendMessage', { text: 'Hi' }]), endsSilently())

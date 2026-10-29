@@ -560,6 +560,8 @@ export class BotRuntime implements AgentRuntime {
   readonly #errors = new Map<string, string>()
   /** Messages each bot has sent in its current group turn, by the turn's input id. */
   readonly #groupMessages = new Map<string, { inputId: string; sent: number }>()
+  /** The texts each bot has sent in its current run, by the run's input id, each with the call that sent it. */
+  readonly #sentTexts = new Map<string, { inputId: string; calls: Map<string, string> }>()
   /** The server's time, which memory facts are dated and ranked by. */
   readonly #clock: Clock
   /** The tools that act: those whose calls are reviewed under a fixed surface (see `ExchangePart`'s `acts`). */
@@ -715,9 +717,16 @@ export class BotRuntime implements AgentRuntime {
           if (groupChatId && !(await getGroup(options.db, groupChatId))?.members.includes(bot.id)) {
             throw new Error('You are no longer in this group chat; nothing was posted.')
           }
+          // Weak models resend a message they already sent in the run, believing the first call went wrong. Claimed
+          // before posting, so two calls of one round can't both pass; a replayed call keeps its own claim.
+          const unclaim = turn?.id && args.text.trim() && !paths.length ? runtime!.claimText(bot.id, turn.id, args.text, api.callId) : undefined
+          if (unclaim === false) {
+            return { output: [{ type: 'text', text: 'Not sent again: you already sent the owner this exact message in this turn, and they have it.' }] }
+          }
           // Counted before posting, so calls of one round can't all pass the check at once.
           const release = groupChatId ? runtime!.countGroupMessage(bot.id, turn.id ?? '') : undefined
           if (release === null) {
+            unclaim?.()
             const { maxMessagesPerMemberTurn } = groupRoundRules
             throw new Error(`You can send at most ${maxMessagesPerMemberTurn} messages in one turn in a group chat; this one wasn't sent.`)
           }
@@ -726,6 +735,7 @@ export class BotRuntime implements AgentRuntime {
             await options.sendMessage(bot, groupChatId ?? bot.chatId, { text: args.text, attachments }, `${api.conversationId}:${api.callId}`, turn?.id)
           } catch (error) {
             release?.()
+            unclaim?.()
             throw error
           }
           // A run ends only when every call of its last round asks it to, so a message sent beside a card must too.
@@ -1356,6 +1366,23 @@ export class BotRuntime implements AgentRuntime {
     } while (cursor)
     // Pages read from the newest entry back.
     return calls.reverse().flat()
+  }
+
+  /**
+   * Claims text `text` for call `callId` of the bot's run `inputId`: false when another call of the run already sent
+   * it. Returns a function taking the claim back if the message isn't sent.
+   */
+  claimText(botId: string, inputId: string, text: string, callId: string): (() => void) | false {
+    const run = this.#sentTexts.get(botId)
+    const current = run?.inputId === inputId ? run : { inputId, calls: new Map<string, string>() }
+    const key = text.trim()
+    const sender = current.calls.get(key)
+    if (sender !== undefined && sender !== callId) return false
+    current.calls.set(key, callId)
+    this.#sentTexts.set(botId, current)
+    return () => {
+      if (current.calls.get(key) === callId) current.calls.delete(key)
+    }
   }
 
   /**
