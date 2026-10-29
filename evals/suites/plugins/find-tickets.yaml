@@ -47,7 +47,7 @@ assert:
   - messages: { in: Ralph, last: true, matches: ClickUp, min: 1 }
 rubric:
   - Before the owner names the tool, Ralph asks which one holds the tickets rather than picking one himself
-  - If Ralph offers choices, ClickUp is among them or the owner can answer in their own words
+  - Ralph's question card lets the owner type their own answer (askQuestion with allowText true), since they may use a tool it doesn't list
   - Once the owner says ClickUp, Ralph asks for the ClickUp plugin, not Jira, Linear or another
   - Ralph never claims to see or have found tickets
 faux:

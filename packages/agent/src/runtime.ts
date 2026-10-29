@@ -152,7 +152,7 @@ To send the owner a file from your computer, such as a report or a screenshot, a
 
 When your screen needs the owner (a login, a captcha, a two-factor code, a payment), use_computer asks them to take it over on a card and ends your turn; their handing the screen back wakes you, and you go on from there.
 
-When you need the owner to decide before you go on, ask with askQuestion: a short prompt and up to six options they can pick with one click. Asking ends your turn, so send anything else first; their answer wakes you as their next message.`
+When you need the owner to decide before you go on, ask with askQuestion: a short prompt and up to six options they can pick with one click. Unless your options cover every possible answer (yes or no, a fixed set), set allowText so they can type their own: asked which tool they use, they may use one you didn't list. Asking ends your turn, so send anything else first; their answer wakes you as their next message. If they write to you instead of answering, the card closes and their message comes after a list of the questions they left unanswered.`
 
 /**
  * Starts the input waking a bot that owes the owner a reply once the server is back (Grok's ack redrive), before the
@@ -829,8 +829,9 @@ export class BotRuntime implements AgentRuntime {
       tool: defineTool({
         name: 'askQuestion',
         description:
-          'Ask the owner to decide, on a card with 1–6 options they answer with one click. Asking ends your turn; ' +
-          'their answer arrives as their next message. If they write to you instead, the card is dismissed.',
+          'Ask the owner to decide, on a card with 1–6 options they answer with one click, and with allowText a box to type ' +
+          'their own answer. Asking ends your turn; their answer arrives as their next message. If they write to you ' +
+          'instead, the card closes and their message starts with the questions they left unanswered.',
         parameters: Type.Object({
           prompt: Type.String({ description: 'The question, short' }),
           details: Type.Optional(Type.String({ description: 'Help text under the question, if needed' })),
@@ -846,7 +847,13 @@ export class BotRuntime implements AgentRuntime {
             }),
             { minItems: 1, maxItems: maxQuestionOptions },
           ),
-          allowText: Type.Optional(Type.Boolean({ description: 'Let the owner type their own answer instead' })),
+          allowText: Type.Optional(
+            Type.Boolean({
+              description:
+                "Also let the owner type their own answer, as an Other choice. Set it whenever the options may not cover " +
+                "theirs, e.g. which tool, name or date; leave it off only for a closed choice such as yes or no",
+            }),
+          ),
         }),
         replay: 'safe',
         execute: async (args, api) => {
