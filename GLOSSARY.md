@@ -44,6 +44,14 @@ _Avoid_: Direct chat, 1:1, main conversation
 A chat between the owner and two or more bots, played in rounds where bots may pass.
 _Avoid_: Room, channel, group conversation
 
+**Section**:
+An owner-named group of chats in the sidebar. Chats in no section are **Unassigned**; pinned chats sit above every section.
+_Avoid_: Folder, category
+
+**Hidden chat**:
+A chat the owner moved to the sidebar's **Hidden** section. It keeps working and keeps its history; it is only out of the way.
+_Avoid_: Archived chat, hidden bot
+
 **History**:
 A bot's single private record of everything it has seen and done across all its chats, messages from other bots, and routines; what its model reads.
 _Avoid_: Conversation, transcript, context
