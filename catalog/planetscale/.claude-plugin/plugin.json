@@ -3,6 +3,13 @@
   "displayName": "PlanetScale",
   "version": "1.0.0",
   "description": "Query and manage PlanetScale databases and branches.",
+  "keywords": [
+    "database",
+    "mysql",
+    "postgres",
+    "sql",
+    "developer"
+  ],
   "author": {
     "name": "OpenBot"
   },

@@ -3,6 +3,14 @@
   "displayName": "Neon",
   "version": "1.0.0",
   "description": "Manage Neon Postgres projects and branches, and run SQL.",
+  "keywords": [
+    "database",
+    "postgres",
+    "postgresql",
+    "sql",
+    "serverless",
+    "developer"
+  ],
   "author": {
     "name": "OpenBot"
   },

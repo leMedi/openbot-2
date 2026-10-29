@@ -209,7 +209,7 @@ async function startPlugins(plugins: Record<string, FakePlugin>) {
       })
       fakes.set(name, fake)
       await mkdir(join(catalog, name, '.claude-plugin'), { recursive: true })
-      await writeFile(join(catalog, name, '.claude-plugin', 'plugin.json'), JSON.stringify({ name, displayName: plugin.displayName, description: plugin.description }))
+      await writeFile(join(catalog, name, '.claude-plugin', 'plugin.json'), JSON.stringify({ name, displayName: plugin.displayName, description: plugin.description, keywords: plugin.keywords }))
       await writeFile(join(catalog, name, '.mcp.json'), JSON.stringify({ mcpServers: { [name]: { type: 'http', url: fake.url } } }))
     }
   } catch (error) {

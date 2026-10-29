@@ -3,6 +3,15 @@
   "displayName": "Paddle",
   "version": "1.0.0",
   "description": "Manage products, prices, customers and subscriptions in Paddle.",
+  "keywords": [
+    "payments",
+    "billing",
+    "subscriptions",
+    "invoices",
+    "revenue",
+    "saas",
+    "checkout"
+  ],
   "author": {
     "name": "OpenBot"
   },

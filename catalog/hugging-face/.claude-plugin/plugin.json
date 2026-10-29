@@ -3,6 +3,15 @@
   "displayName": "Hugging Face",
   "version": "1.0.0",
   "description": "Search models, datasets, Spaces and papers on Hugging Face.",
+  "keywords": [
+    "ai",
+    "machine learning",
+    "ml",
+    "models",
+    "datasets",
+    "llm",
+    "papers"
+  ],
   "author": {
     "name": "OpenBot"
   },

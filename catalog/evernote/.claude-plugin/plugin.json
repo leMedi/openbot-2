@@ -3,6 +3,12 @@
   "displayName": "Evernote",
   "version": "1.0.0",
   "description": "Search, read and write notes and notebooks in Evernote.",
+  "keywords": [
+    "notes",
+    "note-taking",
+    "notebooks",
+    "knowledge base"
+  ],
   "author": {
     "name": "OpenBot"
   },

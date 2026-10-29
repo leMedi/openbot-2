@@ -3,6 +3,13 @@
   "displayName": "Egnyte",
   "version": "1.0.0",
   "description": "Search, read and share files in Egnyte.",
+  "keywords": [
+    "files",
+    "file storage",
+    "documents",
+    "file sharing",
+    "drive"
+  ],
   "author": {
     "name": "OpenBot"
   },

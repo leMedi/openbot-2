@@ -3,6 +3,17 @@
   "displayName": "Cloudflare",
   "version": "1.0.0",
   "description": "Manage Workers, KV, R2 and D1 in your Cloudflare account.",
+  "keywords": [
+    "hosting",
+    "serverless",
+    "workers",
+    "storage",
+    "dns",
+    "cdn",
+    "database",
+    "devops",
+    "deployments"
+  ],
   "author": {
     "name": "OpenBot"
   },

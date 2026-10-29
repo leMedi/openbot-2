@@ -3,6 +3,14 @@
   "displayName": "Bitly",
   "version": "1.0.0",
   "description": "Shorten links and see how often they are clicked, with Bitly.",
+  "keywords": [
+    "links",
+    "url shortener",
+    "short links",
+    "qr codes",
+    "click analytics",
+    "marketing"
+  ],
   "author": {
     "name": "OpenBot"
   },

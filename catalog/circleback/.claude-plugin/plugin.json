@@ -3,6 +3,14 @@
   "displayName": "Circleback",
   "version": "1.0.0",
   "description": "Search meeting notes, transcripts and action items in Circleback.",
+  "keywords": [
+    "meetings",
+    "meeting notes",
+    "transcripts",
+    "action items",
+    "recordings",
+    "notetaker"
+  ],
   "author": {
     "name": "OpenBot"
   },

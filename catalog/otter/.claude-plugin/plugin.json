@@ -3,6 +3,15 @@
   "displayName": "Otter",
   "version": "1.0.0",
   "description": "Search meeting transcripts and summaries in Otter.",
+  "keywords": [
+    "meetings",
+    "meeting notes",
+    "transcripts",
+    "transcription",
+    "notetaker",
+    "calls",
+    "recordings"
+  ],
   "author": {
     "name": "OpenBot"
   },

@@ -3,6 +3,13 @@
   "displayName": "GrowthBook",
   "version": "1.0.0",
   "description": "Manage feature flags and experiments in GrowthBook.",
+  "keywords": [
+    "feature flags",
+    "experiments",
+    "a/b tests",
+    "rollouts",
+    "product"
+  ],
   "author": {
     "name": "OpenBot"
   },

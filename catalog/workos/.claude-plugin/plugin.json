@@ -3,6 +3,15 @@
   "displayName": "WorkOS",
   "version": "1.0.0",
   "description": "Manage organizations, users and SSO connections in WorkOS.",
+  "keywords": [
+    "authentication",
+    "sso",
+    "saml",
+    "users",
+    "enterprise",
+    "directory sync",
+    "developer"
+  ],
   "author": {
     "name": "OpenBot"
   },

@@ -3,6 +3,14 @@
   "displayName": "Attio",
   "version": "1.0.0",
   "description": "Work with records, lists, notes and tasks in your Attio CRM.",
+  "keywords": [
+    "crm",
+    "sales",
+    "customers",
+    "contacts",
+    "deals",
+    "pipeline"
+  ],
   "author": {
     "name": "OpenBot"
   },

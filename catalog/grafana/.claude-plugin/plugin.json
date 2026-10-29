@@ -3,6 +3,15 @@
   "displayName": "Grafana",
   "version": "1.0.0",
   "description": "Search dashboards, query data sources and check alerts in Grafana Cloud.",
+  "keywords": [
+    "observability",
+    "monitoring",
+    "dashboards",
+    "metrics",
+    "logs",
+    "alerts",
+    "devops"
+  ],
   "author": {
     "name": "OpenBot"
   },

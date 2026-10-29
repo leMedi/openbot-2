@@ -3,6 +3,14 @@
   "displayName": "Ahrefs",
   "version": "1.0.0",
   "description": "SEO data from Ahrefs: backlinks, keywords, rankings and site metrics.",
+  "keywords": [
+    "seo",
+    "marketing",
+    "backlinks",
+    "keyword research",
+    "search rankings",
+    "competitors"
+  ],
   "author": {
     "name": "OpenBot"
   },

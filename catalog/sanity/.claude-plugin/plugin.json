@@ -3,6 +3,12 @@
   "displayName": "Sanity",
   "version": "1.0.0",
   "description": "Query and edit documents and schemas in Sanity.",
+  "keywords": [
+    "cms",
+    "content management",
+    "headless cms",
+    "website content"
+  ],
   "author": {
     "name": "OpenBot"
   },

@@ -3,6 +3,14 @@
   "displayName": "Railway",
   "version": "1.0.0",
   "description": "Deploy and manage services, variables and logs on Railway.",
+  "keywords": [
+    "hosting",
+    "deployments",
+    "servers",
+    "databases",
+    "logs",
+    "devops"
+  ],
   "author": {
     "name": "OpenBot"
   },

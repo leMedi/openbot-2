@@ -3,6 +3,12 @@
   "displayName": "Algolia",
   "version": "1.0.0",
   "description": "Search and manage your Algolia indices and their records.",
+  "keywords": [
+    "search",
+    "indexes",
+    "site search",
+    "developer"
+  ],
   "author": {
     "name": "OpenBot"
   },

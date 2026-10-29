@@ -3,6 +3,13 @@
   "displayName": "scite",
   "version": "1.0.0",
   "description": "Search research papers on scite, with how they've been cited.",
+  "keywords": [
+    "research",
+    "science",
+    "academic papers",
+    "citations",
+    "literature"
+  ],
   "author": {
     "name": "OpenBot"
   },

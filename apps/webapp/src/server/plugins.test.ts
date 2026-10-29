@@ -60,6 +60,7 @@ describe('the plugin catalog', () => {
       displayName: 'Notes',
       version: '1.0.0',
       description: 'Your notes workspace',
+      keywords: [],
       icon: '/plugins/notes/icon',
       status: 'not_connected',
       servers: [{ name: 'notes', url: 'https://mcp.notes.test/mcp' }],

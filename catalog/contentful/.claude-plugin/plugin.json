@@ -3,6 +3,13 @@
   "displayName": "Contentful",
   "version": "1.0.0",
   "description": "Read and edit entries, content types and assets in Contentful.",
+  "keywords": [
+    "cms",
+    "content management",
+    "headless cms",
+    "website content",
+    "assets"
+  ],
   "author": {
     "name": "OpenBot"
   },

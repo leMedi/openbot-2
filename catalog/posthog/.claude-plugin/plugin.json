@@ -3,6 +3,16 @@
   "displayName": "PostHog",
   "version": "1.0.0",
   "description": "Query analytics, feature flags, experiments and errors in PostHog.",
+  "keywords": [
+    "product analytics",
+    "analytics",
+    "feature flags",
+    "experiments",
+    "a/b tests",
+    "session replay",
+    "errors",
+    "surveys"
+  ],
   "author": {
     "name": "OpenBot"
   },

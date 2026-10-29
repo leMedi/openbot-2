@@ -3,6 +3,22 @@
   "displayName": "Atlassian",
   "version": "1.0.0",
   "description": "Search, create and update Jira issues and Confluence pages.",
+  "keywords": [
+    "jira",
+    "confluence",
+    "wiki",
+    "documentation",
+    "bugs",
+    "project management",
+    "tickets",
+    "issues",
+    "tasks",
+    "todos",
+    "backlog",
+    "sprints",
+    "boards",
+    "roadmap"
+  ],
   "author": {
     "name": "OpenBot"
   },

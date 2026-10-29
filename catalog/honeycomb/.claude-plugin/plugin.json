@@ -3,6 +3,15 @@
   "displayName": "Honeycomb",
   "version": "1.0.0",
   "description": "Query events and traces, and check SLOs and boards, in Honeycomb.",
+  "keywords": [
+    "observability",
+    "tracing",
+    "traces",
+    "events",
+    "slos",
+    "monitoring",
+    "devops"
+  ],
   "author": {
     "name": "OpenBot"
   },

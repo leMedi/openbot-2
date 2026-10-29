@@ -32,6 +32,8 @@ export type Plugin = {
   displayName: string
   version: string | null
   description: string
+  /** `plugin.json`'s `keywords`, lowercase: what else the service is known by, e.g. tickets for Linear, for search. */
+  keywords: string[]
   /** The plugin's folder. */
   root: string
   /** `plugin.json`'s `icon`, an image file in the plugin, and its media type; null without one. */
@@ -86,6 +88,7 @@ export async function loadPlugin(root: string): Promise<{ plugin: Plugin; warnin
       displayName: text(manifest.displayName) || name,
       version: text(manifest.version) || null,
       description: text(manifest.description),
+      keywords: Array.isArray(manifest.keywords) ? manifest.keywords.map(text).filter(Boolean).map((keyword) => keyword.toLowerCase()) : [],
       root,
       icon,
       servers: await readServers(root),

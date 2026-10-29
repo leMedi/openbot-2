@@ -3,6 +3,14 @@
   "displayName": "BioRender",
   "version": "1.0.0",
   "description": "Find scientific icons and templates in BioRender.",
+  "keywords": [
+    "science",
+    "biology",
+    "figures",
+    "illustrations",
+    "research",
+    "diagrams"
+  ],
   "author": {
     "name": "OpenBot"
   },

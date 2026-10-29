@@ -3,6 +3,14 @@
   "displayName": "Prisma",
   "version": "1.0.0",
   "description": "Manage Prisma Postgres databases and run migrations.",
+  "keywords": [
+    "database",
+    "postgres",
+    "orm",
+    "migrations",
+    "sql",
+    "developer"
+  ],
   "author": {
     "name": "OpenBot"
   },

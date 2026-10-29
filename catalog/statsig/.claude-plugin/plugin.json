@@ -3,6 +3,13 @@
   "displayName": "Statsig",
   "version": "1.0.0",
   "description": "Manage feature gates, experiments and metrics in Statsig.",
+  "keywords": [
+    "feature flags",
+    "experiments",
+    "a/b tests",
+    "product analytics",
+    "metrics"
+  ],
   "author": {
     "name": "OpenBot"
   },

@@ -3,6 +3,15 @@
   "displayName": "Mercury",
   "version": "1.0.0",
   "description": "See balances, transactions and recipients of your Mercury bank accounts.",
+  "keywords": [
+    "banking",
+    "bank account",
+    "finance",
+    "payments",
+    "transactions",
+    "transfers",
+    "accounting"
+  ],
   "author": {
     "name": "OpenBot"
   },

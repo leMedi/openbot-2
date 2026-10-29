@@ -3,6 +3,13 @@
   "displayName": "beehiiv",
   "version": "1.0.0",
   "description": "Read posts, subscribers and stats of your beehiiv newsletter.",
+  "keywords": [
+    "newsletter",
+    "email marketing",
+    "subscribers",
+    "publishing",
+    "blog"
+  ],
   "author": {
     "name": "OpenBot"
   },

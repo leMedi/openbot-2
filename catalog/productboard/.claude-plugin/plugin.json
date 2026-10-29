@@ -3,6 +3,14 @@
   "displayName": "Productboard",
   "version": "1.0.0",
   "description": "Read and add features, notes and insights in Productboard.",
+  "keywords": [
+    "product management",
+    "roadmap",
+    "feature requests",
+    "customer feedback",
+    "insights",
+    "prioritization"
+  ],
   "author": {
     "name": "OpenBot"
   },

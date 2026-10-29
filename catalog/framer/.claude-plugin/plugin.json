@@ -3,6 +3,14 @@
   "displayName": "Framer",
   "version": "1.0.0",
   "description": "Edit pages, components and CMS content of your Framer sites.",
+  "keywords": [
+    "website",
+    "site builder",
+    "design",
+    "landing pages",
+    "cms",
+    "no-code"
+  ],
   "author": {
     "name": "OpenBot"
   },

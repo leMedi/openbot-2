@@ -3,6 +3,14 @@
   "displayName": "PayPal",
   "version": "1.0.0",
   "description": "Create invoices and orders, and look up transactions, in PayPal.",
+  "keywords": [
+    "payments",
+    "invoices",
+    "transactions",
+    "money",
+    "checkout",
+    "finance"
+  ],
   "author": {
     "name": "OpenBot"
   },

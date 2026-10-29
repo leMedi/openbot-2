@@ -3,6 +3,19 @@
   "displayName": "GitLab",
   "version": "1.0.0",
   "description": "Work with projects, issues, merge requests and pipelines on GitLab.com.",
+  "keywords": [
+    "git",
+    "code",
+    "repositories",
+    "merge requests",
+    "pull requests",
+    "ci/cd",
+    "pipelines",
+    "tickets",
+    "issues",
+    "bugs",
+    "devops"
+  ],
   "author": {
     "name": "OpenBot"
   },

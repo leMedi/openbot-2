@@ -3,6 +3,13 @@
   "displayName": "Mermaid Chart",
   "version": "1.0.0",
   "description": "Create and edit diagrams in Mermaid Chart.",
+  "keywords": [
+    "diagrams",
+    "flowcharts",
+    "charts",
+    "mermaid",
+    "visualization"
+  ],
   "author": {
     "name": "OpenBot"
   },

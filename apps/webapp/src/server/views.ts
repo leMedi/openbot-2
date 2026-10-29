@@ -150,6 +150,7 @@ export function toPluginInfo(plugin: Plugin, accounts: PluginAccountSummary[], g
     displayName: plugin.displayName,
     version: plugin.version,
     description: plugin.description,
+    keywords: plugin.keywords,
     icon: plugin.icon && pluginIconPath(plugin.name),
     status: own.length ? 'connected' : 'not_connected',
     servers: plugin.servers,

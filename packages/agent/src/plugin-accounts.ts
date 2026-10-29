@@ -80,7 +80,7 @@ export const disconnectedNote = (plugin: { displayName: string }, account: { plu
   `[${accountLabel(plugin, account.displayName)} was disconnected by the owner: its tools (${toolPrefix(account.plugin, account.slug)}…) are gone.]`
 
 /** A plugin of the catalog, as `listings` reads it: what it is, and whether it brings skills only (no server, so no account). */
-export type CatalogEntry = { name: string; displayName: string; description: string; skillsOnly: boolean }
+export type CatalogEntry = { name: string; displayName: string; description: string; keywords: string[]; skillsOnly: boolean }
 
 /** A catalog plugin as `search_plugins` shows it to one bot, with that bot's status for it. */
 export type PluginListing = Omit<CatalogEntry, 'skillsOnly'> &
@@ -111,16 +111,20 @@ function describeListing(listing: PluginListing): string {
 }
 
 /**
- * `search_plugins`' answer: the plugins matching any word of `query` in their name, display name or description, or the
- * whole catalog.
+ * `search_plugins`' answer: the plugins matching any word of `query` in their name, display name, description or
+ * keywords, those matching the most words first; or the whole catalog.
  */
 export function describePluginSearch(listings: readonly PluginListing[], query?: string): string {
   const words = query?.toLowerCase().split(/\s+/).filter(Boolean) ?? []
   const found = words.length
-    ? listings.filter((listing) => {
-        const text = [listing.name, listing.displayName, listing.description].join(' ').toLowerCase()
-        return words.some((word) => text.includes(word))
-      })
+    ? listings
+        .map((listing) => {
+          const text = [listing.name, listing.displayName, listing.description, ...listing.keywords].join(' ').toLowerCase()
+          return { listing, matches: words.filter((word) => text.includes(word)).length }
+        })
+        .filter(({ matches }) => matches > 0)
+        .sort((a, b) => b.matches - a.matches)
+        .map(({ listing }) => listing)
     : listings
   if (!found.length) {
     const all = listings.map((listing) => listing.name).join(', ') || 'none'

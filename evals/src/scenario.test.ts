@@ -206,6 +206,7 @@ world:
         - Work
     linear:
       description: Your issues
+      keywords: [tickets]
       tools: [{ name: list_issues, description: List issues, result: "#1 Fix login" }]
 script:
   - { to: Ada, text: hi }
@@ -217,6 +218,7 @@ script:
       notion: {
         displayName: 'Notion',
         description: 'Your Notion workspace',
+        keywords: [],
         tools: [
           { name: 'search', description: 'Search pages', result: { Personal: 'Groceries list', Work: 'Q3 roadmap' } },
           { name: 'fetch', description: 'Read a page', result: 'The page' },
@@ -226,7 +228,7 @@ script:
           { name: 'Work', granted: [] },
         ],
       },
-      linear: { displayName: 'linear', description: 'Your issues', tools: [{ name: 'list_issues', description: 'List issues', result: '#1 Fix login' }], accounts: [] },
+      linear: { displayName: 'linear', description: 'Your issues', keywords: ['tickets'], tools: [{ name: 'list_issues', description: 'List issues', result: '#1 Fix login' }], accounts: [] },
     })
     expect(scenario.script.slice(1)).toEqual([
       { decide: 'Ada', plugin: 'notion', grant: 'Work' },

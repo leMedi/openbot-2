@@ -3,6 +3,15 @@
   "displayName": "Akiflow",
   "version": "1.0.0",
   "description": "Plan your day in Akiflow: tasks, time blocks and calendar events.",
+  "keywords": [
+    "tasks",
+    "todos",
+    "calendar",
+    "planner",
+    "time blocking",
+    "productivity",
+    "schedule"
+  ],
   "author": {
     "name": "OpenBot"
   },

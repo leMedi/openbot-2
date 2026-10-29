@@ -17,6 +17,7 @@ export type FakeTool = { name: string; description: string; result: string }
 export type FakePlugin = {
   displayName: string
   description: string
+  keywords: string[]
   tools: { name: string; description: string; result: string | Record<string, string> }[]
   accounts: { name: string; granted: string[] }[]
 }
@@ -209,6 +210,7 @@ const plugin = z
   .object({
     display_name: z.string().min(1).optional(),
     description: z.string().min(1),
+    keywords: z.array(z.string().min(1)).default([]),
     tools: z.array(z.object({ name, description: z.string(), result: z.union([z.string(), z.record(name, z.string())]) }).strict()).default([]),
     accounts: z
       .array(z.union([name.transform((account) => ({ name: account, granted: [] })), z.object({ name, granted: z.array(name).default([]) }).strict()]))
@@ -300,6 +302,7 @@ function toPlugin(name: string, raw: Raw['world']['plugins'][string]): FakePlugi
   return {
     displayName: raw.display_name ?? name,
     description: raw.description,
+    keywords: raw.keywords,
     tools: raw.tools,
     accounts: raw.accounts,
   }

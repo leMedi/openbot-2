@@ -3,6 +3,14 @@
   "displayName": "Webflow",
   "version": "1.0.0",
   "description": "Edit sites, pages and CMS collections in Webflow.",
+  "keywords": [
+    "website",
+    "site builder",
+    "cms",
+    "no-code",
+    "design",
+    "landing pages"
+  ],
   "author": {
     "name": "OpenBot"
   },

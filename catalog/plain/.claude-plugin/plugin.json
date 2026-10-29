@@ -3,6 +3,14 @@
   "displayName": "Plain",
   "version": "1.0.0",
   "description": "Work with customer threads and support requests in Plain.",
+  "keywords": [
+    "customer support",
+    "support tickets",
+    "tickets",
+    "helpdesk",
+    "customers",
+    "inbox"
+  ],
   "author": {
     "name": "OpenBot"
   },

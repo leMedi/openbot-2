@@ -3,6 +3,14 @@
   "displayName": "Cloudinary",
   "version": "1.0.0",
   "description": "Upload, find and transform images and videos in Cloudinary.",
+  "keywords": [
+    "images",
+    "videos",
+    "media",
+    "assets",
+    "photos",
+    "cdn"
+  ],
   "author": {
     "name": "OpenBot"
   },

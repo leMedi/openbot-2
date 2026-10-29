@@ -27,7 +27,7 @@ const searchPages: FakeMcpTool = {
 async function start({ accounts = 1 } = {}) {
   const { fake, plugin: notes } = await hostedPlugin('notes', [searchPages])
   const { plugin: tasks } = await hostedPlugin('tasks')
-  tasks['.claude-plugin/plugin.json'] = { name: 'tasks', displayName: 'Tasks', description: 'Your team tasks' }
+  tasks['.claude-plugin/plugin.json'] = { name: 'tasks', displayName: 'Tasks', description: 'Your team tasks', keywords: ['Tickets', 'project management'] }
   const style = {
     '.claude-plugin/plugin.json': { name: 'style', displayName: 'Style', description: 'House writing style' },
     'skills/tone/SKILL.md': '---\nname: tone\ndescription: Write in the house tone\n---\nBe brief.',
@@ -99,6 +99,18 @@ describe('search_plugins', () => {
     expect(toolResults(server, 1).at(-1)!.text).toContain('tasks (Tasks)')
     expect(toolResults(server, 1).at(-1)!.text).not.toContain('notes (Notes)')
     expect(toolResults(server, 2).at(-1)!.text).toContain('No plugin matches "calendar"')
+  })
+
+  it('finds a plugin by its keywords, those matching the most words first', async () => {
+    const { server } = await start()
+    const rex = await server.client.bots.create(newBot('Rex'))
+    server.providers.script(callsTools(['search_plugins', { query: 'tickets' }]), callsTools(['search_plugins', { query: 'workspace tickets team' }]), endsSilently())
+
+    await send(server, rex, 'Find my tickets')
+
+    expect(toolResults(server, 1).at(-1)!.text).toMatch(/^- tasks \(Tasks\)/)
+    expect(toolResults(server, 1).at(-1)!.text).not.toContain('notes (Notes)')
+    expect(toolResults(server, 2).at(-1)!.text).toMatch(/^- tasks \(Tasks\)[\s\S]*\n- notes \(Notes\)/)
   })
 
   it('is what the prompt says to check before using the browser for a service', async () => {

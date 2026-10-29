@@ -3,6 +3,13 @@
   "displayName": "Exa",
   "version": "1.0.0",
   "description": "Search the web and read pages through Exa, a search engine built for AI.",
+  "keywords": [
+    "web search",
+    "search engine",
+    "research",
+    "browse",
+    "internet"
+  ],
   "author": {
     "name": "OpenBot"
   },

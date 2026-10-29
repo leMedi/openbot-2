@@ -3,6 +3,15 @@
   "displayName": "Morningstar",
   "version": "1.0.0",
   "description": "Research funds, stocks and their ratings with Morningstar.",
+  "keywords": [
+    "investing",
+    "investments",
+    "funds",
+    "stocks",
+    "finance",
+    "portfolio",
+    "ratings"
+  ],
   "author": {
     "name": "OpenBot"
   },

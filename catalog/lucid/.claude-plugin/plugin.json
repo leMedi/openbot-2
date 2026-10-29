@@ -3,6 +3,14 @@
   "displayName": "Lucid",
   "version": "1.0.0",
   "description": "Create and read Lucidchart diagrams and Lucidspark boards.",
+  "keywords": [
+    "diagrams",
+    "flowcharts",
+    "whiteboard",
+    "lucidchart",
+    "lucidspark",
+    "visual collaboration"
+  ],
   "author": {
     "name": "OpenBot"
   },

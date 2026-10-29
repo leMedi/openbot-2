@@ -3,6 +3,17 @@
   "displayName": "Datadog",
   "version": "1.0.0",
   "description": "Search logs, metrics, traces, monitors and incidents in Datadog (US1 site).",
+  "keywords": [
+    "observability",
+    "monitoring",
+    "logs",
+    "metrics",
+    "apm",
+    "traces",
+    "alerts",
+    "incidents",
+    "devops"
+  ],
   "author": {
     "name": "OpenBot"
   },

@@ -3,6 +3,15 @@
   "displayName": "Hex",
   "version": "1.0.0",
   "description": "Search and run projects, and ask questions of your data, in Hex.",
+  "keywords": [
+    "data",
+    "analytics",
+    "sql",
+    "notebooks",
+    "bi",
+    "dashboards",
+    "data science"
+  ],
   "author": {
     "name": "OpenBot"
   },

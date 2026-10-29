@@ -3,6 +3,13 @@
   "displayName": "Granola",
   "version": "1.0.0",
   "description": "Search your meeting notes and transcripts in Granola.",
+  "keywords": [
+    "meetings",
+    "meeting notes",
+    "transcripts",
+    "notetaker",
+    "calls"
+  ],
   "author": {
     "name": "OpenBot"
   },

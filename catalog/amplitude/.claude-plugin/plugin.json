@@ -3,6 +3,16 @@
   "displayName": "Amplitude",
   "version": "1.0.0",
   "description": "Query charts, events, cohorts and experiments in Amplitude.",
+  "keywords": [
+    "product analytics",
+    "analytics",
+    "events",
+    "metrics",
+    "funnels",
+    "retention",
+    "experiments",
+    "a/b tests"
+  ],
   "author": {
     "name": "OpenBot"
   },

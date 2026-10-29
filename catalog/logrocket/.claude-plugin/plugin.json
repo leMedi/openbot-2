@@ -3,6 +3,14 @@
   "displayName": "LogRocket",
   "version": "1.0.0",
   "description": "Search sessions, errors and user behaviour in LogRocket.",
+  "keywords": [
+    "session replay",
+    "errors",
+    "frontend monitoring",
+    "product analytics",
+    "bugs",
+    "user behavior"
+  ],
   "author": {
     "name": "OpenBot"
   },

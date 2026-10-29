@@ -3,6 +3,14 @@
   "displayName": "Klaviyo",
   "version": "1.0.0",
   "description": "Work with profiles, lists, campaigns and flows in Klaviyo.",
+  "keywords": [
+    "email marketing",
+    "sms",
+    "marketing automation",
+    "campaigns",
+    "ecommerce",
+    "customers"
+  ],
   "author": {
     "name": "OpenBot"
   },

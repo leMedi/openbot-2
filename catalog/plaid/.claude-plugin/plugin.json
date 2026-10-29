@@ -3,6 +3,13 @@
   "displayName": "Plaid",
   "version": "1.0.0",
   "description": "Check your Plaid integration in the Plaid Dashboard: items, usage and errors.",
+  "keywords": [
+    "banking",
+    "fintech",
+    "bank accounts",
+    "financial data",
+    "developer"
+  ],
   "author": {
     "name": "OpenBot"
   },

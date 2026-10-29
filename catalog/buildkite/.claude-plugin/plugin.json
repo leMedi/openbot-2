@@ -3,6 +3,15 @@
   "displayName": "Buildkite",
   "version": "1.0.0",
   "description": "See pipelines and builds, and start or retry builds, in Buildkite.",
+  "keywords": [
+    "ci",
+    "ci/cd",
+    "builds",
+    "pipelines",
+    "continuous integration",
+    "deployments",
+    "devops"
+  ],
   "author": {
     "name": "OpenBot"
   },

@@ -3,6 +3,15 @@
   "displayName": "Close",
   "version": "1.0.0",
   "description": "Work with leads, contacts, opportunities and calls in Close CRM.",
+  "keywords": [
+    "crm",
+    "sales",
+    "leads",
+    "deals",
+    "pipeline",
+    "calls",
+    "customers"
+  ],
   "author": {
     "name": "OpenBot"
   },

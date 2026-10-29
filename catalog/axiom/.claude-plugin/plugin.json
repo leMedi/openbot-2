@@ -3,6 +3,13 @@
   "displayName": "Axiom",
   "version": "1.0.0",
   "description": "Query logs and events in your Axiom datasets.",
+  "keywords": [
+    "logs",
+    "observability",
+    "monitoring",
+    "events",
+    "devops"
+  ],
   "author": {
     "name": "OpenBot"
   },

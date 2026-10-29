@@ -3,6 +3,15 @@
   "displayName": "RocketReach",
   "version": "1.0.0",
   "description": "Find contact details of people and companies with RocketReach.",
+  "keywords": [
+    "sales",
+    "prospecting",
+    "contacts",
+    "email finder",
+    "phone numbers",
+    "leads",
+    "recruiting"
+  ],
   "author": {
     "name": "OpenBot"
   },

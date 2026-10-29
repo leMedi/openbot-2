@@ -3,6 +3,19 @@
   "displayName": "Linear",
   "version": "1.0.0",
   "description": "Find, create and update issues, projects and comments in Linear.",
+  "keywords": [
+    "bugs",
+    "cycles",
+    "project management",
+    "tickets",
+    "issues",
+    "tasks",
+    "todos",
+    "backlog",
+    "sprints",
+    "boards",
+    "roadmap"
+  ],
   "author": {
     "name": "OpenBot"
   },

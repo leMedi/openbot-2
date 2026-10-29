@@ -3,6 +3,14 @@
   "displayName": "Krisp",
   "version": "1.0.0",
   "description": "Search meeting transcripts and notes recorded by Krisp.",
+  "keywords": [
+    "meetings",
+    "meeting notes",
+    "transcripts",
+    "notetaker",
+    "calls",
+    "recordings"
+  ],
   "author": {
     "name": "OpenBot"
   },

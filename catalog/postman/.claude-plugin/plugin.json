@@ -3,6 +3,13 @@
   "displayName": "Postman",
   "version": "1.0.0",
   "description": "Work with collections, requests, environments and APIs in Postman.",
+  "keywords": [
+    "apis",
+    "api testing",
+    "http requests",
+    "collections",
+    "developer"
+  ],
   "author": {
     "name": "OpenBot"
   },

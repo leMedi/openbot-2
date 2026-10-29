@@ -3,6 +3,12 @@
   "displayName": "Jotform",
   "version": "1.0.0",
   "description": "Create forms and read their submissions in Jotform.",
+  "keywords": [
+    "forms",
+    "surveys",
+    "submissions",
+    "questionnaires"
+  ],
   "author": {
     "name": "OpenBot"
   },

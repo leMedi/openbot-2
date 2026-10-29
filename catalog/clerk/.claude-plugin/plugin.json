@@ -3,6 +3,15 @@
   "displayName": "Clerk",
   "version": "1.0.0",
   "description": "Manage users and organizations in your Clerk applications.",
+  "keywords": [
+    "authentication",
+    "auth",
+    "users",
+    "login",
+    "sign-in",
+    "identity",
+    "developer"
+  ],
   "author": {
     "name": "OpenBot"
   },

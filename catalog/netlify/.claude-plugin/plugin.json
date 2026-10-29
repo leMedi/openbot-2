@@ -3,6 +3,14 @@
   "displayName": "Netlify",
   "version": "1.0.0",
   "description": "Deploy sites and manage projects, forms and environment variables on Netlify.",
+  "keywords": [
+    "hosting",
+    "deployments",
+    "websites",
+    "serverless",
+    "domains",
+    "devops"
+  ],
   "author": {
     "name": "OpenBot"
   },

@@ -3,6 +3,14 @@
   "displayName": "Coda",
   "version": "1.0.0",
   "description": "Read and edit docs, tables and rows in Coda.",
+  "keywords": [
+    "docs",
+    "documents",
+    "wiki",
+    "tables",
+    "spreadsheets",
+    "notes"
+  ],
   "author": {
     "name": "OpenBot"
   },

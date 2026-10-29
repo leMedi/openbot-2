@@ -3,6 +3,15 @@
   "displayName": "Fireflies",
   "version": "1.0.0",
   "description": "Search meeting transcripts, summaries and action items in Fireflies.",
+  "keywords": [
+    "meetings",
+    "meeting notes",
+    "transcripts",
+    "action items",
+    "recordings",
+    "notetaker",
+    "calls"
+  ],
   "author": {
     "name": "OpenBot"
   },

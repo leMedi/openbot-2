@@ -287,7 +287,7 @@ export async function createServerContext({
     searchPlugins: (botId) =>
       pluginAccounts.listings(
         botId,
-        plugins.map(({ name, displayName, description, servers }) => ({ name, displayName, description, skillsOnly: !servers.length })),
+        plugins.map(({ name, displayName, description, keywords, servers }) => ({ name, displayName, description, keywords, skillsOnly: !servers.length })),
       ),
     watchdog,
     fetch,

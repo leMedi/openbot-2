@@ -3,6 +3,15 @@
   "displayName": "Miro",
   "version": "1.0.0",
   "description": "Read and create boards, sticky notes and diagrams in Miro.",
+  "keywords": [
+    "whiteboard",
+    "boards",
+    "diagrams",
+    "sticky notes",
+    "brainstorming",
+    "collaboration",
+    "design"
+  ],
   "author": {
     "name": "OpenBot"
   },

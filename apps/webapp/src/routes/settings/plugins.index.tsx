@@ -27,7 +27,7 @@ function Plugins() {
   const sections = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean)
     const shown = (plugins ?? []).filter((plugin) => {
-      const text = `${plugin.displayName} ${plugin.name} ${plugin.description}`.toLowerCase()
+      const text = [plugin.displayName, plugin.name, plugin.description, ...plugin.keywords].join(' ').toLowerCase()
       return words.every((word) => text.includes(word))
     })
     const connected = shown.filter((plugin) => plugin.status !== 'not_connected')

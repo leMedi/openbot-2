@@ -56,6 +56,7 @@ world:
     notion:                      # the catalog is empty (never the bundled plugins)
       display_name: Notion       # optional, the name by default
       description: Your Notion workspace
+      keywords: [docs, wiki]     # optional, what else search_plugins finds it by
       tools:                     # bots granted an account call them as mcp__notion_account1__search…
         - { name: search, description: Search pages, result: "Q3 roadmap" }
         - name: fetch

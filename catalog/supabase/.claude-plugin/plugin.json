@@ -3,6 +3,15 @@
   "displayName": "Supabase",
   "version": "1.0.0",
   "description": "Manage Supabase projects, run SQL and read their logs.",
+  "keywords": [
+    "database",
+    "postgres",
+    "sql",
+    "backend",
+    "auth",
+    "storage",
+    "developer"
+  ],
   "author": {
     "name": "OpenBot"
   },

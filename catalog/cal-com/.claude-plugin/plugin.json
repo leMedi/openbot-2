@@ -3,6 +3,14 @@
   "displayName": "Cal.com",
   "version": "1.0.0",
   "description": "See and book meetings, and manage event types, in Cal.com.",
+  "keywords": [
+    "calendar",
+    "scheduling",
+    "meetings",
+    "bookings",
+    "appointments",
+    "availability"
+  ],
   "author": {
     "name": "OpenBot"
   },

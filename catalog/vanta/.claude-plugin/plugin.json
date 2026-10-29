@@ -3,6 +3,15 @@
   "displayName": "Vanta",
   "version": "1.0.0",
   "description": "Check compliance tests, controls and vendors in Vanta.",
+  "keywords": [
+    "compliance",
+    "security",
+    "soc 2",
+    "iso 27001",
+    "audits",
+    "vendors",
+    "risk"
+  ],
   "author": {
     "name": "OpenBot"
   },

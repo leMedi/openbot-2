@@ -3,6 +3,15 @@
   "displayName": "Apollo.io",
   "version": "1.0.0",
   "description": "Find people and companies, and enrich contacts, with Apollo.io.",
+  "keywords": [
+    "sales",
+    "prospecting",
+    "leads",
+    "contacts",
+    "email finder",
+    "enrichment",
+    "crm"
+  ],
   "author": {
     "name": "OpenBot"
   },

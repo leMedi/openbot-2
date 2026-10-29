@@ -3,6 +3,13 @@
   "displayName": "Resend",
   "version": "1.0.0",
   "description": "Send emails, and manage domains, audiences and broadcasts, in Resend.",
+  "keywords": [
+    "email",
+    "transactional email",
+    "newsletters",
+    "broadcasts",
+    "developer"
+  ],
   "author": {
     "name": "OpenBot"
   },

@@ -3,6 +3,16 @@
   "displayName": "Stripe",
   "version": "1.0.0",
   "description": "Look up and manage customers, payments, invoices and subscriptions in Stripe.",
+  "keywords": [
+    "payments",
+    "billing",
+    "subscriptions",
+    "invoices",
+    "customers",
+    "revenue",
+    "checkout",
+    "finance"
+  ],
   "author": {
     "name": "OpenBot"
   },

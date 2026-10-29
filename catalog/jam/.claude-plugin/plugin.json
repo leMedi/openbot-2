@@ -3,6 +3,14 @@
   "displayName": "Jam",
   "version": "1.0.0",
   "description": "Read bug reports from Jam, with their console logs and network requests.",
+  "keywords": [
+    "bug reports",
+    "bugs",
+    "qa",
+    "screen recordings",
+    "debugging",
+    "issues"
+  ],
   "author": {
     "name": "OpenBot"
   },

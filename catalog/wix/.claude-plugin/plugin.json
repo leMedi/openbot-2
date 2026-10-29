@@ -3,6 +3,14 @@
   "displayName": "Wix",
   "version": "1.0.0",
   "description": "Manage your Wix sites: store, bookings, blog and contacts.",
+  "keywords": [
+    "website",
+    "site builder",
+    "online store",
+    "ecommerce",
+    "bookings",
+    "blog"
+  ],
   "author": {
     "name": "OpenBot"
   },

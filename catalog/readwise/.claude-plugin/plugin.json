@@ -3,6 +3,14 @@
   "displayName": "Readwise",
   "version": "1.0.0",
   "description": "Search your highlights and saved reading in Readwise and Reader.",
+  "keywords": [
+    "reading",
+    "highlights",
+    "articles",
+    "books",
+    "read later",
+    "kindle"
+  ],
   "author": {
     "name": "OpenBot"
   },

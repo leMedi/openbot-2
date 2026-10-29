@@ -3,6 +3,14 @@
   "displayName": "Airtable",
   "version": "1.0.0",
   "description": "Read and update bases, tables and records in Airtable.",
+  "keywords": [
+    "database",
+    "spreadsheets",
+    "tables",
+    "records",
+    "no-code",
+    "tracker"
+  ],
   "author": {
     "name": "OpenBot"
   },

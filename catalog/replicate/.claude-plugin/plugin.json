@@ -3,6 +3,13 @@
   "displayName": "Replicate",
   "version": "1.0.0",
   "description": "Search and run AI models on Replicate.",
+  "keywords": [
+    "ai",
+    "machine learning",
+    "models",
+    "image generation",
+    "inference"
+  ],
   "author": {
     "name": "OpenBot"
   },

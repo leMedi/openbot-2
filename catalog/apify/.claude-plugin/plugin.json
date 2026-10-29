@@ -3,6 +3,13 @@
   "displayName": "Apify",
   "version": "1.0.0",
   "description": "Run Apify Actors to scrape websites and collect data from them.",
+  "keywords": [
+    "web scraping",
+    "scraper",
+    "crawler",
+    "automation",
+    "data extraction"
+  ],
   "author": {
     "name": "OpenBot"
   },

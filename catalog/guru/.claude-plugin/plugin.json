@@ -3,6 +3,13 @@
   "displayName": "Guru",
   "version": "1.0.0",
   "description": "Search and read your team's knowledge in Guru.",
+  "keywords": [
+    "knowledge base",
+    "wiki",
+    "documentation",
+    "intranet",
+    "team knowledge"
+  ],
   "author": {
     "name": "OpenBot"
   },

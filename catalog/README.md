@@ -2,7 +2,9 @@
 
 The plugins bundled with each release (design §5.5, ADR 0007): one Claude Code plugin folder each, read by
 `@openbot/plugins` on boot. A plugin brings hosted MCP servers (`.mcp.json`, `type: "http"` with a `url` only) and
-optional skills (`skills/<skill>/SKILL.md`); `plugin.json`'s `displayName` and `icon` are what Settings → Plugins shows.
+optional skills (`skills/<skill>/SKILL.md`); `plugin.json`'s `displayName` and `icon` are what Settings → Plugins shows, and its
+`keywords` what else the service is known by (a category, the things it holds: `tickets`, `crm`, `meeting notes`), which
+`search_plugins` and Settings → Plugins search, since a bot looking for tickets won't say ClickUp.
 Hooks, commands, agents and config fields are ignored, and a stdio server refuses the plugin.
 
 Every server signs in with OAuth through dynamic client registration and accepts both the loopback redirect and an

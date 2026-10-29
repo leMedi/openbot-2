@@ -3,6 +3,13 @@
   "displayName": "Runway",
   "version": "1.0.0",
   "description": "Generate images and videos with Runway.",
+  "keywords": [
+    "ai",
+    "video generation",
+    "image generation",
+    "creative",
+    "media"
+  ],
   "author": {
     "name": "OpenBot"
   },

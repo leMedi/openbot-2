@@ -3,6 +3,15 @@
   "displayName": "Mixpanel",
   "version": "1.0.0",
   "description": "Query events, funnels, retention and reports in Mixpanel.",
+  "keywords": [
+    "product analytics",
+    "analytics",
+    "events",
+    "metrics",
+    "funnels",
+    "retention",
+    "reports"
+  ],
   "author": {
     "name": "OpenBot"
   },

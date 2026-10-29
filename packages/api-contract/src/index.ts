@@ -616,6 +616,8 @@ export const plugin = z.object({
   displayName: z.string(),
   version: z.string().nullable(),
   description: z.string(),
+  /** What else the service is known by, e.g. tickets for Linear, which search finds it by. */
+  keywords: z.array(z.string()),
   /** Its icon's path on this API, or null when it has none. */
   icon: z.string().nullable(),
   status: z.enum(pluginStatuses),

@@ -3,6 +3,20 @@
   "displayName": "Basecamp",
   "version": "1.0.0",
   "description": "Work with projects, to-dos and messages in Basecamp.",
+  "keywords": [
+    "to-dos",
+    "team chat",
+    "collaboration",
+    "project management",
+    "tickets",
+    "issues",
+    "tasks",
+    "todos",
+    "backlog",
+    "sprints",
+    "boards",
+    "roadmap"
+  ],
   "author": {
     "name": "OpenBot"
   },

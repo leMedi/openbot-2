@@ -3,6 +3,13 @@
   "displayName": "Make",
   "version": "1.0.0",
   "description": "Run and manage your scenarios in Make.",
+  "keywords": [
+    "automation",
+    "workflows",
+    "integrations",
+    "no-code",
+    "integromat"
+  ],
   "author": {
     "name": "OpenBot"
   },

@@ -3,6 +3,14 @@
   "displayName": "CoinMarketCap",
   "version": "1.0.0",
   "description": "Crypto prices, market data and rankings from CoinMarketCap.",
+  "keywords": [
+    "crypto",
+    "cryptocurrency",
+    "bitcoin",
+    "prices",
+    "markets",
+    "finance"
+  ],
   "author": {
     "name": "OpenBot"
   },

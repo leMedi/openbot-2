@@ -3,6 +3,16 @@
   "displayName": "DigitalOcean",
   "version": "1.0.0",
   "description": "Manage droplets, apps, databases and domains on DigitalOcean.",
+  "keywords": [
+    "hosting",
+    "cloud",
+    "servers",
+    "vps",
+    "databases",
+    "dns",
+    "deployments",
+    "devops"
+  ],
   "author": {
     "name": "OpenBot"
   },

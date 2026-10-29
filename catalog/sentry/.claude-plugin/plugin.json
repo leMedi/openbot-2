@@ -3,6 +3,15 @@
   "displayName": "Sentry",
   "version": "1.0.0",
   "description": "Look into issues, errors and traces in Sentry.",
+  "keywords": [
+    "errors",
+    "crashes",
+    "bugs",
+    "exceptions",
+    "monitoring",
+    "performance",
+    "observability"
+  ],
   "author": {
     "name": "OpenBot"
   },

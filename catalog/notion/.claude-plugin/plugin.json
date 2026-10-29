@@ -3,6 +3,16 @@
   "displayName": "Notion",
   "version": "1.0.0",
   "description": "Search, read and write pages and databases in your Notion workspace.",
+  "keywords": [
+    "docs",
+    "documents",
+    "wiki",
+    "notes",
+    "knowledge base",
+    "databases",
+    "tasks",
+    "project management"
+  ],
   "author": {
     "name": "OpenBot"
   },

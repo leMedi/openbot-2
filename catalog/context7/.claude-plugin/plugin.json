@@ -3,6 +3,15 @@
   "displayName": "Context7",
   "version": "1.0.0",
   "description": "Up-to-date documentation and code examples for libraries and frameworks.",
+  "keywords": [
+    "documentation",
+    "docs",
+    "code",
+    "libraries",
+    "apis",
+    "developer",
+    "programming"
+  ],
   "author": {
     "name": "OpenBot"
   },

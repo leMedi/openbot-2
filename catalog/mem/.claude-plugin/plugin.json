@@ -3,6 +3,12 @@
   "displayName": "Mem",
   "version": "1.0.0",
   "description": "Search, read and write notes in Mem.",
+  "keywords": [
+    "notes",
+    "note-taking",
+    "knowledge base",
+    "second brain"
+  ],
   "author": {
     "name": "OpenBot"
   },
