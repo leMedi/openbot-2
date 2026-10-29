@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "growthbook": {
+      "type": "http",
+      "url": "https://mcp.growthbook.io/mcp"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "readwise",
+  "displayName": "Readwise",
+  "version": "1.0.0",
+  "description": "Search your highlights and saved reading in Readwise and Reader.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://readwise.io",
+  "icon": "./logo.svg"
+}

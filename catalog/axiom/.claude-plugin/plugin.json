@@ -1,0 +1,11 @@
+{
+  "name": "axiom",
+  "displayName": "Axiom",
+  "version": "1.0.0",
+  "description": "Query logs and events in your Axiom datasets.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://axiom.co",
+  "icon": "./logo.svg"
+}

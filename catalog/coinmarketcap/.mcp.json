@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "coinmarketcap": {
+      "type": "http",
+      "url": "https://mcp.coinmarketcap.com/mcp"
+    }
+  }
+}

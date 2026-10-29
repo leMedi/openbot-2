@@ -1,0 +1,11 @@
+{
+  "name": "coinmarketcap",
+  "displayName": "CoinMarketCap",
+  "version": "1.0.0",
+  "description": "Crypto prices, market data and rankings from CoinMarketCap.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://coinmarketcap.com",
+  "icon": "./logo.svg"
+}

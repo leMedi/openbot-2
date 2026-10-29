@@ -1,0 +1,11 @@
+{
+  "name": "rocketreach",
+  "displayName": "RocketReach",
+  "version": "1.0.0",
+  "description": "Find contact details of people and companies with RocketReach.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://rocketreach.co",
+  "icon": "./logo.svg"
+}

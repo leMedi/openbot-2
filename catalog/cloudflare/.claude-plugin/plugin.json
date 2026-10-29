@@ -1,0 +1,11 @@
+{
+  "name": "cloudflare",
+  "displayName": "Cloudflare",
+  "version": "1.0.0",
+  "description": "Manage Workers, KV, R2 and D1 in your Cloudflare account.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.cloudflare.com",
+  "icon": "./logo.svg"
+}

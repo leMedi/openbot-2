@@ -1,0 +1,11 @@
+{
+  "name": "workos",
+  "displayName": "WorkOS",
+  "version": "1.0.0",
+  "description": "Manage organizations, users and SSO connections in WorkOS.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://workos.com",
+  "icon": "./logo.svg"
+}

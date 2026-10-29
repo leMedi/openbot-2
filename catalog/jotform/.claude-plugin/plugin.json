@@ -1,0 +1,11 @@
+{
+  "name": "jotform",
+  "displayName": "Jotform",
+  "version": "1.0.0",
+  "description": "Create forms and read their submissions in Jotform.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.jotform.com",
+  "icon": "./logo.svg"
+}

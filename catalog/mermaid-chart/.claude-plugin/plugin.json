@@ -1,0 +1,11 @@
+{
+  "name": "mermaid-chart",
+  "displayName": "Mermaid Chart",
+  "version": "1.0.0",
+  "description": "Create and edit diagrams in Mermaid Chart.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.mermaidchart.com",
+  "icon": "./logo.svg"
+}

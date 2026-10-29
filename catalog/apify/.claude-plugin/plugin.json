@@ -1,0 +1,11 @@
+{
+  "name": "apify",
+  "displayName": "Apify",
+  "version": "1.0.0",
+  "description": "Run Apify Actors to scrape websites and collect data from them.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://apify.com",
+  "icon": "./logo.svg"
+}

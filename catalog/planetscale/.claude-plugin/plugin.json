@@ -1,0 +1,11 @@
+{
+  "name": "planetscale",
+  "displayName": "PlanetScale",
+  "version": "1.0.0",
+  "description": "Query and manage PlanetScale databases and branches.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://planetscale.com",
+  "icon": "./logo.svg"
+}

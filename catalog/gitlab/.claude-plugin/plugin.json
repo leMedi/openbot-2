@@ -1,0 +1,11 @@
+{
+  "name": "gitlab",
+  "displayName": "GitLab",
+  "version": "1.0.0",
+  "description": "Work with projects, issues, merge requests and pipelines on GitLab.com.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://gitlab.com",
+  "icon": "./logo.svg"
+}

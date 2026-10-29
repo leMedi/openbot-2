@@ -1,0 +1,11 @@
+{
+  "name": "datadog",
+  "displayName": "Datadog",
+  "version": "1.0.0",
+  "description": "Search logs, metrics, traces, monitors and incidents in Datadog (US1 site).",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.datadoghq.com",
+  "icon": "./logo.svg"
+}

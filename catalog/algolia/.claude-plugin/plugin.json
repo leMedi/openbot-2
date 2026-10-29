@@ -1,0 +1,11 @@
+{
+  "name": "algolia",
+  "displayName": "Algolia",
+  "version": "1.0.0",
+  "description": "Search and manage your Algolia indices and their records.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.algolia.com",
+  "icon": "./logo.svg"
+}

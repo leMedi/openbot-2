@@ -1,0 +1,11 @@
+{
+  "name": "framer",
+  "displayName": "Framer",
+  "version": "1.0.0",
+  "description": "Edit pages, components and CMS content of your Framer sites.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.framer.com",
+  "icon": "./logo.svg"
+}

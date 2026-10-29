@@ -31,18 +31,22 @@ async function start(catalog?: string) {
 }
 
 describe('the plugin catalog', () => {
-  it('lists the bundled plugins, Notion, Linear, ClickUp and Exa, each hosted and not connected', async () => {
+  it('lists the bundled plugins, among them Notion, Linear, ClickUp and Exa, each hosted over https and not connected', async () => {
     const server = await start()
 
     const plugins = await server.client.plugins.list()
 
-    expect(plugins.map(({ name, displayName, status, servers }) => ({ name, displayName, status, servers }))).toEqual([
-      { name: 'clickup', displayName: 'ClickUp', status: 'not_connected', servers: [{ name: 'clickup', url: 'https://mcp.clickup.com/mcp' }] },
-      { name: 'exa', displayName: 'Exa', status: 'not_connected', servers: [{ name: 'exa', url: 'https://mcp.exa.ai/mcp' }] },
-      { name: 'linear', displayName: 'Linear', status: 'not_connected', servers: [{ name: 'linear', url: 'https://mcp.linear.app/mcp' }] },
-      { name: 'notion', displayName: 'Notion', status: 'not_connected', servers: [{ name: 'notion', url: 'https://mcp.notion.com/mcp' }] },
-    ])
+    expect(plugins.map(({ name, displayName, status, servers }) => ({ name, displayName, status, servers }))).toEqual(
+      expect.arrayContaining([
+        { name: 'clickup', displayName: 'ClickUp', status: 'not_connected', servers: [{ name: 'clickup', url: 'https://mcp.clickup.com/mcp' }] },
+        { name: 'exa', displayName: 'Exa', status: 'not_connected', servers: [{ name: 'exa', url: 'https://mcp.exa.ai/mcp' }] },
+        { name: 'linear', displayName: 'Linear', status: 'not_connected', servers: [{ name: 'linear', url: 'https://mcp.linear.app/mcp' }] },
+        { name: 'notion', displayName: 'Notion', status: 'not_connected', servers: [{ name: 'notion', url: 'https://mcp.notion.com/mcp' }] },
+      ]),
+    )
     for (const plugin of plugins) {
+      expect(plugin.status).toBe('not_connected')
+      expect(plugin.servers).toEqual([{ name: plugin.name, url: expect.stringMatching(/^https:\/\//) }])
       expect(plugin.description).not.toBe('')
       expect(plugin.icon).toBe(`/plugins/${plugin.name}/icon`)
     }

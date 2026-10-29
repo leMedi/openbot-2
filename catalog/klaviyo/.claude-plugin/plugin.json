@@ -1,0 +1,11 @@
+{
+  "name": "klaviyo",
+  "displayName": "Klaviyo",
+  "version": "1.0.0",
+  "description": "Work with profiles, lists, campaigns and flows in Klaviyo.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.klaviyo.com",
+  "icon": "./logo.svg"
+}

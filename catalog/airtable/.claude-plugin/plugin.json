@@ -1,0 +1,11 @@
+{
+  "name": "airtable",
+  "displayName": "Airtable",
+  "version": "1.0.0",
+  "description": "Read and update bases, tables and records in Airtable.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.airtable.com",
+  "icon": "./logo.svg"
+}

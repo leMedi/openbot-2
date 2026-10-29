@@ -1,0 +1,11 @@
+{
+  "name": "basecamp",
+  "displayName": "Basecamp",
+  "version": "1.0.0",
+  "description": "Work with projects, to-dos and messages in Basecamp.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://basecamp.com",
+  "icon": "./logo.svg"
+}

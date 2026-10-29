@@ -1,0 +1,11 @@
+{
+  "name": "sanity",
+  "displayName": "Sanity",
+  "version": "1.0.0",
+  "description": "Query and edit documents and schemas in Sanity.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.sanity.io",
+  "icon": "./logo.svg"
+}

@@ -1,0 +1,11 @@
+{
+  "name": "statsig",
+  "displayName": "Statsig",
+  "version": "1.0.0",
+  "description": "Manage feature gates, experiments and metrics in Statsig.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.statsig.com",
+  "icon": "./logo.svg"
+}

@@ -1,0 +1,11 @@
+{
+  "name": "close",
+  "displayName": "Close",
+  "version": "1.0.0",
+  "description": "Work with leads, contacts, opportunities and calls in Close CRM.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.close.com",
+  "icon": "./logo.svg"
+}

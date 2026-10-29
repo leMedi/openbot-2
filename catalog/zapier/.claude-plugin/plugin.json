@@ -1,0 +1,11 @@
+{
+  "name": "zapier",
+  "displayName": "Zapier",
+  "version": "1.0.0",
+  "description": "Run actions in thousands of apps through your Zapier account.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://zapier.com",
+  "icon": "./logo.svg"
+}

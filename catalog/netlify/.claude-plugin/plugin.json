@@ -1,0 +1,11 @@
+{
+  "name": "netlify",
+  "displayName": "Netlify",
+  "version": "1.0.0",
+  "description": "Deploy sites and manage projects, forms and environment variables on Netlify.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.netlify.com",
+  "icon": "./logo.svg"
+}

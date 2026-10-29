@@ -1,0 +1,11 @@
+{
+  "name": "make",
+  "displayName": "Make",
+  "version": "1.0.0",
+  "description": "Run and manage your scenarios in Make.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.make.com",
+  "icon": "./logo.svg"
+}

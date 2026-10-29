@@ -1,0 +1,11 @@
+{
+  "name": "monday",
+  "displayName": "monday.com",
+  "version": "1.0.0",
+  "description": "Work with boards, items and updates in monday.com.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://monday.com",
+  "icon": "./logo.svg"
+}

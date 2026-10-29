@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "vanta": {
+      "type": "http",
+      "url": "https://mcp.vanta.com/mcp"
+    }
+  }
+}

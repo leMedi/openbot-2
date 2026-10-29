@@ -1,0 +1,11 @@
+{
+  "name": "help-scout",
+  "displayName": "Help Scout",
+  "version": "1.0.0",
+  "description": "Search and answer conversations, and look up customers, in Help Scout.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.helpscout.com",
+  "icon": "./logo.svg"
+}

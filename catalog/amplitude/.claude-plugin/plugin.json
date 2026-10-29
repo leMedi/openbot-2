@@ -1,0 +1,11 @@
+{
+  "name": "amplitude",
+  "displayName": "Amplitude",
+  "version": "1.0.0",
+  "description": "Query charts, events, cohorts and experiments in Amplitude.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://amplitude.com",
+  "icon": "./logo.svg"
+}

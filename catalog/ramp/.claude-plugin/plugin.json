@@ -1,0 +1,11 @@
+{
+  "name": "ramp",
+  "displayName": "Ramp",
+  "version": "1.0.0",
+  "description": "Look into card spend, transactions, bills and reimbursements in Ramp.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://ramp.com",
+  "icon": "./logo.svg"
+}

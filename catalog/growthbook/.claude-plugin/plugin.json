@@ -1,0 +1,11 @@
+{
+  "name": "growthbook",
+  "displayName": "GrowthBook",
+  "version": "1.0.0",
+  "description": "Manage feature flags and experiments in GrowthBook.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.growthbook.io",
+  "icon": "./logo.svg"
+}

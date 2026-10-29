@@ -1,0 +1,11 @@
+{
+  "name": "atlassian",
+  "displayName": "Atlassian",
+  "version": "1.0.0",
+  "description": "Search, create and update Jira issues and Confluence pages.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.atlassian.com",
+  "icon": "./logo.svg"
+}

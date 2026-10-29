@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "close": {
+      "type": "http",
+      "url": "https://mcp.close.com/mcp"
+    }
+  }
+}

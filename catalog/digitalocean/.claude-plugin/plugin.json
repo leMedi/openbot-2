@@ -1,0 +1,11 @@
+{
+  "name": "digitalocean",
+  "displayName": "DigitalOcean",
+  "version": "1.0.0",
+  "description": "Manage droplets, apps, databases and domains on DigitalOcean.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.digitalocean.com",
+  "icon": "./logo.svg"
+}

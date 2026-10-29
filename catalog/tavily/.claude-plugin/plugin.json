@@ -1,0 +1,11 @@
+{
+  "name": "tavily",
+  "displayName": "Tavily",
+  "version": "1.0.0",
+  "description": "Search the web and extract pages with Tavily.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://tavily.com",
+  "icon": "./logo.svg"
+}

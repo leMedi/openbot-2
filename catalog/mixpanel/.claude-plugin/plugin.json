@@ -1,0 +1,11 @@
+{
+  "name": "mixpanel",
+  "displayName": "Mixpanel",
+  "version": "1.0.0",
+  "description": "Query events, funnels, retention and reports in Mixpanel.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://mixpanel.com",
+  "icon": "./logo.svg"
+}

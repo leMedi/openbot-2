@@ -1,0 +1,11 @@
+{
+  "name": "wix",
+  "displayName": "Wix",
+  "version": "1.0.0",
+  "description": "Manage your Wix sites: store, bookings, blog and contacts.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.wix.com",
+  "icon": "./logo.svg"
+}

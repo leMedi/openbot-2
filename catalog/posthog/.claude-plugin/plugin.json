@@ -1,0 +1,11 @@
+{
+  "name": "posthog",
+  "displayName": "PostHog",
+  "version": "1.0.0",
+  "description": "Query analytics, feature flags, experiments and errors in PostHog.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://posthog.com",
+  "icon": "./logo.svg"
+}

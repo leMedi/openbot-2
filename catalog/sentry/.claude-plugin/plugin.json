@@ -1,0 +1,11 @@
+{
+  "name": "sentry",
+  "displayName": "Sentry",
+  "version": "1.0.0",
+  "description": "Look into issues, errors and traces in Sentry.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://sentry.io",
+  "icon": "./logo.svg"
+}

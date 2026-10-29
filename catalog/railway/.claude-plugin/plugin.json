@@ -1,0 +1,11 @@
+{
+  "name": "railway",
+  "displayName": "Railway",
+  "version": "1.0.0",
+  "description": "Deploy and manage services, variables and logs on Railway.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://railway.com",
+  "icon": "./logo.svg"
+}

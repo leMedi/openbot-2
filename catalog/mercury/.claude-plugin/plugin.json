@@ -1,0 +1,11 @@
+{
+  "name": "mercury",
+  "displayName": "Mercury",
+  "version": "1.0.0",
+  "description": "See balances, transactions and recipients of your Mercury bank accounts.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://mercury.com",
+  "icon": "./logo.svg"
+}

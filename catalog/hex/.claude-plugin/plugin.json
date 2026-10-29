@@ -1,0 +1,11 @@
+{
+  "name": "hex",
+  "displayName": "Hex",
+  "version": "1.0.0",
+  "description": "Search and run projects, and ask questions of your data, in Hex.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://hex.tech",
+  "icon": "./logo.svg"
+}

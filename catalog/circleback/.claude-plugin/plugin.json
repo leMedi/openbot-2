@@ -1,0 +1,11 @@
+{
+  "name": "circleback",
+  "displayName": "Circleback",
+  "version": "1.0.0",
+  "description": "Search meeting notes, transcripts and action items in Circleback.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://circleback.ai",
+  "icon": "./logo.svg"
+}

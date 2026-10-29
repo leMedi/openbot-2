@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mermaid-chart": {
+      "type": "http",
+      "url": "https://mcp.mermaidchart.com/mcp"
+    }
+  }
+}

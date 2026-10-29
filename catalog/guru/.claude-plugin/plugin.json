@@ -1,0 +1,11 @@
+{
+  "name": "guru",
+  "displayName": "Guru",
+  "version": "1.0.0",
+  "description": "Search and read your team's knowledge in Guru.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.getguru.com",
+  "icon": "./logo.svg"
+}

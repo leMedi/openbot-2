@@ -1,0 +1,11 @@
+{
+  "name": "logrocket",
+  "displayName": "LogRocket",
+  "version": "1.0.0",
+  "description": "Search sessions, errors and user behaviour in LogRocket.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://logrocket.com",
+  "icon": "./logo.svg"
+}

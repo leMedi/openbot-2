@@ -1,0 +1,11 @@
+{
+  "name": "context7",
+  "displayName": "Context7",
+  "version": "1.0.0",
+  "description": "Up-to-date documentation and code examples for libraries and frameworks.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://context7.com",
+  "icon": "./logo.svg"
+}

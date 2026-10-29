@@ -1,0 +1,11 @@
+{
+  "name": "jam",
+  "displayName": "Jam",
+  "version": "1.0.0",
+  "description": "Read bug reports from Jam, with their console logs and network requests.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://jam.dev",
+  "icon": "./logo.svg"
+}

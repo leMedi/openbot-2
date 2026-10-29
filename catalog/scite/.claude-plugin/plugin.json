@@ -1,0 +1,11 @@
+{
+  "name": "scite",
+  "displayName": "scite",
+  "version": "1.0.0",
+  "description": "Search research papers on scite, with how they've been cited.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://scite.ai",
+  "icon": "./logo.svg"
+}

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "scite": {
+      "type": "http",
+      "url": "https://api.scite.ai/mcp"
+    }
+  }
+}

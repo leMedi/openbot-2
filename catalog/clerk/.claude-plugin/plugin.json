@@ -1,0 +1,11 @@
+{
+  "name": "clerk",
+  "displayName": "Clerk",
+  "version": "1.0.0",
+  "description": "Manage users and organizations in your Clerk applications.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://clerk.com",
+  "icon": "./logo.svg"
+}

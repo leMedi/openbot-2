@@ -1,0 +1,11 @@
+{
+  "name": "otter",
+  "displayName": "Otter",
+  "version": "1.0.0",
+  "description": "Search meeting transcripts and summaries in Otter.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://otter.ai",
+  "icon": "./logo.svg"
+}

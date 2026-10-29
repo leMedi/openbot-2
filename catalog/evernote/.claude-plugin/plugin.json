@@ -1,0 +1,11 @@
+{
+  "name": "evernote",
+  "displayName": "Evernote",
+  "version": "1.0.0",
+  "description": "Search, read and write notes and notebooks in Evernote.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://evernote.com",
+  "icon": "./logo.svg"
+}

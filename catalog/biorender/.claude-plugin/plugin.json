@@ -1,0 +1,11 @@
+{
+  "name": "biorender",
+  "displayName": "BioRender",
+  "version": "1.0.0",
+  "description": "Find scientific icons and templates in BioRender.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.biorender.com",
+  "icon": "./logo.svg"
+}

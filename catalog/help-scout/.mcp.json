@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "help-scout": {
+      "type": "http",
+      "url": "https://mcp.helpscout.net/mcp"
+    }
+  }
+}

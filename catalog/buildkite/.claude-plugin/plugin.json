@@ -1,0 +1,11 @@
+{
+  "name": "buildkite",
+  "displayName": "Buildkite",
+  "version": "1.0.0",
+  "description": "See pipelines and builds, and start or retry builds, in Buildkite.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://buildkite.com",
+  "icon": "./logo.svg"
+}

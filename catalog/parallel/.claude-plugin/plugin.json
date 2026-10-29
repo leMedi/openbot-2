@@ -1,0 +1,11 @@
+{
+  "name": "parallel",
+  "displayName": "Parallel",
+  "version": "1.0.0",
+  "description": "Search the web and read pages through Parallel, a search engine built for AI.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://parallel.ai",
+  "icon": "./logo.svg"
+}

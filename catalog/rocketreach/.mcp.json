@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "rocketreach": {
+      "type": "http",
+      "url": "https://mcp.rocketreach.co/mcp"
+    }
+  }
+}

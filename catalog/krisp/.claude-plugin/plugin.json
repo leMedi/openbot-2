@@ -1,0 +1,11 @@
+{
+  "name": "krisp",
+  "displayName": "Krisp",
+  "version": "1.0.0",
+  "description": "Search meeting transcripts and notes recorded by Krisp.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://krisp.ai",
+  "icon": "./logo.svg"
+}

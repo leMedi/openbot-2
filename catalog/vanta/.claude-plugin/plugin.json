@@ -1,0 +1,11 @@
+{
+  "name": "vanta",
+  "displayName": "Vanta",
+  "version": "1.0.0",
+  "description": "Check compliance tests, controls and vendors in Vanta.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.vanta.com",
+  "icon": "./logo.svg"
+}

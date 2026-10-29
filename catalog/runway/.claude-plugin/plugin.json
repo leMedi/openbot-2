@@ -1,0 +1,11 @@
+{
+  "name": "runway",
+  "displayName": "Runway",
+  "version": "1.0.0",
+  "description": "Generate images and videos with Runway.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://runwayml.com",
+  "icon": "./logo.svg"
+}

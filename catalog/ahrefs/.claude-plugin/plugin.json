@@ -1,0 +1,11 @@
+{
+  "name": "ahrefs",
+  "displayName": "Ahrefs",
+  "version": "1.0.0",
+  "description": "SEO data from Ahrefs: backlinks, keywords, rankings and site metrics.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://ahrefs.com",
+  "icon": "./logo.svg"
+}

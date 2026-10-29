@@ -1,0 +1,11 @@
+{
+  "name": "productboard",
+  "displayName": "Productboard",
+  "version": "1.0.0",
+  "description": "Read and add features, notes and insights in Productboard.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.productboard.com",
+  "icon": "./logo.svg"
+}

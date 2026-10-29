@@ -1,0 +1,11 @@
+{
+  "name": "paypal",
+  "displayName": "PayPal",
+  "version": "1.0.0",
+  "description": "Create invoices and orders, and look up transactions, in PayPal.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.paypal.com",
+  "icon": "./logo.svg"
+}

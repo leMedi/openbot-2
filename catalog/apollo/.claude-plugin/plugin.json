@@ -1,0 +1,11 @@
+{
+  "name": "apollo",
+  "displayName": "Apollo.io",
+  "version": "1.0.0",
+  "description": "Find people and companies, and enrich contacts, with Apollo.io.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.apollo.io",
+  "icon": "./logo.svg"
+}

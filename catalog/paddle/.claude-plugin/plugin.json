@@ -1,0 +1,11 @@
+{
+  "name": "paddle",
+  "displayName": "Paddle",
+  "version": "1.0.0",
+  "description": "Manage products, prices, customers and subscriptions in Paddle.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.paddle.com",
+  "icon": "./logo.svg"
+}

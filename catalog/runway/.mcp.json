@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "runway": {
+      "type": "http",
+      "url": "https://mcp.runwayml.com/mcp"
+    }
+  }
+}

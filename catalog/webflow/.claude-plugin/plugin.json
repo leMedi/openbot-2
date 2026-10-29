@@ -1,0 +1,11 @@
+{
+  "name": "webflow",
+  "displayName": "Webflow",
+  "version": "1.0.0",
+  "description": "Edit sites, pages and CMS collections in Webflow.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://webflow.com",
+  "icon": "./logo.svg"
+}

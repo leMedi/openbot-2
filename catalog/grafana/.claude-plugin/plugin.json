@@ -1,0 +1,11 @@
+{
+  "name": "grafana",
+  "displayName": "Grafana",
+  "version": "1.0.0",
+  "description": "Search dashboards, query data sources and check alerts in Grafana Cloud.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://grafana.com",
+  "icon": "./logo.svg"
+}

@@ -1,0 +1,11 @@
+{
+  "name": "morningstar",
+  "displayName": "Morningstar",
+  "version": "1.0.0",
+  "description": "Research funds, stocks and their ratings with Morningstar.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.morningstar.com",
+  "icon": "./logo.svg"
+}

@@ -1,0 +1,11 @@
+{
+  "name": "stripe",
+  "displayName": "Stripe",
+  "version": "1.0.0",
+  "description": "Look up and manage customers, payments, invoices and subscriptions in Stripe.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://stripe.com",
+  "icon": "./logo.svg"
+}

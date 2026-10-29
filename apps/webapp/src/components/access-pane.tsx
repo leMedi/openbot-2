@@ -5,9 +5,9 @@ import { api, errorMessage } from '../lib/api.ts'
 import { GrantSwitch, PluginIcon, PluginStatus, SkillsGrantSwitch } from './plugins.tsx'
 
 /**
- * The bot's Access pane (design §5.5): every plugin of the catalog, and whether the bot may use each connected account
- * of a plugin with one to sign in to, or the skills of a plugin of skills only, which the owner grants and revokes here.
- * A plugin not connected yet links to its page in Settings → Plugins.
+ * The bot's Access pane (design §5.5): the connected plugins and those of skills only, and whether the bot may use each
+ * connected account of a plugin, or the skills of a plugin of skills only, which the owner grants and revokes here. The
+ * plugins not connected yet are counted, with a link to Settings → Plugins to connect them.
  */
 export function AccessPane({ bot }: { bot: BotInfo }) {
   const [plugins, setPlugins] = useState<PluginInfo[]>()
@@ -36,7 +36,8 @@ export function AccessPane({ bot }: { bot: BotInfo }) {
     )
   }
 
-  const grantable = plugins?.filter((plugin) => plugin.servers.length > 0 || plugin.skills.length > 0)
+  const grantable = plugins?.filter((plugin) => plugin.accounts.length > 0 || (!plugin.servers.length && plugin.skills.length > 0))
+  const unconnected = plugins?.filter((plugin) => plugin.servers.length > 0 && !plugin.accounts.length).length ?? 0
   return (
     <aside aria-label={`${bot.name}'s access`} className="flex w-[360px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-border-subtle p-5">
       <header className="flex flex-col gap-1">
@@ -46,7 +47,7 @@ export function AccessPane({ bot }: { bot: BotInfo }) {
         </p>
       </header>
       {error && <p className="text-sm text-destructive-foreground">Couldn't load the plugins: {error}</p>}
-      {grantable && !grantable.length && <p className="text-sm text-muted-foreground">No plugin has an account or skills to grant.</p>}
+      {grantable && !grantable.length && <p className="text-sm text-muted-foreground">No plugin has an account or skills to grant yet.</p>}
       <ul className="flex flex-col gap-3">
         {grantable?.map((plugin) => (
           <li key={plugin.name} className="flex flex-col gap-2 rounded-lg border border-border p-3">
@@ -55,7 +56,7 @@ export function AccessPane({ bot }: { bot: BotInfo }) {
               <Link to="/settings/plugins/$name" params={{ name: plugin.name }} className="min-w-0 flex-1 truncate font-medium hover:underline">
                 {plugin.displayName}
               </Link>
-              {plugin.servers.length > 0 && !plugin.accounts.length && <PluginStatus status={plugin.status} />}
+              {plugin.status === 'needs_reconnect' && <PluginStatus status={plugin.status} />}
             </div>
             {plugin.accounts.map((account) => (
               <GrantSwitch
@@ -78,6 +79,15 @@ export function AccessPane({ bot }: { bot: BotInfo }) {
           </li>
         ))}
       </ul>
+      {unconnected > 0 && (
+        <p className="text-sm text-muted-foreground">
+          {unconnected} more {unconnected === 1 ? 'plugin is' : 'plugins are'} not connected yet:{' '}
+          <Link to="/settings/plugins" className="text-foreground hover:underline">
+            connect them in Settings → Plugins
+          </Link>
+          .
+        </p>
+      )}
     </aside>
   )
 }

@@ -1,0 +1,11 @@
+{
+  "name": "postman",
+  "displayName": "Postman",
+  "version": "1.0.0",
+  "description": "Work with collections, requests, environments and APIs in Postman.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.postman.com",
+  "icon": "./logo.svg"
+}

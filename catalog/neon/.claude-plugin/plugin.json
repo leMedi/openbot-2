@@ -1,0 +1,11 @@
+{
+  "name": "neon",
+  "displayName": "Neon",
+  "version": "1.0.0",
+  "description": "Manage Neon Postgres projects and branches, and run SQL.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://neon.com",
+  "icon": "./logo.svg"
+}

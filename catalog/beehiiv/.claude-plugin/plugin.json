@@ -1,0 +1,11 @@
+{
+  "name": "beehiiv",
+  "displayName": "beehiiv",
+  "version": "1.0.0",
+  "description": "Read posts, subscribers and stats of your beehiiv newsletter.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.beehiiv.com",
+  "icon": "./logo.svg"
+}

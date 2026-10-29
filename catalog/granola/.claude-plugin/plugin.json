@@ -1,0 +1,11 @@
+{
+  "name": "granola",
+  "displayName": "Granola",
+  "version": "1.0.0",
+  "description": "Search your meeting notes and transcripts in Granola.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.granola.ai",
+  "icon": "./logo.svg"
+}

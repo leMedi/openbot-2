@@ -1,0 +1,11 @@
+{
+  "name": "lucid",
+  "displayName": "Lucid",
+  "version": "1.0.0",
+  "description": "Create and read Lucidchart diagrams and Lucidspark boards.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://lucid.co",
+  "icon": "./logo.svg"
+}

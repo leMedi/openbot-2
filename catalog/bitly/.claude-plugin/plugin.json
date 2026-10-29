@@ -1,0 +1,11 @@
+{
+  "name": "bitly",
+  "displayName": "Bitly",
+  "version": "1.0.0",
+  "description": "Shorten links and see how often they are clicked, with Bitly.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://bitly.com",
+  "icon": "./logo.svg"
+}

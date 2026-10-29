@@ -1,0 +1,11 @@
+{
+  "name": "contentful",
+  "displayName": "Contentful",
+  "version": "1.0.0",
+  "description": "Read and edit entries, content types and assets in Contentful.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.contentful.com",
+  "icon": "./logo.svg"
+}

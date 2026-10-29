@@ -1,0 +1,11 @@
+{
+  "name": "todoist",
+  "displayName": "Todoist",
+  "version": "1.0.0",
+  "description": "Add, find and complete tasks and projects in Todoist.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.todoist.com",
+  "icon": "./logo.svg"
+}

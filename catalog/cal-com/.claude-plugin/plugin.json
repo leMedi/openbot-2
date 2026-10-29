@@ -1,0 +1,11 @@
+{
+  "name": "cal-com",
+  "displayName": "Cal.com",
+  "version": "1.0.0",
+  "description": "See and book meetings, and manage event types, in Cal.com.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://cal.com",
+  "icon": "./logo.svg"
+}

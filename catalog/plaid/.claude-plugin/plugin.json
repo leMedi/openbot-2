@@ -1,0 +1,11 @@
+{
+  "name": "plaid",
+  "displayName": "Plaid",
+  "version": "1.0.0",
+  "description": "Check your Plaid integration in the Plaid Dashboard: items, usage and errors.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://plaid.com",
+  "icon": "./logo.svg"
+}

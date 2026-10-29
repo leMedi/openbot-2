@@ -1,0 +1,11 @@
+{
+  "name": "miro",
+  "displayName": "Miro",
+  "version": "1.0.0",
+  "description": "Read and create boards, sticky notes and diagrams in Miro.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://miro.com",
+  "icon": "./logo.svg"
+}

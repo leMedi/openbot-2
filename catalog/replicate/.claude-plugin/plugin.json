@@ -1,0 +1,11 @@
+{
+  "name": "replicate",
+  "displayName": "Replicate",
+  "version": "1.0.0",
+  "description": "Search and run AI models on Replicate.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://replicate.com",
+  "icon": "./logo.svg"
+}

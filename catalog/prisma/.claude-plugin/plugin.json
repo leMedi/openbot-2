@@ -1,0 +1,11 @@
+{
+  "name": "prisma",
+  "displayName": "Prisma",
+  "version": "1.0.0",
+  "description": "Manage Prisma Postgres databases and run migrations.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.prisma.io",
+  "icon": "./logo.svg"
+}

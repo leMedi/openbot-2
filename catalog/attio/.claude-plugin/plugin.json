@@ -1,0 +1,11 @@
+{
+  "name": "attio",
+  "displayName": "Attio",
+  "version": "1.0.0",
+  "description": "Work with records, lists, notes and tasks in your Attio CRM.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://attio.com",
+  "icon": "./logo.svg"
+}

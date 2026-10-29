@@ -1,0 +1,11 @@
+{
+  "name": "coda",
+  "displayName": "Coda",
+  "version": "1.0.0",
+  "description": "Read and edit docs, tables and rows in Coda.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://coda.io",
+  "icon": "./logo.svg"
+}

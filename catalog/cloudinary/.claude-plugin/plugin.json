@@ -1,0 +1,11 @@
+{
+  "name": "cloudinary",
+  "displayName": "Cloudinary",
+  "version": "1.0.0",
+  "description": "Upload, find and transform images and videos in Cloudinary.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://cloudinary.com",
+  "icon": "./logo.svg"
+}

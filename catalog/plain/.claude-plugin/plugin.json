@@ -1,0 +1,11 @@
+{
+  "name": "plain",
+  "displayName": "Plain",
+  "version": "1.0.0",
+  "description": "Work with customer threads and support requests in Plain.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.plain.com",
+  "icon": "./logo.svg"
+}

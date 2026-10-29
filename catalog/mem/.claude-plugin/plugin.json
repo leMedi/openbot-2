@@ -1,0 +1,11 @@
+{
+  "name": "mem",
+  "displayName": "Mem",
+  "version": "1.0.0",
+  "description": "Search, read and write notes in Mem.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://mem.ai",
+  "icon": "./logo.svg"
+}

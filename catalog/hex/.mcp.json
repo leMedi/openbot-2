@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "hex": {
+      "type": "http",
+      "url": "https://app.hex.tech/mcp"
+    }
+  }
+}

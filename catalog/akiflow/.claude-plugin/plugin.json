@@ -1,0 +1,11 @@
+{
+  "name": "akiflow",
+  "displayName": "Akiflow",
+  "version": "1.0.0",
+  "description": "Plan your day in Akiflow: tasks, time blocks and calendar events.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://akiflow.com",
+  "icon": "./logo.svg"
+}

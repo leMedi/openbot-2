@@ -1,0 +1,11 @@
+{
+  "name": "honeycomb",
+  "displayName": "Honeycomb",
+  "version": "1.0.0",
+  "description": "Query events and traces, and check SLOs and boards, in Honeycomb.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://www.honeycomb.io",
+  "icon": "./logo.svg"
+}

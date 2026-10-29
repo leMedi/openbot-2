@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "buildkite": {
+      "type": "http",
+      "url": "https://mcp.buildkite.com/mcp"
+    }
+  }
+}

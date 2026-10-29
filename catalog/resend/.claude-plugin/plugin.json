@@ -1,0 +1,11 @@
+{
+  "name": "resend",
+  "displayName": "Resend",
+  "version": "1.0.0",
+  "description": "Send emails, and manage domains, audiences and broadcasts, in Resend.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://resend.com",
+  "icon": "./logo.svg"
+}

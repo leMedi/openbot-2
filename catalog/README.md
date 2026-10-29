@@ -5,4 +5,9 @@ The plugins bundled with each release (design §5.5, ADR 0007): one Claude Code 
 optional skills (`skills/<skill>/SKILL.md`); `plugin.json`'s `displayName` and `icon` are what Settings → Plugins shows.
 Hooks, commands, agents and config fields are ignored, and a stdio server refuses the plugin.
 
-The icons are each service's own mark (Simple Icons, CC0; Exa's from LobeHub Icons, MIT) on a tile in its brand colours, as its app icon shows it.
+Every server signs in with OAuth through dynamic client registration and accepts both the loopback redirect and an
+https one (design §5.5 lists the servers left out, and why).
+
+The icons are each service's own mark on a tile, as its app icon shows it: from Simple Icons (CC0) on the service's
+brand colour, from LobeHub Icons (MIT) for Exa and Tavily, otherwise the service's own app icon or favicon, embedded in
+`logo.svg`.

@@ -1,0 +1,11 @@
+{
+  "name": "supabase",
+  "displayName": "Supabase",
+  "version": "1.0.0",
+  "description": "Manage Supabase projects, run SQL and read their logs.",
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://supabase.com",
+  "icon": "./logo.svg"
+}
