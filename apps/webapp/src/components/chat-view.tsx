@@ -564,10 +564,47 @@ function FileChip({ file, onRemove }: { file: File; onRemove?: () => void }) {
   )
 }
 
+/** The width of a button beside the composer's field, with the gap before it. */
+const composerButtonWidth = 30 + 8
+
+let measuring: CanvasRenderingContext2D | null | undefined
+
+/** How wide `text` is in `field`'s font, on one line. */
+function textWidth(field: HTMLTextAreaElement, text: string): number {
+  measuring ??= document.createElement('canvas').getContext('2d')
+  if (!measuring) return 0
+  measuring.font = getComputedStyle(field).font
+  return measuring.measureText(text).width
+}
+
+/**
+ * Whether `text` takes more than one line in the composer's field when + and Send sit beside it: then the field spans the
+ * composer and the buttons move to a row below. Measured against that one-line width, so the field widening doesn't
+ * fold it back.
+ */
+function useMultiline(form: React.RefObject<HTMLFormElement | null>, field: React.RefObject<HTMLTextAreaElement | null>, text: string, buttons: number) {
+  const [multiline, setMultiline] = useState(false)
+  const [width, setWidth] = useState(0)
+  useLayoutEffect(() => {
+    if (!form.current) return
+    const observer = new ResizeObserver(([entry]) => setWidth(entry!.contentRect.width))
+    observer.observe(form.current)
+    return () => observer.disconnect()
+  }, [form])
+  useLayoutEffect(() => {
+    if (!field.current || !width) return
+    // The field's own side padding (px-1) is part of the one-line width too.
+    const oneLine = width - buttons * composerButtonWidth - 8
+    setMultiline(text.includes('\n') || textWidth(field.current, text) > oneLine)
+  }, [field, text, width, buttons])
+  return multiline
+}
+
 /**
  * Writes to the chat. In a DM, a message sent while the bot works supersedes its run: there is no Stop, as in Grok.
  * Files come from the + button, a paste, or a drop anywhere on the chat. The chat's unsent text is kept by the live
- * store, so switching chats doesn't lose it.
+ * store, so switching chats doesn't lose it. One line at first, with + and Send at its ends; once the text takes more
+ * than a line, the field spans the composer and grows, with + and Send on their own row below.
  */
 function Composer({
   chatId,
@@ -591,6 +628,9 @@ function Composer({
   const live = useLive()
   const text = live.drafts.get(chatId) ?? ''
   const picker = useRef<HTMLInputElement>(null)
+  const form = useRef<HTMLFormElement>(null)
+  const field = useRef<HTMLTextAreaElement>(null)
+  const multiline = useMultiline(form, field, text, allowFiles ? 2 : 1)
 
   function send() {
     const draft = text.trim()
@@ -603,6 +643,7 @@ function Composer({
     <div className="px-[max(24px,calc((100%-700px)/2))] pt-2 pb-[18px]">
       {notice && <p className="pb-1 text-[10px] text-muted-foreground">{notice}</p>}
       <form
+        ref={form}
         onSubmit={(event) => {
           event.preventDefault()
           send()
@@ -616,7 +657,19 @@ function Composer({
             ))}
           </div>
         )}
-        <div className="flex items-end gap-2">
+        <div
+          className={cn(
+            'grid items-center gap-x-2',
+            multiline && 'gap-y-2',
+            allowFiles
+              ? multiline
+                ? "grid-cols-[auto_1fr] [grid-template-areas:'field_field''attach_send']"
+                : "grid-cols-[auto_1fr_auto] [grid-template-areas:'attach_field_send']"
+              : multiline
+                ? "grid-cols-[1fr] [grid-template-areas:'field''send']"
+                : "grid-cols-[1fr_auto] [grid-template-areas:'field_send']",
+          )}
+        >
           {allowFiles && (
             <>
               <input
@@ -635,7 +688,7 @@ function Composer({
                 title="Attach files"
                 disabled={files.length >= maxAttachments}
                 onClick={() => picker.current?.click()}
-                className="pressable grid size-[30px] shrink-0 place-items-center rounded-full bg-background text-foreground hover:bg-secondary-hover disabled:opacity-40"
+                className="pressable grid size-[30px] [grid-area:attach] shrink-0 place-items-center rounded-full bg-background text-foreground hover:bg-secondary-hover disabled:opacity-40"
               >
                 <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden>
                   <path d="M8 3v10M3 8h10" />
@@ -644,10 +697,11 @@ function Composer({
             </>
           )}
           <textarea
+            ref={field}
             data-composer
             aria-label={label}
             placeholder={label}
-            rows={2}
+            rows={1}
             value={text}
             onChange={(event) => live.setDraft(chatId, event.target.value)}
             onPaste={(event) => {
@@ -662,9 +716,14 @@ function Composer({
                 send()
               }
             }}
-            className="max-h-60 min-h-12 flex-1 resize-none bg-transparent px-1 leading-[1.4] outline-none [field-sizing:content]"
+            className="max-h-60 resize-none bg-transparent px-1 leading-[1.4] outline-none [field-sizing:content] [grid-area:field]"
           />
-          <button type="submit" aria-label="Send" disabled={!text.trim() && !files.length} className={roundButton}>
+          <button
+            type="submit"
+            aria-label="Send"
+            disabled={!text.trim() && !files.length}
+            className={cn(roundButton, '[grid-area:send]', multiline && 'justify-self-end')}
+          >
             <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" />
             </svg>
