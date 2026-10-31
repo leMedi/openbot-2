@@ -99,6 +99,19 @@ describe('chatting in a DM', () => {
     expect(system).toContain('Rex fixes builds and never gives up.')
   })
 
+  it("starts every run with the owner's local time", async () => {
+    const { server, bot } = await startWithRex({ now: new Date('2026-03-14T09:05:00Z') })
+    await server.client.general.updateSettings({ timeZone: 'Europe/Paris' })
+    server.providers.script(callsTools(['sendMessage', { text: 'Hi' }]), endsSilently())
+
+    await server.client.chats.send({ chatId: bot.chatId, text: 'What day is it?' })
+    await untilIdle(server, bot)
+
+    const woken = JSON.stringify(server.providers.requests[0]!.messages.at(-1))
+    expect(woken).toContain('[Now: Saturday 2026-03-14 10:05 (Europe/Paris)')
+    expect(woken).toContain('What day is it?')
+  })
+
   it('runs a bot with no model of its own on the current default model', async () => {
     const { server, bot } = await startWithRex()
     await server.client.models.updateSettings({ defaultModel: 'fake/fake-mini' })

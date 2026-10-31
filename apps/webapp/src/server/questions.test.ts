@@ -268,10 +268,11 @@ describe('a question dismissed when the owner moves on', () => {
 })
 
 describe('reminding the bot of unanswered questions', () => {
-  /** What the bot read of the input that started run `index`: the newest owner message in its request. */
+  /** What the bot read of the input that started run `index`, after the time: the newest owner message in its request. */
   const inputOf = (server: TestServer, index: number) => {
     const message = server.providers.requests[index]!.messages.filter((entry) => entry.role === 'user').at(-1)!
-    return typeof message.content === 'string' ? message.content : JSON.stringify(message.content)
+    const text = typeof message.content === 'string' ? message.content : JSON.stringify(message.content)
+    return text.replace(/^\[Now: [^\]]*\]\n\n/, '')
   }
 
   it('lists every question still unanswered, open or dismissed, at the start of its next run, once', async () => {
