@@ -155,7 +155,7 @@ describe('a bot messaging another bot', () => {
     await server.client.chats.send({ chatId: rex.chatId, text: 'Ping the team' })
     await untilIdle(server, rex)
 
-    const results = JSON.stringify(requestsOf(server, 'Rex')[1]!.messages.slice(-3))
+    const results = JSON.stringify(requestsOf(server, 'Rex')[1]!.messages.filter((message) => message.role === 'toolResult').slice(-3))
     expect(results).toContain("You can't message yourself")
     expect(results).toContain('There is no bot or group chat named Zed')
     expect(results).toContain('Your teammates are Ana.')
@@ -241,7 +241,7 @@ describe('a bot messaging another bot', () => {
     await server.client.chats.send({ chatId: rex.chatId, text: 'Send Ana the diff' })
     await untilIdle(server, rex)
 
-    const results = JSON.stringify(requestsOf(server, 'Rex')[1]!.messages.slice(-4))
+    const results = JSON.stringify(requestsOf(server, 'Rex')[1]!.messages.filter((message) => message.role === 'toolResult').slice(-4))
     expect(results).toContain("diff.txt isn't an image: message_bot only carries images")
     expect(results).toContain(join(server.home, 'shared'))
     expect(results).toContain("https://example.com/page isn't an image (text/html)")

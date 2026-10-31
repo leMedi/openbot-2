@@ -111,7 +111,7 @@ describe("a granted plugin's skills", () => {
     await server.client.chats.send({ chatId: bot.chatId, text: 'Plan my meals for the week' })
     await untilIdle(server, bot)
 
-    const read = server.providers.requests.slice(1).map((request) => JSON.stringify(request.messages.at(-1)))
+    const read = server.providers.requests.slice(1).map((request) => JSON.stringify(request.messages.filter((message) => message.role === 'toolResult').at(-1)))
     expect(read[0]).toContain('Ask about allergies first.')
     expect(read[1]).toContain('Group the shopping list by aisle.')
   })

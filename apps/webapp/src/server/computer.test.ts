@@ -36,11 +36,12 @@ async function untilIdle(server: TestServer, bot: BotInfo) {
 /** Has the bot make `calls`, one round each, then answer; returns what each call gave back to the model, in order. */
 async function work(server: TestServer, bot: BotInfo, ...calls: [name: string, args: Record<string, unknown>][]) {
   const before = server.providers.requests.length
-  // It answers the owner last, so the reply guarantee has nothing to remind it of.
+  // It answers the owner last, so the reply guarantee has nothing to remind it of. Each request's tool result is the
+  // newest one, before any reminder read during the run.
   server.providers.script(...calls.map((call) => callsTools(call as [string, never])), callsTools(['sendMessage', { text: 'Done' }]), endsSilently())
   await server.client.chats.send({ chatId: bot.chatId, text: 'Get to work' })
   await untilIdle(server, bot)
-  return server.providers.requests.slice(before + 1).map((request) => JSON.stringify(request.messages.at(-1)))
+  return server.providers.requests.slice(before + 1).map((request) => JSON.stringify(request.messages.filter((message) => message.role === 'toolResult').at(-1)))
 }
 
 describe('bots on the computer', () => {

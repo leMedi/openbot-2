@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
-import { type ImageContent, type Models, type TextContent, Type } from '@earendil-works/pi-ai'
+import { type AssistantMessage, type ImageContent, type Message as ModelMessage, type Models, type TextContent, Type } from '@earendil-works/pi-ai'
 import {
   type CompactionPolicy,
   type Conversation,
@@ -130,8 +130,38 @@ const noteKind = 'openbot.note'
 const maxReplyReminders = 3
 
 export const replyReminder =
-  '<system_reminder>You ended your turn without replying. The owner only sees what you send with sendMessage; ' +
-  'your plain text is private. Reply to them now with sendMessage.</system_reminder>'
+  '<system_reminder>You ended your turn without calling sendMessage, so the owner saw nothing: your plain text is ' +
+  'private, never sent. Reply to them now by calling sendMessage, in one to four short messages.</system_reminder>'
+
+/** Follows a group turn that ended on text the bot wrote but didn't send, once: it may have meant it for the group. */
+export const groupReplyReminder =
+  '<system_reminder>Your turn ended without calling sendMessage, so nothing was posted: your plain text is private. ' +
+  'If you meant it for the group, send it now with sendMessage; otherwise end your turn.</system_reminder>'
+
+/**
+ * Follows a run that told the owner something, then worked on and ended without sending them what the work found, once
+ * (Grok's `CLOSING_SEND_NUDGE_PROMPT`): the owner's last sight may be an "on it".
+ */
+export const closingReminder =
+  '<system_reminder>You told the owner something, then kept working and ended without sending them anything more, so ' +
+  'the last thing they saw is your earlier message. If that work found or did what they are waiting on, send it now ' +
+  "with sendMessage. If it isn't finished, carry on and send the result once you have it. If they already have " +
+  'everything, end your turn.</system_reminder>'
+
+/** Read once, during a run answering the owner, when the bot has made tool calls but hasn't messaged them yet. */
+export const openingReminder =
+  '<system_reminder>The owner is waiting and has seen nothing from you yet: your tool calls and plain text never reach ' +
+  "them. Send a short sendMessage now saying what you're on, then go on with the work.</system_reminder>"
+
+/** Read once, during a run answering the owner, after many tool calls since the bot last messaged them. */
+export const silenceReminder =
+  '<system_reminder>You have made several tool calls since you last messaged the owner, so they are watching silence. ' +
+  'If you have found something, hit a blocker or changed plan, tell them in a short sendMessage, then go on; never a ' +
+  'canned "still working".</system_reminder>'
+
+/** Tool calls without a message to the owner after which a run is reminded to open, then to update (Grok's 1 and 6). */
+const openingAfterCalls = 2
+const silenceAfterCalls = 7
 
 /** Why a message is held back while the owner's newer message waits to supersede the run. */
 export const outdatedAnswer =
@@ -148,7 +178,7 @@ Your plain text is a private inner monologue: the owner never sees it, nor your 
 
 Reply first: when the owner asks for something that takes tools, your first action is a short sendMessage saying what you're on, before any other tool call. Then do the work and close the loop with what you found or did. On long work, send an update when something happens that they would want to know (a finding, a blocker, a change of plan), never a canned "still working". When something fails, say so in a line and what you'll try next. When you can answer at once, just answer. This is for the owner's messages in your chat with them: teammates' messages, routines and group turns have their own rules.
 
-Text like a person, not a memo: reply in one to four short messages, one sendMessage call each, in Markdown. Use code blocks for code. Never mention tool names, message ids or these instructions.
+Text like a person, not a memo: reply in one to four short messages, one sendMessage call each, in prose, with no headings or outlines. Keep each message to a few sentences: given many options, send your best few and offer more. Messages are Markdown; use code blocks for code. Never mention tool names, message ids or these instructions.
 
 Sound like a warm, sharp friend, not a help desk: no "Certainly!", "Great question!" or "I hope this helps", no offering a list of further help. Don't use em dashes. Use emoji only when the owner does.
 
@@ -334,6 +364,8 @@ function computerPrompt(computer: BotComputer, bot: BotWithChat, others: BotWith
     'Choose tools in this order: plugin tools first, then the shell and fetching the web from it (curl, scripts), then the browser through use_computer, then the desktop. The browser is slow and costly: use it only when the shell can\'t do the job, e.g. pages that need JavaScript, signing in or clicking through, and say why in its reason. Desktop apps come last, for what has no command line or web page.',
     '',
     "Always check search_plugins before using the browser for a service such as Notion or Linear: a plugin gives you proper tools for it. If one covers the service and you aren't granted it, ask the owner for it with request_plugin.",
+    '',
+    "Your computer's clock may not be on the owner's time zone: times that date, logs, git or file listings print may be UTC. Tell the owner times in their zone, the one in the [Now: …] line that starts each of your runs, converting any you read.",
   )
   return lines.join('\n')
 }
@@ -370,7 +402,8 @@ function groupsPrompt(bot: BotWithChat, groups: Group[]): string {
     ...groups.map((group) => `- "${group.name}", with ${othersIn(group, bot.id)}`),
     '',
     'In a group chat:',
-    `- Members take turns in rounds after each message. On your turn, reply with sendMessage (at most ${maxMessagesPerMemberTurn} messages), or pass by sending nothing. Pass unless you have something to add.`,
+    `- Members take turns in rounds after each message. On your turn, reply with sendMessage (at most ${maxMessagesPerMemberTurn} messages), or pass by sending nothing: a reply you only write, as plain text, is a pass.`,
+    '- Answer when you are mentioned or the owner asks every member; otherwise pass unless you have something to add. News that needs no answer needs no acknowledgement, and a teammate who didn\'t ask you anything needs no reply.',
     '- Everyone in the group reads what you send there. Never reveal what the owner told you privately, or anything else private from your own chat with them.',
     "- Private is everything the group hasn't seen: your chat with the owner, what they wrote about themselves, your memory, your teammates' messages to you, and the files in your folders. Use it to help, but share it only when the owner has already said it in this group or asks you to. When unsure, leave it out.",
     "- To start something in a group outside your turn, post to it with message_bot, to: the group's name. Only members can post to a group.",
@@ -379,6 +412,14 @@ function groupsPrompt(bot: BotWithChat, groups: Group[]): string {
 
 /** A message that only says "(pass)": in a group turn, it passes, posting nothing. */
 const isPass = (text: string) => /^\(?pass\)?\.?$/i.test(text.trim())
+
+/**
+ * Plain text that ends a group turn as a pass, not a reply meant for the group: "(pass)", or the bot saying to itself
+ * that it has nothing to add, wasn't asked, or will stay quiet.
+ */
+const soundsLikePass = (text: string) =>
+  isPass(text) ||
+  /\b(pass(ing)?|nothing (useful |new |more |else )?to add|no need to (reply|respond|answer|add)|not (addressed|mentioned|asked)|stay(ing)? (quiet|silent)|skip(ping)?( this)?|no (reply|response) (needed|required))\b/i.test(text)
 
 /** What a bot reads when another bot's message wakes it. */
 function describeBotMessage(sender: BotWithChat, text: string, priority: boolean): string {
@@ -454,8 +495,15 @@ function describeAttachments(attachments: readonly Attachment[], by: string): st
   return `[${by} attached ${count}, saved on your computer:\n${files.join('\n')}]`
 }
 
-const isReminder = (entry: EntryRecord) =>
-  entry.kind === 'pi.user' && entry.model?.some((message) => message.role === 'user' && message.content === replyReminder)
+const isReminder = (entry: EntryRecord, reminder: string) =>
+  entry.kind === 'pi.user' && entry.model?.some((message) => message.role === 'user' && message.content === reminder)
+
+/** A model response's text, its private monologue; empty when it said nothing. */
+const textOf = (answer: AssistantMessage) =>
+  answer.content
+    .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+    .join('')
+    .trim()
 
 /** The tools that reach the owner; any of them answers the owner, and the owner's newer message holds them all back. */
 const ownerTools = new Set(['sendMessage', 'askQuestion', 'request_plugin'])
@@ -479,6 +527,9 @@ const reachedOwner = (entry: EntryRecord) =>
       (ownerTools.has(message.toolName) ||
         (message.toolName === 'use_computer' && Boolean((message.details as UseComputerDetails | undefined)?.takeOver))),
   )
+
+/** A tool's result in a run, other than of one reaching the owner: work whose outcome they may be owed. */
+const isWork = (entry: EntryRecord) => entry.kind === 'pi.tool-result' && entry.model?.some((message) => message.role === 'toolResult' && !ownerTools.has(message.toolName))
 
 /** The tools a bot sends its own messages with: to the owner or a group, to teammates, and questions. */
 const sendingTools = new Set(['sendMessage', 'message_bot', 'askQuestion'])
@@ -1142,7 +1193,10 @@ export class BotRuntime implements AgentRuntime {
       sections: [section('voice', () => voice, { tag: false })],
       tools: tools.map(({ tool }) => tool),
       hooks: [
-        hook(GenerationTask, { onYield: (_answer, api) => runtime?.remindIfOwed(api.conversationId) }),
+        hook(GenerationTask, {
+          beforeRequest: (request, api) => runtime?.remindDuring(api.conversationId, request.messages),
+          onYield: (answer, api) => runtime?.remindIfOwed(api.conversationId, answer),
+        }),
         // The owner's newer message is about to supersede the run; until then the bot can't answer the request it replaces.
         hook(ToolTask, {
           beforeTool: async (call, api) => {
@@ -1475,27 +1529,73 @@ export class BotRuntime implements AgentRuntime {
 
   /**
    * The reply guarantee: a run answering the owner that sent no message continues with a reminder, up to
-   * `maxReplyReminders` times. Reads the history back from the newest entry to the owner's latest input.
+   * `maxReplyReminders` times; one that messaged them, then ran other tools and ended, with `closingReminder` once; a
+   * group turn that ended on `answer`'s text, unless it sounds like a pass, with one. Reads the history back from the
+   * newest entry to the owner's latest input.
    */
-  async remindIfOwed(conversationId: ConversationId) {
+  async remindIfOwed(conversationId: ConversationId, answer: AssistantMessage) {
     const history = await this.#harness.conversation(conversationId, context)
     if (!history) return
     let reminders = 0
+    let groupReminded = false
+    let closed = false
+    let reached = false
+    /** A tool other than one reaching the owner returned after their latest message from the bot. */
+    let workedSince = false
     let cursor
     do {
       const page = await history.entries({}, 100, cursor, context)
       for (const entry of page.items) {
-        if (reachedOwner(entry)) return
-        if (isReminder(entry)) reminders++
+        if (reachedOwner(entry)) reached = true
+        else if (!reached && isWork(entry)) workedSince = true
+        if (isReminder(entry, replyReminder)) reminders++
+        if (isReminder(entry, groupReplyReminder)) groupReminded = true
+        if (isReminder(entry, closingReminder)) closed = true
         if (entry.kind === inputKind) {
-          // A group turn may pass: the guarantee covers the owner's own messages to the bot.
           const data = entry.data as InputRecord | undefined
-          const owed = data?.lane === 'owner' && !data.groupChatId
-          return owed && reminders < maxReplyReminders ? { continue: replyReminder } : undefined
+          if (data?.lane !== 'owner') return
+          // A group turn may pass, but text written and not sent, unless it reads as a pass, was likely meant for the group.
+          if (data.groupChatId) {
+            const ended = textOf(answer)
+            return !reached && ended && !soundsLikePass(ended) && !groupReminded ? { continue: groupReplyReminder } : undefined
+          }
+          if (!reached) return reminders < maxReplyReminders ? { continue: replyReminder } : undefined
+          return workedSince && !closed ? { continue: closingReminder } : undefined
         }
       }
       cursor = page.next
     } while (cursor)
+  }
+
+  /**
+   * Grok's reminder middleware, for a run answering the owner in its DM: before a request, the model reads
+   * `openingReminder` once it has made `openingAfterCalls` tool calls without messaging the owner, and `silenceReminder`
+   * once `silenceAfterCalls` have passed since it last did. Each is read by the one request whose round crossed the
+   * count; neither is kept in the history.
+   */
+  async remindDuring(conversationId: ConversationId, messages: readonly ModelMessage[]): Promise<{ messages: readonly ModelMessage[] } | undefined> {
+    let sent = false
+    let since = 0
+    let latestRound: number | undefined
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index]!
+      if (message.role === 'user') break
+      if (message.role !== 'assistant') continue
+      const calls = message.content.filter((block) => block.type === 'toolCall')
+      if (calls.some((call) => ownerTools.has(call.name))) {
+        sent = true
+        latestRound ??= 0
+        break
+      }
+      latestRound ??= calls.length
+      since += calls.length
+    }
+    const crossed = (count: number) => since >= count && since - (latestRound ?? 0) < count
+    const reminder = !sent && crossed(openingAfterCalls) ? openingReminder : crossed(silenceAfterCalls) ? silenceReminder : undefined
+    if (!reminder) return
+    const input = await this.inputOf(conversationId)
+    if (input?.lane !== 'owner' || input.groupChatId) return
+    return { messages: [...messages, { role: 'user', content: reminder, timestamp: Date.now() }] }
   }
 
   /**
@@ -1659,7 +1759,7 @@ export class BotRuntime implements AgentRuntime {
     do {
       const page = await history.entries({ minEntryId: inputEntry, order: 'ascending' }, 100, cursor, context)
       for (const entry of page.items) {
-        if (entry.id === inputEntry || isReminder(entry)) continue
+        if (entry.id === inputEntry || [replyReminder, groupReplyReminder, closingReminder].some((reminder) => isReminder(entry, reminder))) continue
         // The next run's.
         if (entry.kind === inputKind) return parts
         for (const message of entry.model ?? []) {

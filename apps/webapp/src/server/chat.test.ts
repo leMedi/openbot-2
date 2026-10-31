@@ -1,4 +1,4 @@
-import { owedReplyNote, replyReminder, supersededNote } from '@openbot/agent'
+import { closingReminder, openingReminder, owedReplyNote, replyReminder, silenceReminder, supersededNote } from '@openbot/agent'
 import { callsTools, endsSilently, fails, held, says, slowTool } from '@openbot/agent/testing'
 import type { BotInfo, NewBot } from '@openbot/api-contract'
 import { postMessage } from '@openbot/core'
@@ -265,6 +265,90 @@ describe('the reply guarantee', () => {
       ['bot', 'The build is green again.'],
     ])
     expect(JSON.stringify(server.providers.requests[1]!.messages)).toContain(replyReminder)
+    expect(server.providers.pendingTurns).toBe(0)
+  })
+
+  it('reminds a bot once that it messaged the owner, then worked and ended without sending what it found', async () => {
+    const { server, bot } = await startWithRex()
+    server.providers.script(
+      callsTools(['sendMessage', { text: 'On it.' }]),
+      callsTools(['search_plugins', {}]),
+      says('Private: no plugin covers it.'),
+      callsTools(['sendMessage', { text: 'No plugin covers that.' }]),
+      endsSilently(),
+    )
+
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Is there a plugin for it?' })
+    await untilIdle(server, bot)
+
+    expect(await texts(server, bot)).toEqual([
+      ['owner', 'Is there a plugin for it?'],
+      ['bot', 'On it.'],
+      ['bot', 'No plugin covers that.'],
+    ])
+    expect(JSON.stringify(server.providers.requests[3]!.messages)).toContain(closingReminder)
+    expect(server.providers.pendingTurns).toBe(0)
+  })
+
+  it('reminds a bot at most once to send what its work found', async () => {
+    const { server, bot } = await startWithRex()
+    server.providers.script(
+      callsTools(['sendMessage', { text: 'On it.' }]),
+      callsTools(['search_plugins', {}]),
+      endsSilently(),
+      says('Private: they have it.'),
+      says('unused'),
+    )
+
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Is there a plugin for it?' })
+    await untilIdle(server, bot)
+
+    expect(server.providers.pendingTurns).toBe(1)
+  })
+
+  it('does not remind a bot that sent what its work found', async () => {
+    const { server, bot } = await startWithRex()
+    server.providers.script(
+      callsTools(['sendMessage', { text: 'On it.' }]),
+      callsTools(['search_plugins', {}]),
+      callsTools(['sendMessage', { text: 'No plugin covers that.' }]),
+      endsSilently(),
+      says('unused'),
+    )
+
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Is there a plugin for it?' })
+    await untilIdle(server, bot)
+
+    expect(server.providers.pendingTurns).toBe(1)
+  })
+
+  it('reminds a working bot, for one request each, to tell the owner what it is on and then how it is going', async () => {
+    const { server, bot } = await startWithRex()
+    const search = () => callsTools(['search_plugins', {}])
+    server.providers.script(
+      search(),
+      search(),
+      callsTools(['sendMessage', { text: 'Looking through the plugins.' }]),
+      ...Array.from({ length: 7 }, search),
+      callsTools(['sendMessage', { text: 'None fits.' }]),
+      endsSilently(),
+    )
+
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Find me a plugin' })
+    await untilIdle(server, bot)
+
+    const reads = (reminder: string) => server.providers.requests.map((request) => request.messages.some((message) => message.content === reminder))
+    const only = (index: number) => server.providers.requests.map((_, at) => at === index)
+    // Two calls and no message: the third request reads the opening reminder, and only it.
+    expect(reads(openingReminder)).toEqual(only(2))
+    // Seven calls since that message: the eleventh reads the silence reminder, and only it.
+    expect(reads(silenceReminder)).toEqual(only(10))
+    // Neither stays in the history.
+    expect(await texts(server, bot)).toEqual([
+      ['owner', 'Find me a plugin'],
+      ['bot', 'Looking through the plugins.'],
+      ['bot', 'None fits.'],
+    ])
     expect(server.providers.pendingTurns).toBe(0)
   })
 
