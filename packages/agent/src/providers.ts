@@ -9,7 +9,7 @@ import {
   type Provider,
   createModels,
 } from '@earendil-works/pi-ai'
-import type { SecretBox } from '@openbot/core'
+import { installationId, type SecretBox } from '@openbot/core'
 import type { Db } from '@openbot/db'
 import { SystemCredentialStore } from './credential-store.ts'
 import { SignInNotFoundError, type SignInStep, stepQueue } from './sign-in.ts'
@@ -76,10 +76,12 @@ const toStep = (event: AuthEvent): SignInStep => {
 export class Providers {
   /** pi's model collection, for the runtime; auth resolves (and refreshes) through our credential store. */
   readonly models: Models
+  readonly #db: Db
   readonly #credentials: SystemCredentialStore
   readonly #signIns = new Map<string, Map<string, (answer: string) => void>>()
 
   constructor({ db, box, providers }: { db: Db; box: SecretBox; providers: readonly ModelProvider[] }) {
+    this.#db = db
     this.#credentials = new SystemCredentialStore(db, box)
     const models = createModels({ credentials: this.#credentials, authContext: noAmbientAuth })
     for (const provider of providers) models.setProvider(provider)
@@ -174,7 +176,8 @@ export class Providers {
     }
 
     steps.push({ type: 'started', signInId })
-    this.models.login(providerId, method, interaction).then(
+    // Sign in with ChatGPT names this installation to OpenAI by a UUID that must not change between sign-ins.
+    installationId(this.#db).then((id) => this.models.login(providerId, method, interaction, { getDeviceId: () => id })).then(
       () => steps.push({ type: 'connected' }),
       (error: unknown) => {
         if (!cancel.signal.aborted) steps.push({ type: 'failed', message: error instanceof Error ? error.message : String(error) })

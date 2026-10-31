@@ -125,6 +125,7 @@ export { type Clock, type ClockTimer, systemClock } from './ports/clock.ts'
 export { type DailyJob, instantAt, type LocalDateTime, type LocalTime, nextLocalTime, ServerJobs } from './server-jobs.ts'
 export {
   detectTimeZone,
+  installationId,
   InvalidTimeZoneError,
   ownerTimeZone,
   readModelSettings,

@@ -131,3 +131,13 @@ export async function writeOwnerProfile(db: Db, changes: Partial<{ name: string;
   })
   return readOwnerProfile(db)
 }
+
+/**
+ * This installation's stable UUID, created on first use; e.g. OpenAI's agent host ID when the owner signs in with
+ * ChatGPT, which must stay the same across sign-ins.
+ */
+export async function installationId(db: Db): Promise<string> {
+  await db.insert(settings).values({ key: 'installationId', value: crypto.randomUUID() }).onConflictDoNothing()
+  const [row] = await db.select().from(settings).where(eq(settings.key, 'installationId'))
+  return row!.value as string
+}
