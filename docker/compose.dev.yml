@@ -17,8 +17,13 @@ services:
     hostname: openbot
     ports:
       - "${OPENBOT_DEV_PORT:-3000}:3000"
+      # Sign in with ChatGPT returns the browser to http://127.0.0.1:1455/auth/callback, a port pi listens on during the
+      # sign-in; published so the sign-in completes without pasting the URL back.
+      - "127.0.0.1:1455:1455"
     environment:
       OPENBOT_PUBLIC_URL: http://localhost:${OPENBOT_DEV_PORT:-3000}
+      # pi listens on 127.0.0.1 by default, which the published port can't reach inside the container.
+      PI_OAUTH_CALLBACK_HOST: 0.0.0.0
       # Empty means generate one into the data volume; set (≥ 32 characters) in your shell to use your own. Empty also
       # keeps the repo's .env from supplying one, since dotenv never overrides a variable that is set.
       OPENBOT_SECRET_KEY: ${OPENBOT_SECRET_KEY:-}
