@@ -57,6 +57,9 @@ export type Verdict =
 
 export const avatarShapes = ['blob', 'pebble', 'squircle', 'tablet', 'wedge', 'hex', 'cloud', 'teardrop'] as const
 export type AvatarShape = (typeof avatarShapes)[number]
+/** How a bot's avatar is drawn: a critter with an accessory, or a Bauhaus poster of tiles. */
+export const avatarStyles = ['critter', 'bauhaus'] as const
+export type AvatarStyle = (typeof avatarStyles)[number]
 
 export const bots = sqliteTable(
   'bots',
@@ -67,6 +70,8 @@ export const bots = sqliteTable(
     title: text('title'),
     /** The owner's instructions: who the bot is and how it behaves. */
     instructions: text('instructions').notNull().default(''),
+    avatarStyle: text('avatar_style', { enum: avatarStyles }).notNull().default('critter'),
+    /** Picks the style's archetype: a critter's accessory, a Bauhaus poster's tile layout. */
     avatarShape: text('avatar_shape', { enum: avatarShapes }).notNull(),
     /** One of the persona-mark colours (black, brown, red…). */
     avatarColor: text('avatar_color').notNull(),

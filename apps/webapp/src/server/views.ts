@@ -89,6 +89,7 @@ export function toBotInfo(bot: BotWithChat, { working, error }: BotStatus): BotI
     name: bot.name,
     title: bot.title,
     instructions: bot.instructions,
+    avatarStyle: bot.avatarStyle,
     avatarShape: bot.avatarShape,
     avatarColor: bot.avatarColor as BotInfo['avatarColor'],
     model: bot.model,

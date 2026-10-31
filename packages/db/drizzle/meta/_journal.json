@@ -141,6 +141,13 @@
       "when": 1793273063497,
       "tag": "0019_message_search",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1793485363793,
+      "tag": "0020_bot_avatar_style",
+      "breakpoints": true
     }
   ]
 }

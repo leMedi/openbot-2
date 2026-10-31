@@ -24,6 +24,7 @@ export const sampleBots: NewBot[] = [
     name: 'Grace',
     title: 'Planner',
     instructions: 'Grace breaks goals into steps, keeps track of who does what and reminds people when things slip.',
+    avatarStyle: 'bauhaus',
     avatarShape: 'squircle',
     avatarColor: 'green',
     model: null,

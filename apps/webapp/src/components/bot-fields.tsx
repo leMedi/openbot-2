@@ -1,4 +1,4 @@
-import { avatarColors, avatarShapes, type BotInfo, type ModelInfo, type ModelSettings } from '@openbot/api-contract'
+import { avatarColors, avatarShapes, avatarStyles, type BotInfo, type ModelInfo, type ModelSettings } from '@openbot/api-contract'
 import { cn } from '@openbot/ui/lib/utils'
 import { useEffect, useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
@@ -28,21 +28,47 @@ export function useModels() {
   return { models, defaultModel: models.find((entry) => entry.ref === settings?.defaultModel), error }
 }
 
-/** The avatar preview with its shape and color pickers. */
+export type AvatarChange =
+  | { avatarStyle: BotInfo['avatarStyle'] }
+  | { avatarShape: BotInfo['avatarShape'] }
+  | { avatarColor: BotInfo['avatarColor'] }
+
+const styleLabels: Record<BotInfo['avatarStyle'], string> = { critter: 'Critter', bauhaus: 'Bauhaus' }
+
+/** The avatar preview with its style, shape and color pickers. */
 export function AvatarPicker({
+  style,
   shape,
   color,
   onChange,
 }: {
+  style: BotInfo['avatarStyle']
   shape: BotInfo['avatarShape']
   color: BotInfo['avatarColor']
   /** Called with the one part that changed. */
-  onChange: (change: { avatarShape: BotInfo['avatarShape'] } | { avatarColor: BotInfo['avatarColor'] }) => void
+  onChange: (change: AvatarChange) => void
 }) {
   return (
     <div className="flex items-center gap-3">
-      <BotAvatar shape={shape} color={color} size={56} />
+      <BotAvatar style={style} shape={shape} color={color} size={56} />
       <div className="flex flex-col gap-2">
+        <div className="flex w-fit gap-0.5 rounded-md bg-secondary p-0.5" role="radiogroup" aria-label="Style">
+          {avatarStyles.map((entry) => (
+            <button
+              key={entry}
+              type="button"
+              role="radio"
+              aria-checked={entry === style}
+              onClick={() => onChange({ avatarStyle: entry })}
+              className={cn(
+                'pressable rounded-[5px] px-2 py-0.5 text-xs transition-colors duration-100',
+                entry === style ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {styleLabels[entry]}
+            </button>
+          ))}
+        </div>
         <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="Shape">
           {avatarShapes.map((entry) => (
             <button
@@ -54,7 +80,7 @@ export function AvatarPicker({
               onClick={() => onChange({ avatarShape: entry })}
               className={cn('pressable rounded-md p-0.5', entry === shape ? 'bg-selected' : 'hover:bg-secondary')}
             >
-              <BotAvatar shape={entry} color={color} size={22} />
+              <BotAvatar style={style} shape={entry} color={color} size={22} />
             </button>
           ))}
         </div>

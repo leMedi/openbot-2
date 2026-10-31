@@ -297,9 +297,9 @@ function YouStep({ general, onSaved }: { general: GeneralSettings; onSaved: (gen
 /** A few of the bots to come, as a hello. */
 function WelcomeMark() {
   const crew = [
-    { shape: 'blob', color: 'blue' },
-    { shape: 'hex', color: 'orange' },
-    { shape: 'cloud', color: 'violet' },
+    { style: 'critter', shape: 'blob', color: 'blue' },
+    { style: 'bauhaus', shape: 'hex', color: 'orange' },
+    { style: 'critter', shape: 'cloud', color: 'violet' },
   ] as const
   return (
     <div aria-hidden className="flex -space-x-2">
@@ -309,7 +309,7 @@ function WelcomeMark() {
           className="motion-safe:animate-pop-in motion-reduce:animate-fade-in"
           style={{ animationDelay: `${120 + position * 60}ms` }}
         >
-          <BotAvatar shape={bot.shape} color={bot.color} size={40} />
+          <BotAvatar style={bot.style} shape={bot.shape} color={bot.color} size={40} />
         </span>
       ))}
     </div>

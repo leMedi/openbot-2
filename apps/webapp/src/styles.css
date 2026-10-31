@@ -86,3 +86,86 @@
     }
   }
 }
+
+/*
+ * Bot avatars (components/bot-avatar.tsx): blink at rest, move while working, flag a wait for the owner. Each part
+ * turns about its own box. Avatars under 24px (`.avatar-still`) and reduced motion stay still.
+ */
+@layer components {
+  .avatar svg * {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  .avatar .avatar-blink {
+    animation: avatar-blink 6s infinite;
+  }
+  .avatar .avatar-flash {
+    animation: avatar-flash 1.1s ease-in-out infinite;
+  }
+  .avatar .avatar-turn {
+    animation: avatar-turn 3.2s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  }
+  .avatar .avatar-bob {
+    animation: avatar-bob 0.7s ease-in-out infinite;
+  }
+  .avatar .avatar-hop {
+    animation: avatar-hop 1.6s ease-out infinite;
+  }
+  .avatar .avatar-sway {
+    transform-origin: bottom center;
+    animation: avatar-sway 1.2s ease-in-out infinite;
+  }
+  .avatar .avatar-propeller {
+    animation: avatar-propeller 0.35s linear infinite;
+  }
+  .avatar .avatar-float {
+    animation: avatar-float 1.4s ease-in-out infinite;
+  }
+  .avatar-still * {
+    animation: none !important;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .avatar * {
+      animation: none !important;
+    }
+  }
+}
+
+@keyframes avatar-blink {
+  0%, 93%, 100% { transform: scaleY(1); }
+  96% { transform: scaleY(0.1); }
+}
+@keyframes avatar-flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+@keyframes avatar-turn {
+  0%, 20% { transform: rotate(0); }
+  25%, 45% { transform: rotate(90deg); }
+  50%, 70% { transform: rotate(180deg); }
+  75%, 95% { transform: rotate(270deg); }
+  100% { transform: rotate(360deg); }
+}
+@keyframes avatar-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+@keyframes avatar-hop {
+  0%, 55%, 100% { transform: translateY(0); }
+  65% { transform: translateY(-9px); }
+  75% { transform: translateY(0); }
+  83% { transform: translateY(-4px); }
+  90% { transform: translateY(0); }
+}
+@keyframes avatar-sway {
+  0%, 100% { transform: rotate(-12deg); }
+  50% { transform: rotate(12deg); }
+}
+@keyframes avatar-propeller {
+  0%, 100% { transform: scaleX(1); }
+  50% { transform: scaleX(-1); }
+}
+@keyframes avatar-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}

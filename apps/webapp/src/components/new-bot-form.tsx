@@ -19,6 +19,7 @@ export function NewBotForm({
   const [name, setName] = useState('')
   const [title, setTitle] = useState('')
   const [instructions, setInstructions] = useState('')
+  const [style, setStyle] = useState<BotInfo['avatarStyle']>('critter')
   const [shape, setShape] = useState<NewBot['avatarShape']>(() => avatarShapes[Math.floor(Math.random() * avatarShapes.length)]!)
   const [color, setColor] = useState<NewBot['avatarColor']>(() => avatarColors[Math.floor(Math.random() * avatarColors.length)]!)
   const [model, setModel] = useState(followDefault)
@@ -37,6 +38,7 @@ export function NewBotForm({
           name: name.trim(),
           title: title.trim() || null,
           instructions,
+          avatarStyle: style,
           avatarShape: shape,
           avatarColor: color,
           model: model || null,
@@ -51,9 +53,14 @@ export function NewBotForm({
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
       <AvatarPicker
+        style={style}
         shape={shape}
         color={color}
-        onChange={(change) => ('avatarShape' in change ? setShape(change.avatarShape) : setColor(change.avatarColor))}
+        onChange={(change) => {
+          if ('avatarStyle' in change) setStyle(change.avatarStyle)
+          else if ('avatarShape' in change) setShape(change.avatarShape)
+          else setColor(change.avatarColor)
+        }}
       />
 
       <Field label="Name" htmlFor="bot-name" hint="How you and other bots mention it; no two bots share one.">

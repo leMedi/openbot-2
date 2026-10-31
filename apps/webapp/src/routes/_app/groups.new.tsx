@@ -124,7 +124,7 @@ function ToField({ bots, members, onChange }: { bots: BotInfo[]; members: BotInf
         </label>
         {members.map((bot) => (
           <span key={bot.id} className="flex items-center gap-1 rounded-full bg-secondary py-0.5 pr-1 pl-1 motion-safe:animate-pop-in motion-reduce:animate-fade-in">
-            <BotAvatar shape={bot.avatarShape} color={bot.avatarColor} size={18} />
+            <BotAvatar style={bot.avatarStyle} shape={bot.avatarShape} color={bot.avatarColor} size={18} />
             <span className="text-sm">{bot.name}</span>
             <button
               type="button"
@@ -185,7 +185,7 @@ function ToField({ bots, members, onChange }: { bots: BotInfo[]; members: BotInf
               }}
               className={cn('flex cursor-default items-center gap-2 rounded-md px-2 py-1.5', index === highlight && 'bg-secondary')}
             >
-              <BotAvatar shape={bot.avatarShape} color={bot.avatarColor} size={20} />
+              <BotAvatar style={bot.avatarStyle} shape={bot.avatarShape} color={bot.avatarColor} size={20} />
               <span>{bot.name}</span>
               {bot.title && <span className="truncate text-sm text-muted-foreground">{bot.title}</span>}
             </li>

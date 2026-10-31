@@ -3,6 +3,8 @@ import { type ContractRouterClient, eventIterator, oc } from '@orpc/contract'
 import { OpenAPILink } from '@orpc/openapi-client/fetch'
 import { z } from 'zod'
 
+/** How a bot's avatar is drawn: a critter with an accessory, or a Bauhaus poster of tiles. */
+export const avatarStyles = ['critter', 'bauhaus'] as const
 export const avatarShapes = ['blob', 'pebble', 'squircle', 'tablet', 'wedge', 'hex', 'cloud', 'teardrop'] as const
 export const avatarColors = [
   'black',
@@ -25,6 +27,8 @@ export const bot = z.object({
   title: z.string().nullable(),
   /** The owner's instructions: who the bot is and how it behaves. */
   instructions: z.string(),
+  avatarStyle: z.enum(avatarStyles),
+  /** Picks the style's archetype: a critter's accessory, a Bauhaus poster's tile layout. */
   avatarShape: z.enum(avatarShapes),
   avatarColor: z.enum(avatarColors),
   /** `provider/modelId`; null follows the default model. */
@@ -42,6 +46,8 @@ export const newBot = z.object({
   name: z.string().trim().min(1).max(80),
   title: z.string().trim().max(120).nullable(),
   instructions: z.string().max(20_000),
+  /** Critter when left out. */
+  avatarStyle: z.enum(avatarStyles).optional(),
   avatarShape: z.enum(avatarShapes),
   avatarColor: z.enum(avatarColors),
   model: z.string().nullable(),

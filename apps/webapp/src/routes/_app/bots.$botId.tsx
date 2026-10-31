@@ -107,7 +107,7 @@ const paneLabels = { screen: 'Screen', profile: 'Profile', routines: 'Routines' 
 function DmHeader({ bot, pane, onTogglePane }: { bot: BotInfo; pane: Pane | null; onTogglePane: (pane: Pane) => void }) {
   return (
     <header className="chat-material sticky top-0 z-10 flex min-h-[51px] items-center gap-2 px-4">
-      <BotAvatar shape={bot.avatarShape} color={bot.avatarColor} />
+      <BotAvatar style={bot.avatarStyle} shape={bot.avatarShape} color={bot.avatarColor} />
       <span className="font-semibold">{bot.name}</span>
       {bot.working && <span className="animate-fade-in text-sm text-muted-foreground">Working</span>}
       <span className="ml-auto flex gap-1">

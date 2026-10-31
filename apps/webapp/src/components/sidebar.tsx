@@ -665,7 +665,7 @@ function RailRow({ row, active, visible, onMenu }: { row: Row; active: boolean; 
       activeProps={{ className: 'bg-secondary', 'aria-current': 'page' }}
     >
       {bot ? (
-        <BotAvatar shape={bot.avatarShape} color={bot.avatarColor} working={working && !needsYou} />
+        <BotAvatar style={bot.avatarStyle} shape={bot.avatarShape} color={bot.avatarColor} working={working} waiting={needsYou} />
       ) : (
         <GroupAvatar members={members} working={working && !needsYou} />
       )}
@@ -877,7 +877,7 @@ function ChatRow({
   const status = needsYou ? 'Needs attention' : unread ? 'Unread activity' : undefined
 
   const avatar = (working: boolean) =>
-    bot ? <BotAvatar shape={bot.avatarShape} color={bot.avatarColor} working={working} /> : <GroupAvatar members={members} working={working} />
+    bot ? <BotAvatar style={bot.avatarStyle} shape={bot.avatarShape} color={bot.avatarColor} working={working} waiting={needsYou} /> : <GroupAvatar members={members} working={working} />
 
   if (renaming) return <RenameRow row={row} avatar={avatar(working)} onDone={onRenamed} />
 

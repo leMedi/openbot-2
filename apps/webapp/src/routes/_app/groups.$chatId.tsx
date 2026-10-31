@@ -127,7 +127,7 @@ function MembersPane({ chat, members }: { chat: ChatInfo; members: BotInfo[] }) 
       <ul className="flex flex-col gap-1">
         {members.map((bot) => (
           <li key={bot.id} className="flex items-center gap-2 rounded-md px-1 py-1">
-            <BotAvatar shape={bot.avatarShape} color={bot.avatarColor} size={24} working={bot.working} />
+            <BotAvatar style={bot.avatarStyle} shape={bot.avatarShape} color={bot.avatarColor} size={24} working={bot.working} />
             <Link to="/bots/$botId" params={{ botId: bot.id }} className="min-w-0 flex-1 truncate hover:underline">
               {bot.name}
             </Link>

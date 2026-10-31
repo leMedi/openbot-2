@@ -4,7 +4,7 @@ import { and, asc, eq, ne, sql } from 'drizzle-orm'
 export class NameTakenError extends Error {}
 
 /** What the owner sets on a bot. */
-export type BotProfile = Pick<NewBot, 'name' | 'title' | 'instructions' | 'avatarShape' | 'avatarColor' | 'model'>
+export type BotProfile = Pick<NewBot, 'name' | 'title' | 'instructions' | 'avatarStyle' | 'avatarShape' | 'avatarColor' | 'model'>
 
 /** Throws `NameTakenError` when a bot other than `exceptId` has `name`, ignoring case. */
 async function assertNameFree(tx: Pick<Db, 'select'>, name: string, exceptId?: string) {

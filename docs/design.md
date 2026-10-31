@@ -125,7 +125,7 @@ As built (#10):
 
 ### 3.1 Bots
 
-- Fields: name (unique ignoring case; bots are mentioned by name), title, instructions, avatar shape and color, `model` (null follows `settings.defaultModel`), display number, `pi_conversation_id`, sidebar `section_id` and `pinned_position` (P1).
+- Fields: name (unique ignoring case; bots are mentioned by name), title, instructions, avatar style (critter or bauhaus), shape and color, `model` (null follows `settings.defaultModel`), display number, `pi_conversation_id`, sidebar `section_id` and `pinned_position` (P1).
 - **New bot** opens a popup with those fields. **New group chat** opens an empty conversation with a Slack-style "To:" chip field; the first message creates the group.
 - **Delete is permanent.** It removes the bot row, its pi conversation, 1:1 messages, routines, memory, grants, rules, audit entries, display and `$OPENBOT_HOME/bots/<id>/`, and removes it from groups. Messages it left elsewhere keep an `author_name` snapshot and show as "Name (deleted)". Shared memory facts it wrote stay, shown as "via Name (deleted)".
 

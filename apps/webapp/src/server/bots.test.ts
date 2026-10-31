@@ -89,7 +89,7 @@ describe('bots', () => {
 
     const created = await server.client.bots.create(rex)
 
-    expect(created).toEqual({ ...rex, id: expect.any(String), chatId: expect.any(String), working: false, error: null })
+    expect(created).toEqual({ ...rex, avatarStyle: 'critter', id: expect.any(String), chatId: expect.any(String), working: false, error: null })
     expect(await server.client.bots.list()).toEqual([created])
     expect(await server.client.chats.messages({ chatId: created.chatId })).toEqual([])
   })
@@ -128,6 +128,16 @@ describe('editing a bot', () => {
 
     expect(updated).toEqual({ ...bot, name: 'Rexy', title: 'Release engineer', avatarShape: 'cloud', avatarColor: 'red' })
     expect(await server.client.bots.list()).toEqual([updated])
+  })
+
+  it('draws a new bot as a critter unless told otherwise, and switches its avatar style', async () => {
+    const server = await start()
+    const bot = await server.client.bots.create(rex)
+    expect(bot.avatarStyle).toBe('critter')
+    expect((await server.client.bots.create({ ...rex, name: 'Ada', avatarStyle: 'bauhaus' })).avatarStyle).toBe('bauhaus')
+
+    const updated = await server.client.bots.update({ botId: bot.id, avatarStyle: 'bauhaus' })
+    expect(updated).toEqual({ ...bot, avatarStyle: 'bauhaus' })
   })
 
   it("rejects another bot's name, ignoring case, but lets a bot change its own name's case", async () => {

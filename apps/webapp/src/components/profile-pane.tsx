@@ -117,7 +117,7 @@ export function ProfilePane({ bot, onSaved, onDeleted }: { bot: BotInfo; onSaved
         </span>
       </header>
 
-      <AvatarPicker shape={bot.avatarShape} color={bot.avatarColor} onChange={(change) => save(change)} />
+      <AvatarPicker style={bot.avatarStyle} shape={bot.avatarShape} color={bot.avatarColor} onChange={(change) => save(change)} />
 
       <Field label="Name" htmlFor="profile-name" hint="How you and other bots mention it; no two bots share one.">
         <input id="profile-name" value={text.name} onChange={(event) => edit('name', event.target.value)} onBlur={blurName} className={inputClass} />

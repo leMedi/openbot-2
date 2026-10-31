@@ -1,0 +1,1 @@
+ALTER TABLE `bots` ADD `avatar_style` text DEFAULT 'critter' NOT NULL;
