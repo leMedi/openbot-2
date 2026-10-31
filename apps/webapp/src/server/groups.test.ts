@@ -1,8 +1,8 @@
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { interruptedNote } from '@openbot/agent'
-import { callsTools, endsSilently, held } from '@openbot/agent/testing'
+import { groupReplyReminder, interruptedNote } from '@openbot/agent'
+import { callsTools, endsSilently, held, says } from '@openbot/agent/testing'
 import { type BotInfo, type ChatInfo, maxGroupMembers, minGroupMembers, type NewBot } from '@openbot/api-contract'
 import { groupRoundRules } from '@openbot/core'
 import { messages } from '@openbot/db'
@@ -160,6 +160,32 @@ describe('rounds', () => {
     expect(lastMessage(anaFirst!)).toContain('Rex: Build is green.')
     // A pass needs no reply: no reminder followed.
     expect(server.providers.pendingTurns).toBe(0)
+  })
+
+  it('reminds a member once that a reply it only wrote was not posted', async () => {
+    const { server, bots: [rex, ana] } = await startWith('Rex', 'Ana')
+    server.providers.scriptFor('Rex', says('Build is green.'), ...posts('Build is green.'))
+    server.providers.scriptFor('Ana', says('Docs are ready, I think.'), says('Still nothing to post.'))
+
+    const chat = await createGroup(server, [rex!, ana!], 'Can we ship today?')
+
+    expect(await transcript(server, chat.id)).toEqual(['You: Can we ship today?', 'Rex: Build is green.'])
+    expect(lastMessage(requestsOf(server, 'Rex')[1]!)).toContain(groupReplyReminder)
+    expect(lastMessage(requestsOf(server, 'Ana')[1]!)).toContain(groupReplyReminder)
+    // Ana's second text ended its turn: one reminder only.
+    expect(requestsOf(server, 'Ana')).toHaveLength(2)
+    expect(server.providers.pendingTurns).toBe(0)
+  })
+
+  it('takes text saying the member has nothing to add as a pass, with no reminder', async () => {
+    const { server, bots: [rex, ana] } = await startWith('Rex', 'Ana')
+    server.providers.scriptFor('Rex', ...posts('Build is green.'))
+    server.providers.scriptFor('Ana', says('Rex covered it, nothing to add.'), says('unused'))
+
+    const chat = await createGroup(server, [rex!, ana!], 'Can we ship today?')
+
+    expect(await transcript(server, chat.id)).toEqual(['You: Can we ship today?', 'Rex: Build is green.'])
+    expect(requestsOf(server, 'Ana')).toHaveLength(1)
   })
 
   it('plays at most 3 rounds, rotating the order each round', async () => {

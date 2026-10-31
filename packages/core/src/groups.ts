@@ -201,9 +201,11 @@ export function describeTurn(group: Group, botId: string, since: TurnMessages): 
   const { maxMessagesPerMemberTurn } = groupRoundRules
   const lines = [
     `[Group chat: "${group.name}" - with ${othersIn(group, botId)}]`,
-    `[Your turn in the group chat. The owner and every member read what you send here. Reply with sendMessage, at most ${maxMessagesPerMemberTurn} messages, ` +
-      'or pass by ending your turn without sending anything. Pass unless you have something useful to add, and never repeat what someone already said. ' +
-      'Answer when you are mentioned (@name or @everyone). Never reveal anything from your private chat with the owner or other private context.]',
+    `[Your turn in the group chat. The owner and every member read what you send here with sendMessage, at most ${maxMessagesPerMemberTurn} messages; ` +
+      'your plain text is private, so a reply you only write is never posted. Answer when you are mentioned (@name or @everyone) or the owner asks every member. ' +
+      'Otherwise pass by ending your turn without sending anything, unless you have something useful to add. News that needs no answer needs no acknowledgement; ' +
+      "never repeat what someone already said, nor answer a teammate who didn't ask you anything. " +
+      'Never reveal anything from your private chat with the owner or other private context.]',
     '',
   ]
   if (since.omitted > 0) lines.push(`(${since.omitted} earlier message${since.omitted === 1 ? '' : 's'} not shown)`)

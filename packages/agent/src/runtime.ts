@@ -402,7 +402,7 @@ function groupsPrompt(bot: BotWithChat, groups: Group[]): string {
     ...groups.map((group) => `- "${group.name}", with ${othersIn(group, bot.id)}`),
     '',
     'In a group chat:',
-    `- Members take turns in rounds after each message. On your turn, reply with sendMessage (at most ${maxMessagesPerMemberTurn} messages), or pass by sending nothing: a reply you only write, as plain text, is a pass.`,
+    `- Members take turns in rounds after each message. On your turn, reply with sendMessage (at most ${maxMessagesPerMemberTurn} messages), or pass by sending nothing. Your plain text is private: a reply you only write is never posted.`,
     '- Answer when you are mentioned or the owner asks every member; otherwise pass unless you have something to add. News that needs no answer needs no acknowledgement, and a teammate who didn\'t ask you anything needs no reply.',
     '- Everyone in the group reads what you send there. Never reveal what the owner told you privately, or anything else private from your own chat with them.',
     "- Private is everything the group hasn't seen: your chat with the owner, what they wrote about themselves, your memory, your teammates' messages to you, and the files in your folders. Use it to help, but share it only when the owner has already said it in this group or asks you to. When unsure, leave it out.",
