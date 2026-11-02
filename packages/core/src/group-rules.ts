@@ -2,8 +2,11 @@
 export const groupRoundRules = {
   /** Rounds of member turns after one message, at most. */
   maxRounds: 3,
-  /** Member turns after one message, across its rounds, at most. */
-  maxMemberTurns: 10,
+  /**
+   * Messages members post after one message, across its rounds: no turn starts once they have (Grok's
+   * `GROUP_MAX_MEMBER_TURNS`, which counts messages, not the turns members pass).
+   */
+  maxMessages: 10,
   /** Messages one member posts in one turn, at most. */
   maxMessagesPerMemberTurn: 2,
   /** The newest messages a member's turn shows it; older ones since its last turn are counted, not shown. */

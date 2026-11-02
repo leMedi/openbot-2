@@ -18,9 +18,10 @@ script:
   - to: Launch
     text: We need a landing page for the launch by Friday. What does each of you need from me?
 assert:
-  - messages: { in: Launch, from: Ada, min: 1, max: 2 }
-  - messages: { in: Launch, from: Linus, min: 1, max: 2 }
-  - messages: { in: Launch, from: Grace, min: 1, max: 2 }
+  # At most one message a round, as Grok's turns ask: members may settle a hand-off between them in rounds 2 and 3
+  - messages: { in: Launch, from: Ada, min: 1, max: 3 }
+  - messages: { in: Launch, from: Linus, min: 1, max: 3 }
+  - messages: { in: Launch, from: Grace, min: 1, max: 3 }
   - max_message_length: 600
 rubric:
   - Each member asks only for what its own area needs (design, engineering, planning)

@@ -20,10 +20,11 @@ const rotate = <T>(items: readonly T[], by: number): T[] => {
 
 /**
  * Plays group chats in Grok's rounds. A message in a group (the owner's, or a member's post) starts rounds of member
- * turns, one member at a time, each reading what was said since its last turn. At most 3 rounds and 10
- * member turns; the order rotates each round; a round in which nobody posts ends it. Mentions choose who answers:
- * `@name` restricts the rounds to the members named (and those they then mention), `@everyone` or no mention lets
- * every member answer. A newer message ends the rounds going on after the turn in progress, and starts its own.
+ * turns, one member at a time, each reading what was said since its last turn. At most 3 rounds and 10 messages
+ * posted; the order rotates each round; a round in which nobody posts ends it. Mentions choose who answers each round,
+ * as Grok's `resolveResponders`: the members mentioned since the message (in it or in members' posts), or every member
+ * while nobody is mentioned or someone said `@everyone`. A newer message ends the rounds going on after the turn in
+ * progress, and starts its own.
  */
 export class GroupRounds {
   readonly #options: GroupRoundsOptions
@@ -87,21 +88,23 @@ export class GroupRounds {
 
   async #play(chatId: string, trigger: Message, generation: number) {
     const { db } = this.#options
-    const { maxRounds, maxMemberTurns } = groupRoundRules
+    const { maxRounds, maxMessages } = groupRoundRules
     const group = await getGroup(db, chatId)
     if (!group) return
-    const mentions = mentionedMembers(trigger.text, group.roster.filter((member) => member.id !== trigger.authorBotId))
-    const restricted = !mentions.everyone && mentions.ids.length > 0
-    // Who may answer this round: the members mentioned, or everyone but the poster.
-    let answering = new Set(restricted ? mentions.ids : group.members.filter((id) => id !== trigger.authorBotId))
-    let turns = 0
+    const first = mentionedMembers(trigger.text, group.roster.filter((member) => member.id !== trigger.authorBotId))
+    // Everyone mentioned since the message, which picks who answers each round.
+    let everyone = first.everyone
+    const mentioned = new Set(first.ids)
+    let messages = 0
     for (let round = 0; round < maxRounds; round++) {
       let posted = false
-      const mentionedNow = new Set<string>()
       const current = await getGroup(db, chatId)
       if (!current) return
-      for (const botId of rotate(current.members.filter((id) => answering.has(id)), round)) {
-        if (this.#superseded(chatId, generation) || turns >= maxMemberTurns) return
+      // The poster sits out round 1.
+      const members = round === 0 ? current.members.filter((id) => id !== trigger.authorBotId) : current.members
+      const answering = everyone || !mentioned.size ? members : members.filter((id) => mentioned.has(id))
+      for (const botId of rotate(answering, round)) {
+        if (this.#superseded(chatId, generation) || messages >= maxMessages) return
         // Read afresh: an earlier turn may have taken a while, and members come and go.
         const group = await getGroup(db, chatId)
         if (!group?.members.includes(botId)) continue
@@ -109,16 +112,18 @@ export class GroupRounds {
         // Nothing new from anyone else: nothing to answer.
         if (!since.messages.length || !since.cursor) continue
         await setTurnCursor(db, chatId, botId, since.cursor)
-        turns++
         const said = await this.#turn(group.id, botId, describeTurn(group, botId, since), since.cursor)
         if (!said.length) continue
         posted = true
+        messages += said.length
         const others = group.roster.filter((member) => member.id !== botId)
-        for (const message of said) for (const id of mentionedMembers(message.text, others).ids) mentionedNow.add(id)
+        for (const message of said) {
+          const named = mentionedMembers(message.text, others)
+          everyone ||= named.everyone
+          for (const id of named.ids) mentioned.add(id)
+        }
       }
       if (!posted) return
-      const members = (await getGroup(db, chatId))?.members ?? []
-      answering = new Set(restricted ? [...mentions.ids, ...mentionedNow] : members)
     }
   }
 

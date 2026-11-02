@@ -164,14 +164,15 @@ describe('rounds', () => {
 
   it('reminds a member once that a reply it only wrote was not posted', async () => {
     const { server, bots: [rex, ana] } = await startWith('Rex', 'Ana')
-    server.providers.scriptFor('Rex', says('Build is green.'), ...posts('Build is green.'))
+    // A build "passing" isn't the member passing.
+    server.providers.scriptFor('Rex', says('Build 482 is passing.'), ...posts('Build is green.'))
     server.providers.scriptFor('Ana', says('Docs are ready, I think.'), says('Still nothing to post.'))
 
     const chat = await createGroup(server, [rex!, ana!], 'Can we ship today?')
 
     expect(await transcript(server, chat.id)).toEqual(['You: Can we ship today?', 'Rex: Build is green.'])
-    expect(lastMessage(requestsOf(server, 'Rex')[1]!)).toContain(groupReplyReminder)
-    expect(lastMessage(requestsOf(server, 'Ana')[1]!)).toContain(groupReplyReminder)
+    expect(lastMessage(requestsOf(server, 'Rex')[1]!)).toContain(JSON.stringify(groupReplyReminder))
+    expect(lastMessage(requestsOf(server, 'Ana')[1]!)).toContain(JSON.stringify(groupReplyReminder))
     // Ana's second text ended its turn: one reminder only.
     expect(requestsOf(server, 'Ana')).toHaveLength(2)
     expect(server.providers.pendingTurns).toBe(0)
@@ -201,7 +202,33 @@ describe('rounds', () => {
     expect(server.providers.pendingTurns).toBe(0)
   })
 
-  it('plays at most 10 member turns', async () => {
+  it('reminds a member once that work it did in its turn, then ended on silently, was not posted', async () => {
+    const { server, bots: [rex, ana] } = await startWith('Rex', 'Ana')
+    server.providers.scriptFor('Rex', callsTools(['read', { path: 'notes.txt' }]), endsSilently(), ...posts('No notes yet.'))
+    server.providers.scriptFor('Ana', callsTools(['read', { path: 'notes.txt' }]), endsSilently(), endsSilently())
+
+    const chat = await createGroup(server, [rex!, ana!], 'Any notes from yesterday?')
+
+    expect(await transcript(server, chat.id)).toEqual(['You: Any notes from yesterday?', 'Rex: No notes yet.'])
+    expect(lastMessage(requestsOf(server, 'Rex')[2]!)).toContain(JSON.stringify(groupReplyReminder))
+    expect(requestsOf(server, 'Ana')).toHaveLength(3)
+    expect(server.providers.pendingTurns).toBe(0)
+  })
+
+  it('ends after 10 messages, not counting the turns members pass', async () => {
+    const { server, bots } = await startWith('Rex', 'Ana', 'Max', 'Kim', 'Bo', 'Cy')
+    server.providers.scriptFor('Rex', ...posts('Rex 1'), ...posts('Rex 2'))
+    server.providers.scriptFor('Ana', ...posts('Ana 1'), ...posts('Ana 2'))
+    for (const name of ['Max', 'Kim', 'Bo', 'Cy']) server.providers.scriptFor(name, ...passes(), ...passes())
+
+    const chat = await createGroup(server, bots, 'Brainstorm names')
+
+    // Round 2 is Rex's alone (the others heard nothing new); round 3's 11th and 12th turns still play.
+    expect((await transcript(server, chat.id)).slice(1)).toEqual(['Rex: Rex 1', 'Ana: Ana 1', 'Rex: Rex 2', 'Ana: Ana 2'])
+    expect(server.providers.pendingTurns).toBe(0)
+  })
+
+  it('posts at most 10 messages', async () => {
     const { server, bots } = await startWith('Rex', 'Ana', 'Max', 'Kim')
     for (const name of ['Rex', 'Ana', 'Max', 'Kim']) server.providers.scriptFor(name, ...posts(`${name} 1`), ...posts(`${name} 2`))
     // Round 3 would start with Max, then Kim: the 9th and 10th turns.
@@ -224,6 +251,21 @@ describe('rounds', () => {
 
     expect(await transcript(server, chat.id)).toEqual(['You: @ana is the release ready?', 'Ana: @Rex can you check the build?', 'Rex: Green.'])
     expect(requestsOf(server, 'Max')).toEqual([])
+    expect(server.providers.pendingTurns).toBe(0)
+  })
+
+  it('lets only the members mentioned answer once a member mentions one', async () => {
+    const { server, bots: [rex, ana, max] } = await startWith('Rex', 'Ana', 'Max')
+    server.providers.scriptFor('Rex', ...posts('@Ana are the docs done?'))
+    server.providers.scriptFor('Ana', ...posts('Docs are done.'), ...passes())
+    server.providers.scriptFor('Max', ...posts('Build is green.'))
+
+    const chat = await createGroup(server, [rex!, ana!, max!], 'Can we ship today?')
+
+    expect((await transcript(server, chat.id)).slice(1)).toEqual(['Rex: @Ana are the docs done?', 'Ana: Docs are done.', 'Max: Build is green.'])
+    // Round 2 is Ana's alone: Rex, who heard Ana and Max since, gets no turn.
+    expect(speakers(server).filter((_, index) => index % 2 === 0)).toEqual(['Rex', 'Ana', 'Max', 'Ana'])
+    expect((await server.client.bots.list()).map((bot) => bot.error)).toEqual([null, null, null])
     expect(server.providers.pendingTurns).toBe(0)
   })
 

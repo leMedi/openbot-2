@@ -133,10 +133,10 @@ export const replyReminder =
   '<system_reminder>You ended your turn without calling sendMessage, so the owner saw nothing: your plain text is ' +
   'private, never sent. Reply to them now by calling sendMessage, in one to four short messages.</system_reminder>'
 
-/** Follows a group turn that ended on text the bot wrote but didn't send, once: it may have meant it for the group. */
+/** Follows a group turn that ended without posting, on text or on silent work, once: it may have meant it for the group. */
 export const groupReplyReminder =
   '<system_reminder>Your turn ended without calling sendMessage, so nothing was posted: your plain text is private. ' +
-  'If you meant it for the group, send it now with sendMessage; otherwise end your turn.</system_reminder>'
+  'If you meant it for the group, send it now with sendMessage; otherwise send "(pass)".</system_reminder>'
 
 /**
  * Follows a run that told the owner something, then worked on and ended without sending them what the work found, once
@@ -396,14 +396,14 @@ function teamPrompt(others: BotWithChat[]): string {
  */
 function groupsPrompt(bot: BotWithChat, groups: Group[]): string {
   if (!groups.length) return ''
-  const { maxMessagesPerMemberTurn } = groupRoundRules
+  const { maxRounds, maxMessages } = groupRoundRules
   return [
     'Group chats you are in, with the owner and other bots:',
     ...groups.map((group) => `- "${group.name}", with ${othersIn(group, bot.id)}`),
     '',
     'In a group chat:',
-    `- Members take turns in rounds after each message. On your turn, reply with sendMessage (at most ${maxMessagesPerMemberTurn} messages), or pass by sending nothing. Your plain text is private: a reply you only write is never posted.`,
-    '- Answer when you are mentioned or the owner asks every member; otherwise pass unless you have something to add. News that needs no answer needs no acknowledgement, and a teammate who didn\'t ask you anything needs no reply.',
+    `- Members take turns in rounds after each message, at most ${maxRounds} rounds and ${maxMessages} messages. On your turn, do the work first, then reply with a single short sendMessage if you have something new worth adding, or send "(pass)" if you don't. Your plain text is private: a reply you only write is never posted.`,
+    "- Answer when you are mentioned or the owner asks every member. Once someone is mentioned, only the members mentioned get the next turns. Never repeat what someone already said: an acknowledgement isn't worth adding.",
     '- Everyone in the group reads what you send there. Never reveal what the owner told you privately, or anything else private from your own chat with them.',
     "- Private is everything the group hasn't seen: your chat with the owner, what they wrote about themselves, your memory, your teammates' messages to you, and the files in your folders. Use it to help, but share it only when the owner has already said it in this group or asks you to. When unsure, leave it out.",
     "- To start something in a group outside your turn, post to it with message_bot, to: the group's name. Only members can post to a group.",
@@ -419,7 +419,8 @@ const isPass = (text: string) => /^\(?pass\)?\.?$/i.test(text.trim())
  */
 const soundsLikePass = (text: string) =>
   isPass(text) ||
-  /\b(pass(ing)?|nothing (useful |new |more |else )?to add|no need to (reply|respond|answer|add)|not (addressed|mentioned|asked)|stay(ing)? (quiet|silent)|skip(ping)?( this)?|no (reply|response) (needed|required))\b/i.test(text)
+  // The member passing, not a build "passing": "I'll pass", "passing on this", "Passing, nothing to add".
+  /^\(?passing\b|\b(i('ll| will)? pass|passing on (this|it|that)|pass(ing)? (this|my) (one|turn)|nothing (useful |new |more |else )?to add|no need to (reply|respond|answer|add)|not (addressed|mentioned|asked)|stay(ing)? (quiet|silent)|skip(ping)? (this|my turn)|end(ing)? (my |the )?turn|no (reply|response) (needed|required))\b/i.test(text)
 
 /** What a bot reads when another bot's message wakes it. */
 function describeBotMessage(sender: BotWithChat, text: string, priority: boolean): string {
@@ -1530,8 +1531,8 @@ export class BotRuntime implements AgentRuntime {
   /**
    * The reply guarantee: a run answering the owner that sent no message continues with a reminder, up to
    * `maxReplyReminders` times; one that messaged them, then ran other tools and ended, with `closingReminder` once; a
-   * group turn that ended on `answer`'s text, unless it sounds like a pass, with one. Reads the history back from the
-   * newest entry to the owner's latest input.
+   * group turn that posted nothing, ending on `answer`'s text that doesn't sound like a pass or silently after work,
+   * with `groupReplyReminder` once. Reads the history back from the newest entry to the owner's latest input.
    */
   async remindIfOwed(conversationId: ConversationId, answer: AssistantMessage) {
     const history = await this.#harness.conversation(conversationId, context)
@@ -1554,10 +1555,12 @@ export class BotRuntime implements AgentRuntime {
         if (entry.kind === inputKind) {
           const data = entry.data as InputRecord | undefined
           if (data?.lane !== 'owner') return
-          // A group turn may pass, but text written and not sent, unless it reads as a pass, was likely meant for the group.
+          // A group turn may pass, but text written and not sent, unless it reads as a pass, was likely meant for the
+          // group, as was work it ended on silently (Grok's members do the work, then deliver it).
           if (data.groupChatId) {
             const ended = textOf(answer)
-            return !reached && ended && !soundsLikePass(ended) && !groupReminded ? { continue: groupReplyReminder } : undefined
+            const unposted = ended ? !soundsLikePass(ended) : workedSince
+            return !reached && unposted && !groupReminded ? { continue: groupReplyReminder } : undefined
           }
           if (!reached) return reminders < maxReplyReminders ? { continue: replyReminder } : undefined
           return workedSince && !closed ? { continue: closingReminder } : undefined

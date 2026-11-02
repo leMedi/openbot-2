@@ -194,21 +194,20 @@ function describeGroupMessage(message: Message): string {
 }
 
 /**
- * What a member reads when its turn comes: Grok's group tag (`[Group chat: "Launch" - with Ana, Rex]`), the rules of a
- * turn, then the messages since its last turn.
+ * What a member reads when its turn comes, as Grok's `buildGroupTurnPrompt`: the group tag
+ * (`[Group chat: "Launch" - with Ana, Rex]`), the messages since its last turn, then the rules of its turn.
  */
 export function describeTurn(group: Group, botId: string, since: TurnMessages): string {
-  const { maxMessagesPerMemberTurn } = groupRoundRules
-  const lines = [
-    `[Group chat: "${group.name}" - with ${othersIn(group, botId)}]`,
-    `[Your turn in the group chat. The owner and every member read what you send here with sendMessage, at most ${maxMessagesPerMemberTurn} messages; ` +
-      'your plain text is private, so a reply you only write is never posted. Answer when you are mentioned (@name or @everyone) or the owner asks every member. ' +
-      'Otherwise pass by ending your turn without sending anything, unless you have something useful to add. News that needs no answer needs no acknowledgement; ' +
-      "never repeat what someone already said, nor answer a teammate who didn't ask you anything. " +
-      'Never reveal anything from your private chat with the owner or other private context.]',
-    '',
-  ]
+  const name = group.roster.find((member) => member.id === botId)?.name ?? 'you'
+  const lines = [`[Group chat: "${group.name}" - with ${othersIn(group, botId)}]`]
   if (since.omitted > 0) lines.push(`(${since.omitted} earlier message${since.omitted === 1 ? '' : 's'} not shown)`)
-  lines.push(...since.messages.map(describeGroupMessage))
+  lines.push(
+    ...since.messages.map(describeGroupMessage),
+    '',
+    `[It's your turn, ${name}. Reply with a single short sendMessage if you have something new worth adding, or send "(pass)" if you don't; ` +
+      'your plain text is never posted. Answer when you are mentioned (@name or @everyone) or the owner asks every member. ' +
+      "Never repeat what someone already said: an acknowledgement isn't worth adding. " +
+      'Never reveal anything from your private chat with the owner or other private context.]',
+  )
   return lines.join('\n')
 }
