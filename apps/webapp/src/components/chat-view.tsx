@@ -273,7 +273,7 @@ export function ChatView({
             following.current = element.scrollHeight - element.scrollTop - element.clientHeight < followThresholdPx
             if (following.current) setUnseen(false)
           }}
-          className="chat-scroll flex-1 overflow-y-auto"
+          className="chat-scroll relative flex-1 overflow-y-auto"
         >
           {header}
           <MessageList
