@@ -7,7 +7,12 @@ export const Route = createRootRoute({
   head: () => ({
     meta: [
       { charSet: 'utf-8' },
-      { name: 'viewport', content: 'width=device-width, initial-scale=1' },
+      // Paints under the notch and home indicator (the shell pads its content back out); the keyboard shrinks the layout on Android as it does on iOS.
+      { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content' },
+      // The status bar takes the colour of the top of the page in each scheme.
+      { name: 'theme-color', media: '(prefers-color-scheme: light)', content: '#fcfcfc' },
+      { name: 'theme-color', media: '(prefers-color-scheme: dark)', content: '#070707' },
+      { name: 'color-scheme', content: 'light dark' },
       { title: 'OpenBot' },
     ],
     links: [{ rel: 'stylesheet', href: styles }],

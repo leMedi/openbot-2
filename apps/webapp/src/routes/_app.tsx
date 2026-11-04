@@ -28,7 +28,7 @@ function AppShell() {
   if (!ready) return null
   return (
     <LiveProvider>
-      <div className="flex h-screen bg-background text-foreground">
+      <div className="safe-area flex h-dvh bg-background text-foreground">
         <Sidebar />
         <main className="flex min-w-0 flex-1 flex-col">
           <Outlet />

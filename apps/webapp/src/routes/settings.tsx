@@ -14,7 +14,7 @@ const sections = [
 
 function Settings() {
   return (
-    <div className="flex h-screen bg-background text-foreground">
+    <div className="safe-area flex h-dvh bg-background text-foreground">
       <nav className="flex w-52 shrink-0 flex-col gap-0.5 border-r border-border-subtle bg-sidebar p-3">
         <Link
           to="/"

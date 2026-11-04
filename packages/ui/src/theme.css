@@ -277,6 +277,11 @@
   }
 }
 
+/* The app shell paints edge to edge (viewport-fit=cover) and keeps its content clear of the notch and home indicator. */
+@utility safe-area {
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+
 /* Press feedback for anything clickable: it answers on pointer-down. Hover colours ease in 100ms (§7.6). */
 @utility pressable {
   transition-property: transform, background-color, color, opacity;
@@ -291,8 +296,32 @@
   * {
     border-color: var(--border);
   }
+  /*
+   * An app, not a document: no grey flash on tap, no font inflation in landscape, no pull-to-refresh or page bounce
+   * behind the chat's own scrollers.
+   */
   html {
     font-synthesis: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    overscroll-behavior: none;
+  }
+  /* Controls answer a tap at once (no double-tap-zoom wait), and a long press doesn't select their label. */
+  button,
+  a,
+  [role='button'],
+  summary {
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  /* iOS zooms into a field under 16px and never zooms back out; on touch, fields are 16px. */
+  @media (pointer: coarse) {
+    input,
+    textarea,
+    select {
+      font-size: 16px;
+    }
   }
   body {
     background: var(--background);

@@ -273,7 +273,7 @@ export function ChatView({
             following.current = element.scrollHeight - element.scrollTop - element.clientHeight < followThresholdPx
             if (following.current) setUnseen(false)
           }}
-          className="chat-scroll relative flex-1 overflow-y-auto"
+          className="chat-scroll relative flex-1 overflow-y-auto overscroll-contain"
         >
           {header}
           <MessageList
@@ -794,6 +794,7 @@ function Composer({
             data-composer
             aria-label={label}
             placeholder={label}
+            enterKeyHint="send"
             rows={1}
             value={text}
             onChange={(event) => live.setDraft(chatId, event.target.value)}
