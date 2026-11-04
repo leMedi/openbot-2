@@ -518,7 +518,7 @@ const changeVerbs: Record<RoutineChangeCardInfo['change'], string> = {
 
 /**
  * Grok's timeline event: a thin row noting a bot's change to one of its routines ("Rex created routine"), with a clock
- * chip naming the routine that opens it, and the time at the right.
+ * chip naming the routine that opens it and the time, centred between two rules.
  */
 function TimelineRow({
   message,
@@ -542,10 +542,11 @@ function TimelineRow({
     <div
       role="article"
       className={cn(
-        'mb-[22px] flex min-h-8 items-center gap-1.5 text-sm text-muted-foreground',
+        'mt-4 mb-[22px] flex min-h-8 items-center gap-1.5 text-sm text-muted-foreground',
         enter && 'animate-fade-in',
       )}
     >
+      <span aria-hidden className="h-px min-w-4 flex-1 bg-border" />
       <span className="shrink-0">
         {message.authorName} {changeVerbs[card.change]} routine
       </span>
@@ -556,9 +557,10 @@ function TimelineRow({
       ) : (
         <span className={chipClass}>{chip}</span>
       )}
-      <time dateTime={new Date(message.createdAt).toISOString()} className="ml-auto shrink-0 text-xs tabular-nums">
+      <time dateTime={new Date(message.createdAt).toISOString()} className="shrink-0 text-xs tabular-nums">
         {new Date(message.createdAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
       </time>
+      <span aria-hidden className="h-px min-w-4 flex-1 bg-border" />
     </div>
   )
 }
