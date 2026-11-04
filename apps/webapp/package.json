@@ -12,7 +12,7 @@
     "start": "pnpm with-env vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "seed": "pnpm with-env node scripts/seed.ts"
+    "seed": "pnpm with-env node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/seed.ts"
   },
   "dependencies": {
     "@novnc/novnc": "^1.7.0",
