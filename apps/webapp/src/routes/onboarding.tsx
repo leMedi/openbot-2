@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react'
 import { BotAvatar } from '../components/bot-avatar.tsx'
 import { inputClass } from '../components/bot-fields.tsx'
 import { NewBotForm } from '../components/new-bot-form.tsx'
+import { OpenBotMark } from '../components/openbot-mark.tsx'
 import { ProviderList } from '../components/provider-list.tsx'
 import { browserTimeZone, offsetOf, TimeZonePicker } from '../components/time-zone-picker.tsx'
 import { api, errorMessage } from '../lib/api.ts'
@@ -76,7 +77,10 @@ function OnboardingPage() {
     <main className="min-h-dvh bg-background text-foreground">
       <div className="mx-auto flex w-full max-w-[520px] flex-col gap-10 px-6 pt-[10vh] pb-16">
         <header className="flex items-center justify-between gap-6">
-          <span className="text-lg font-semibold tracking-tight">OpenBot</span>
+          <span className="flex items-center gap-2.5 text-lg font-semibold tracking-tight">
+            <OpenBotMark size={28} />
+            OpenBot
+          </span>
           {step && <Progress index={index} />}
         </header>
 

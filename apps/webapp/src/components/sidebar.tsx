@@ -22,6 +22,7 @@ import { useNarrowWindow, useSidebarPrefs } from '../lib/sidebar-prefs.ts'
 import { summarizeAttachments } from './attachments.tsx'
 import { BotAvatar, GroupAvatar } from './bot-avatar.tsx'
 import { NewBotDialog } from './new-bot-dialog.tsx'
+import { OpenBotMark } from './openbot-mark.tsx'
 import { ConfirmDeleteBot, ConfirmDeleteChats, ConfirmDeleteGroup, ConfirmDeleteSection } from './confirm-delete.tsx'
 
 /** Grok Bot's sidebar bounds, in px, and its compact rail's width. */
@@ -362,7 +363,12 @@ export function Sidebar() {
         />
       ) : (
         <header className={cn('flex h-[50px] shrink-0 items-center border-b border-border-subtle', compact ? 'justify-center' : 'justify-between pr-3 pl-4')}>
-          {!compact && <span className="font-semibold">OpenBot</span>}
+          {!compact && (
+            <span className="flex items-center gap-2 font-semibold">
+              <OpenBotMark size={22} />
+              OpenBot
+            </span>
+          )}
           <span className="relative">
             <button
               type="button"

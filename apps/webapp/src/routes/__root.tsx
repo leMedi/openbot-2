@@ -15,7 +15,13 @@ export const Route = createRootRoute({
       { name: 'color-scheme', content: 'light dark' },
       { title: 'OpenBot' },
     ],
-    links: [{ rel: 'stylesheet', href: styles }],
+    links: [
+      { rel: 'stylesheet', href: styles },
+      // The Orbit mark (docs/brand/): the SVG where it's supported, the .ico for the rest, and a full-bleed square for iOS.
+      { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
+      { rel: 'icon', href: '/favicon.ico', sizes: '16x16 32x32 48x48' },
+      { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+    ],
   }),
   shellComponent: RootDocument,
   component: Root,
