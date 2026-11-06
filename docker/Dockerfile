@@ -90,15 +90,17 @@ RUN apt-get update \
       supervisor \
       xvfb openbox x11vnc websockify xdotool x11-utils dbus-x11 \
       fonts-liberation fonts-noto-color-emoji \
-      at-spi2-core mousepad \
+      at-spi2-core mousepad xfce4-terminal \
       hsetroot tint2 thunar \
       google-chrome-stable \
  && google-chrome --version \
  && rm -rf /var/lib/apt/lists/*
 
 # Desktop control (design §4): each screen runs its own cua-driver, which reads apps through AT-SPI (at-spi2-core) and
-# acts on them. Mousepad is a small text editor bots can use, and the app the desktop's contract tests drive. Cua's
-# product telemetry is off: nothing about bots' desktops leaves the computer.
+# acts on them. Mousepad is a small text editor bots can use, and the app the desktop's contract tests drive. Xfce's
+# Terminal is the desktop's shell, light and from the same family as Thunar and Mousepad; AT-SPI shows the driver its
+# menus and the terminal, but not the text in it, which the driver reads from screenshots. Cua's product telemetry is
+# off: nothing about bots' desktops leaves the computer.
 COPY --from=cua-driver /out/cua-driver /usr/local/bin/cua-driver
 ENV CUA_DRIVER_RS_TELEMETRY_ENABLED=0
 RUN cua-driver --version
@@ -107,7 +109,7 @@ RUN cua-driver --version
 RUN printf "[org.xfce.mousepad.preferences.file]\nsession-restore='never'\n" > /usr/share/glib-2.0/schemas/90_openbot.gschema.override \
  && "$(find /usr/lib -type f -name glib-compile-schemas | head -n 1)" /usr/share/glib-2.0/schemas
 
-# Bots' desktop (design §4): a wallpaper (blue mountains) and tint2's dock with Files (Thunar, under a blue folder), Chrome and Mousepad. The dock draws over a
+# Bots' desktop (design §4): a wallpaper (blue mountains) and tint2's dock with Files (Thunar, under a blue folder), Chrome, Mousepad and Terminal. The dock draws over a
 # copy of the wallpaper: Xvfb shows no compositor's work in its framebuffer, so a dock needing one (Plank) shows black.
 # Chrome, however it's opened (the browser tools, the dock, a link), runs through openbot-browser with the bot's profile
 # and DevTools, under both of its desktop file names; links open in it and folders in Thunar.

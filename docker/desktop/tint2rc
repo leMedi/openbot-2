@@ -27,7 +27,7 @@ mouse_hover_icon_asb = 100 0 10
 mouse_pressed_icon_asb = 100 0 -10
 font_shadow = 0
 
-# Launchers: Files, Google Chrome, Mousepad.
+# Launchers: Files, Google Chrome, Mousepad, Terminal.
 launcher_padding = 0 0 4
 launcher_background_id = 0
 launcher_icon_background_id = 0
@@ -38,6 +38,7 @@ startup_notifications = 1
 launcher_item_app = /usr/share/openbot/files.desktop
 launcher_item_app = /usr/local/share/applications/google-chrome.desktop
 launcher_item_app = /usr/share/applications/org.xfce.mousepad.desktop
+launcher_item_app = /usr/share/applications/xfce4-terminal.desktop
 
 tooltip_show_timeout = 0.4
 tooltip_hide_timeout = 0.1
