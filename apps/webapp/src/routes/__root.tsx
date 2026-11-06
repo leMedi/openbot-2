@@ -13,6 +13,12 @@ export const Route = createRootRoute({
       { name: 'theme-color', media: '(prefers-color-scheme: light)', content: '#fcfcfc' },
       { name: 'theme-color', media: '(prefers-color-scheme: dark)', content: '#070707' },
       { name: 'color-scheme', content: 'light dark' },
+      // Installed from Safari's Add to Home Screen, it opens full-screen under this name. The status bar stays opaque
+      // ('default'): 'black-translucent' would draw white text over the light scheme.
+      { name: 'apple-mobile-web-app-capable', content: 'yes' },
+      { name: 'mobile-web-app-capable', content: 'yes' },
+      { name: 'apple-mobile-web-app-title', content: 'OpenBot' },
+      { name: 'apple-mobile-web-app-status-bar-style', content: 'default' },
       { title: 'OpenBot' },
     ],
     links: [
@@ -21,6 +27,8 @@ export const Route = createRootRoute({
       { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
       { rel: 'icon', href: '/favicon.ico', sizes: '16x16 32x32 48x48' },
       { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+      // Installable: public/manifest.webmanifest opens the app standalone, with the Orbit tile (and a maskable cut for Android).
+      { rel: 'manifest', href: '/manifest.webmanifest' },
     ],
   }),
   shellComponent: RootDocument,
