@@ -56,6 +56,10 @@ _Avoid_: Folder, category
 A chat the owner moved to the sidebar's **Hidden** section. It keeps working and keeps its history; it is only out of the way.
 _Avoid_: Archived chat, hidden bot
 
+**Muted chat**:
+A chat whose bots' messages don't notify the owner, for a set time or until unmuted; its cards still do. A hidden chat is always muted.
+_Avoid_: Silenced chat, snoozed chat
+
 **History**:
 A bot's single private record of everything it has seen and done across all its chats, messages from other bots, and routines; what its model reads.
 _Avoid_: Conversation, transcript, context
