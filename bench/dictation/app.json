@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "Dictation Bench",
+    "slug": "dictation-bench",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "dev.openbot.dictationbench",
+      "appleTeamId": "BUH75GV43F",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Records the benchmark clips you read aloud."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "dev.openbot.dictationbench",
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "plugins": [
+      "react-native-zip-archive",
+      "./plugins/with-hexagon"
+    ]
+  }
+}

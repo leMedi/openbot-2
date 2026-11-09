@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["BenchNativeModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.benchnative.BenchNativeModule"]
+  }
+}
