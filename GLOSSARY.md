@@ -10,6 +10,10 @@ OpenBot gives one person a team of always-on bots that run on a machine they con
 The one person an OpenBot instance belongs to. There are no other users.
 _Avoid_: User, admin, account
 
+**Instance**:
+One installed OpenBot: its bots, chats and computer, reached at one address. The web app and the mobile app are both windows onto an instance.
+_Avoid_: Server, backend, host
+
 **Owner profile**:
 The owner's name and a few words about themselves, given at onboarding and changed in Settings → General. Every bot reads it in its instructions from its next run.
 _Avoid_: Bio, persona
