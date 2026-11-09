@@ -36,6 +36,10 @@ _Avoid_: Memo, agent message, bubble
 A file posted with a message: one the owner sends, saved in the bot's uploads folder on the computer, or one a bot sends from the computer. The owner downloads it as it was when posted.
 _Avoid_: Upload (for the message's file), asset
 
+**Dictation**:
+The owner speaking a message instead of typing it, turned into text on their phone for them to edit and send; the audio never leaves the phone.
+_Avoid_: Voice message, voice mode, speech input
+
 **Chat**:
 Anything the owner sees and talks in: a DM or a group chat.
 _Avoid_: Conversation, room, thread
