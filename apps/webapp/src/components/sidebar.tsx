@@ -43,6 +43,12 @@ const sidebarWidth = { initial: 280, min: 240, max: 400 }
 const railWidth = 88
 const widthKey = 'openbot.sidebar.width'
 
+/** Dragged narrower than halfway from the minimum to the rail, the sidebar snaps to the rail; dragged wider, back out. */
+const railSnapPx = (sidebarWidth.min + railWidth) / 2
+
+/** What a drag shows: the rail, or the full sidebar at a width; `snappedAt` is when it last crossed between them. */
+type SidebarSize = { rail: true; snappedAt: number } | { rail: false; width: number; snappedAt: number }
+
 /** What a section made from "Move to new section" or "New section" is called until the owner renames it. */
 const newSectionName = 'New section'
 
@@ -93,13 +99,13 @@ export function Sidebar() {
   const live = useLive()
   const prefs = useSidebarPrefs()
   const narrow = useNarrowWindow()
-  const compact = prefs.compact || narrow
+  const [preview, setPreview] = useState<SidebarSize>()
+  const compact = narrow || (preview ? preview.rail : prefs.compact)
   const navigate = useNavigate()
   const activeChatId = useActiveChatId()
   const [creating, setCreating] = useState(false)
   const [newMenu, setNewMenu] = useState(false)
   const [width, setWidth] = useSidebarWidth()
-  const [preview, setPreview] = useState<number>()
   const [menu, setMenu] = useState<{ label: string; items: MenuItem[]; x: number; y: number }>()
   const [renaming, setRenaming] = useState<string>()
   const [renamingSection, setRenamingSection] = useState<string>()
@@ -369,8 +375,12 @@ export function Sidebar() {
   return (
     <nav
       aria-label="Chats"
-      style={{ width: compact ? railWidth : (preview ?? width) }}
-      className="relative flex shrink-0 flex-col border-r border-border-subtle bg-sidebar transition-[width] duration-150 ease-out motion-reduce:transition-none"
+      style={{ width: compact ? railWidth : preview && !preview.rail ? preview.width : width }}
+      className={cn(
+        'relative flex shrink-0 flex-col border-r border-border-subtle bg-sidebar transition-[width] duration-150 ease-out motion-reduce:transition-none',
+        // A drag follows the pointer; only its snaps to and from the rail animate.
+        preview && performance.now() - preview.snappedAt > 150 && 'transition-none',
+      )}
     >
       {selection.length > 0 && !compact ? (
         <SelectionBar
@@ -478,7 +488,17 @@ export function Sidebar() {
         </Link>
       </footer>
 
-      {!compact && <ResizeHandle width={width} onPreview={setPreview} onCommit={setWidth} />}
+      {!narrow && (
+        <ResizeHandle
+          width={width}
+          rail={prefs.compact}
+          onPreview={setPreview}
+          onCommit={(size) => {
+            if (!size.rail) setWidth(size.width)
+            if (prefs.compact !== size.rail) prefs.setCompact(size.rail)
+          }}
+        />
+      )}
 
       {menu && <Menu label={menu.label} items={menu.items} x={menu.x} y={menu.y} onClose={closeMenu} />}
 
@@ -1126,18 +1146,23 @@ function Menu({ label, items, x, y, onClose }: { label: string; items: MenuItem[
 
 /**
  * Grok's 12px handle on the sidebar's right edge: dragging previews the width live and keeps it on release; Esc
- * cancels the drag. Arrow keys resize it too.
+ * cancels the drag. Dragged past the minimum it snaps to the rail, and the rail dragged out snaps back to the full
+ * sidebar, keeping the width it had. Arrow keys resize it too, ← at the minimum going to the rail and → leaving it.
  */
 function ResizeHandle({
   width,
+  rail,
   onPreview,
   onCommit,
 }: {
   width: number
-  onPreview: (width: number | undefined) => void
-  onCommit: (width: number) => void
+  rail: boolean
+  onPreview: (size: SidebarSize | undefined) => void
+  onCommit: (size: SidebarSize) => void
 }) {
-  const drag = useRef<{ startX: number; startWidth: number; current: number }>(undefined)
+  const drag = useRef<{ startX: number; startWidth: number; current: SidebarSize }>(undefined)
+  const full = (next: number): SidebarSize => ({ rail: false, width: clampWidth(next), snappedAt: 0 })
+  const toRail: SidebarSize = { rail: true, snappedAt: 0 }
 
   useEffect(() => {
     const cancel = (event: globalThis.KeyboardEvent) => {
@@ -1157,38 +1182,44 @@ function ResizeHandle({
     if (ended) onCommit(ended.current)
   }
 
+  const shown = rail ? railWidth : width
   return (
     <div
       role="separator"
       aria-orientation="vertical"
       aria-label="Resize sidebar"
-      aria-valuemin={sidebarWidth.min}
+      aria-valuemin={railWidth}
       aria-valuemax={sidebarWidth.max}
-      aria-valuenow={width}
+      aria-valuenow={shown}
       tabIndex={0}
       onPointerDown={(event) => {
         if (event.button !== 0) return
         event.preventDefault()
         event.currentTarget.setPointerCapture(event.pointerId)
-        drag.current = { startX: event.clientX, startWidth: width, current: width }
+        drag.current = { startX: event.clientX, startWidth: shown, current: rail ? toRail : full(width) }
       }}
       onPointerMove={(event) => {
-        if (!drag.current) return
-        drag.current.current = clampWidth(drag.current.startWidth + event.clientX - drag.current.startX)
-        onPreview(drag.current.current)
+        const current = drag.current
+        if (!current) return
+        const dragged = current.startWidth + event.clientX - current.startX
+        const next = dragged < railSnapPx ? toRail : full(dragged)
+        // A snap keeps its start time so it animates; widths in between follow the pointer.
+        next.snappedAt = next.rail === current.current.rail ? current.current.snappedAt : performance.now()
+        current.current = next
+        onPreview(next)
       }}
       onPointerUp={end}
       onPointerCancel={() => {
         drag.current = undefined
         onPreview(undefined)
       }}
-      onDoubleClick={() => onCommit(sidebarWidth.initial)}
+      onDoubleClick={() => onCommit(full(sidebarWidth.initial))}
       onKeyDown={(event) => {
         const step = event.shiftKey ? 40 : 10
-        if (event.key === 'ArrowLeft') onCommit(width - step)
-        else if (event.key === 'ArrowRight') onCommit(width + step)
-        else if (event.key === 'Home') onCommit(sidebarWidth.min)
-        else if (event.key === 'End') onCommit(sidebarWidth.max)
+        if (event.key === 'ArrowLeft') onCommit(rail || width <= sidebarWidth.min ? toRail : full(width - step))
+        else if (event.key === 'ArrowRight') onCommit(rail ? full(width) : full(width + step))
+        else if (event.key === 'Home') onCommit(toRail)
+        else if (event.key === 'End') onCommit(full(sidebarWidth.max))
         else return
         event.preventDefault()
       }}
