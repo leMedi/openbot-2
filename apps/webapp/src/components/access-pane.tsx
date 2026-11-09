@@ -41,9 +41,8 @@ export function AccessPane({ bot }: { bot: BotInfo }) {
   const grantable = access?.grantable
   const unconnected = access?.unconnected ?? 0
   return (
-    <aside aria-label={`${bot.name}'s access`} className="flex w-[360px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-border-subtle p-5">
-      <header className="flex flex-col gap-1">
-        <h2 className="text-lg font-semibold">Access</h2>
+    <section aria-label={`${bot.name}'s access`} className="flex flex-col gap-4 p-5">
+      <header>
         <p className="text-sm text-muted-foreground">
           The plugin accounts and skills {bot.name} may use. An account's revoke takes effect from its next call; skills change when its history is next compacted.
         </p>
@@ -90,6 +89,6 @@ export function AccessPane({ bot }: { bot: BotInfo }) {
           .
         </p>
       )}
-    </aside>
+    </section>
   )
 }

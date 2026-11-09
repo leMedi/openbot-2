@@ -109,9 +109,9 @@ export function ProfilePane({ bot, onSaved, onDeleted }: { bot: BotInfo; onSaved
   }
 
   return (
-    <aside aria-label={`${bot.name}'s profile`} className="flex w-[360px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-border-subtle p-5">
-      <header className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Profile</h2>
+    <section aria-label={`${bot.name}'s profile`} className="relative flex flex-col gap-4 p-5">
+      {/* Saving shows in the top padding, at the right, so it moves nothing. */}
+      <header className="absolute top-0.5 right-5 leading-5">
         <span role="status" className={cn('text-sm', status.error ? 'text-destructive-foreground' : 'text-muted-foreground')}>
           {status.saving ? 'Saving…' : status.error ? "Couldn't save" : ''}
         </span>
@@ -175,6 +175,6 @@ export function ProfilePane({ bot, onSaved, onDeleted }: { bot: BotInfo; onSaved
       </footer>
 
       {confirmingDelete && <ConfirmDeleteBot bot={bot} onCancel={() => setConfirmingDelete(false)} onDeleted={deleted} />}
-    </aside>
+    </section>
   )
 }

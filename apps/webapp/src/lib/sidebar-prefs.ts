@@ -73,15 +73,28 @@ export function useSidebarPrefs(): SidebarPrefs {
   return sidebarPrefs
 }
 
-/** Whether the window is too narrow for the full sidebar. */
-export function useNarrowWindow(): boolean {
-  const query = `(max-width: ${compactBelowPx - 1}px)`
-  const [narrow, setNarrow] = useState(() => matchMedia(query).matches)
+/** Below this viewport width the app is laid out for a phone: the chat list and each chat are pages of their own. */
+const phoneBelowPx = 640
+
+/** Whether `query` matches, following the window; false when rendered on the server, which has none. */
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => typeof matchMedia !== 'undefined' && matchMedia(query).matches)
   useEffect(() => {
     const media = matchMedia(query)
-    const update = () => setNarrow(media.matches)
+    const update = () => setMatches(media.matches)
+    update()
     media.addEventListener('change', update)
     return () => media.removeEventListener('change', update)
   }, [query])
-  return narrow
+  return matches
+}
+
+/** Whether the window is too narrow for the full sidebar. */
+export function useNarrowWindow(): boolean {
+  return useMediaQuery(`(max-width: ${compactBelowPx - 1}px)`)
+}
+
+/** Whether the window is phone-sized. */
+export function usePhone(): boolean {
+  return useMediaQuery(`(max-width: ${phoneBelowPx - 1}px)`)
 }

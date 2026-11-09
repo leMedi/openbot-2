@@ -41,7 +41,7 @@ type View = { name: 'list' } | { name: 'routine'; routineId: string } | { name: 
  * list. It follows the live events, and reads everything anew after missing some. Keyed by bot: another bot's
  * routines start from its list.
  */
-export function RoutinesPane({ bot, open, onClose }: { bot: BotInfo; open?: RoutineToOpen; onClose: () => void }) {
+export function RoutinesPane({ bot, open }: { bot: BotInfo; open?: RoutineToOpen }) {
   const [routines, setRoutines] = useState<RoutineInfo[]>()
   const [error, setError] = useState<string>()
   const [view, setView] = useState<View>(open ? { name: 'routine', routineId: open.routineId } : { name: 'list' })
@@ -102,22 +102,15 @@ export function RoutinesPane({ bot, open, onClose }: { bot: BotInfo; open?: Rout
   }, [])
 
   return (
-    <aside
-      ref={pane}
-      aria-label={`${bot.name}'s routines`}
-      className="flex w-[360px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-border-subtle p-5"
-    >
-      <header className="flex items-center gap-1">
-        {!showsList && (
-          <button type="button" aria-label="Back to routines" onClick={back} className="pressable -ml-1.5 rounded-md p-1.5 hover:bg-secondary-hover">
+    <section ref={pane} aria-label={`${bot.name}'s routines`} className="flex flex-col gap-4 p-5">
+      {!showsList && (
+        <header className="-mb-2 flex items-center">
+          <button type="button" onClick={back} className="pressable -ml-1.5 flex items-center gap-1 rounded-md py-1 pr-2 pl-1 text-sm text-muted-foreground hover:bg-secondary-hover hover:text-foreground">
             <BackIcon />
+            Routines
           </button>
-        )}
-        <h2 className="text-lg font-semibold">Routines</h2>
-        <button type="button" aria-label="Close" onClick={onClose} className="pressable -mr-1.5 ml-auto rounded-md p-1.5 hover:bg-secondary-hover">
-          <CloseIcon />
-        </button>
-      </header>
+        </header>
+      )}
       {error && <p className="text-sm text-destructive-foreground">Couldn't load {bot.name}'s routines: {error}</p>}
       {shown && showsList && <RoutineList botName={bot.name} routines={shown} onOpen={(routineId) => setView({ name: 'routine', routineId })} onCreate={() => setView({ name: 'new' })} />}
       {opened && <RoutineDetail key={opened.id} routine={opened} timeZone={timeZone} onDeleted={() => setView({ name: 'list' })} />}
@@ -133,7 +126,7 @@ export function RoutinesPane({ bot, open, onClose }: { bot: BotInfo; open?: Rout
           onDiscard={() => setView({ name: 'list' })}
         />
       )}
-    </aside>
+    </section>
   )
 }
 
@@ -658,10 +651,3 @@ function BackIcon() {
   )
 }
 
-function CloseIcon() {
-  return (
-    <svg {...iconProps} aria-hidden>
-      <path d="m4 4 8 8M12 4l-8 8" />
-    </svg>
-  )
-}

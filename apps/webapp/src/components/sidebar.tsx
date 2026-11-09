@@ -32,7 +32,7 @@ import {
 } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
 import { runCommand, useCommand } from '../lib/commands.ts'
-import { useNarrowWindow, useSidebarPrefs } from '../lib/sidebar-prefs.ts'
+import { useNarrowWindow, usePhone, useSidebarPrefs } from '../lib/sidebar-prefs.ts'
 import { BotAvatar, GroupAvatar } from './bot-avatar.tsx'
 import { NewBotDialog } from './new-bot-dialog.tsx'
 import { OpenBotMark } from './openbot-mark.tsx'
@@ -99,8 +99,10 @@ export function Sidebar() {
   const live = useLive()
   const prefs = useSidebarPrefs()
   const narrow = useNarrowWindow()
+  // On a phone the chat list is a page of its own, at full width; elsewhere a narrow window keeps it a rail.
+  const phone = usePhone()
   const [preview, setPreview] = useState<SidebarSize>()
-  const compact = narrow || (preview ? preview.rail : prefs.compact)
+  const compact = !phone && (narrow || (preview ? preview.rail : prefs.compact))
   const navigate = useNavigate()
   const activeChatId = useActiveChatId()
   const [creating, setCreating] = useState(false)
@@ -375,9 +377,10 @@ export function Sidebar() {
   return (
     <nav
       aria-label="Chats"
-      style={{ width: compact ? railWidth : preview && !preview.rail ? preview.width : width }}
+      style={phone ? undefined : { width: compact ? railWidth : preview && !preview.rail ? preview.width : width }}
       className={cn(
-        'relative flex shrink-0 flex-col border-r border-border-subtle bg-sidebar transition-[width] duration-150 ease-out motion-reduce:transition-none',
+        'relative flex shrink-0 flex-col bg-sidebar',
+        phone ? 'w-full' : 'border-r border-border-subtle transition-[width] duration-150 ease-out motion-reduce:transition-none',
         // A drag follows the pointer; only its snaps to and from the rail animate.
         preview && performance.now() - preview.snappedAt > 150 && 'transition-none',
       )}

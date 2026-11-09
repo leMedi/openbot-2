@@ -1,8 +1,7 @@
 import type { BotInfo } from '@openbot/api-contract'
 import { useLive, waitingTakeOver } from '@openbot/client'
-import { cn } from '@openbot/ui/lib/utils'
 import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AccessPane } from '../../components/access-pane.tsx'
 import { BotAvatar } from '../../components/bot-avatar.tsx'
 import { ChatView } from '../../components/chat-view.tsx'
@@ -10,23 +9,43 @@ import { MemoryPane } from '../../components/memory-pane.tsx'
 import { ProfilePane } from '../../components/profile-pane.tsx'
 import { RoutinesPane, type RoutineToOpen } from '../../components/routines-pane.tsx'
 import { FullscreenScreen, ScreenPane } from '../../components/screen-pane.tsx'
+import { BackToChats, PanelToggle, SidePanel } from '../../components/side-panel.tsx'
 import { type ChatSearch, chatSearch } from '../../lib/chat-search.ts'
+import { usePhone } from '../../lib/sidebar-prefs.ts'
 
 export const Route = createFileRoute('/_app/bots/$botId')({
   validateSearch: chatSearch,
   component: Dm,
 })
 
-/** The right-hand pane beside a DM: one at a time, the bot's screen by default. */
+/** The tabs of the panel beside a DM, the bot's screen first. */
 type Pane = 'screen' | 'profile' | 'routines' | 'memory' | 'access'
 
-/** The DM between the owner and one bot, in Grok Bot's layout, with its Screen, Profile, Routines, Memory or Access pane beside it. */
+const panes: readonly { id: Pane; label: string }[] = [
+  { id: 'screen', label: 'Screen' },
+  { id: 'profile', label: 'Profile' },
+  { id: 'routines', label: 'Routines' },
+  { id: 'memory', label: 'Memory' },
+  { id: 'access', label: 'Access' },
+]
+
+/**
+ * The DM between the owner and one bot, in Grok Bot's layout, with its panel beside it: Screen, Profile, Routines,
+ * Memory and Access as tabs, shown and hidden from the header. It starts open on the screen, except on a phone, where
+ * it would cover the chat.
+ */
 function Dm() {
   const { botId } = Route.useParams()
   const search = Route.useSearch()
   const live = useLive()
   const navigate = useNavigate()
-  const [pane, setPane] = useState<Pane | null>('screen')
+  const phone = usePhone()
+  const [pane, setPane] = useState<Pane>('screen')
+  const [panelOpen, setPanelOpen] = useState(() => !phone)
+  function openPane(next: Pane) {
+    setPane(next)
+    setPanelOpen(true)
+  }
   /** The routine a timeline chip asked the Routines pane to open. */
   const [routineToOpen, setRoutineToOpen] = useState<RoutineToOpen>()
   /** Whether the bot's screen is fullscreen, where the owner controls it; another bot's starts closed. */
@@ -39,7 +58,7 @@ function Dm() {
   useEffect(() => {
     if (!search.routine) return
     setRoutineToOpen({ routineId: search.routine, requestedAt: Date.now() })
-    setPane('routines')
+    openPane('routines')
     void navigate({ to: '.', search: (previous: ChatSearch) => ({ ...previous, routine: undefined }), replace: true })
   }, [search.routine, navigate])
   const bot = live.bots?.find((entry) => entry.id === botId)
@@ -60,14 +79,7 @@ function Dm() {
           focusMessage={search.message}
           onFocused={() => void navigate({ to: '.', search: (previous: ChatSearch) => ({ ...previous, message: undefined }), replace: true })}
           header={
-            <DmHeader
-              bot={bot}
-              pane={pane}
-              onTogglePane={(next) => {
-                setRoutineToOpen(undefined)
-                setPane((open) => (open === next ? null : next))
-              }}
-            />
+<DmHeader bot={bot} panelOpen={panelOpen} onTogglePanel={() => setPanelOpen((open) => !open)} />
           }
           notice={bot.error && !bot.working && <ModelError bot={bot} />}
           composerLabel={`Message ${bot.name}`}
@@ -79,117 +91,54 @@ function Dm() {
           onScreen={() => setFullscreen(true)}
           onOpenRoutine={(routineId) => {
             setRoutineToOpen({ routineId, requestedAt: Date.now() })
-            setPane('routines')
+            openPane('routines')
           }}
         />
       </div>
-      {pane === 'screen' && <ScreenPane bot={bot} takeOver={takeOver} onOpen={() => setFullscreen(true)} />}
-      {fullscreen && <FullscreenScreen bot={bot} takeOver={takeOver} onClose={closeFullscreen} />}
-      {pane === 'memory' && <MemoryPane bot={bot} />}
-      {pane === 'access' && <AccessPane key={bot.id} bot={bot} />}
-      {pane === 'routines' && <RoutinesPane key={bot.id} bot={bot} open={routineToOpen} onClose={() => setPane(null)} />}
-      {pane === 'profile' && (
-        <ProfilePane
-          bot={bot}
-          onSaved={(saved) => live.updateBot(saved)}
-          onDeleted={() => {
-            live.removeBot(bot.id, bot.chatId)
-            navigate({ to: '/', replace: true })
+      {panelOpen && (
+        <SidePanel
+          label={`${bot.name}'s panel`}
+          tabs={panes}
+          tab={pane}
+          onTab={(next) => {
+            setRoutineToOpen(undefined)
+            setPane(next)
           }}
-        />
+          onClose={() => setPanelOpen(false)}
+        >
+          {pane === 'screen' && <ScreenPane bot={bot} takeOver={takeOver} onOpen={() => setFullscreen(true)} />}
+          {pane === 'memory' && <MemoryPane bot={bot} />}
+          {pane === 'access' && <AccessPane key={bot.id} bot={bot} />}
+          {pane === 'routines' && <RoutinesPane key={bot.id} bot={bot} open={routineToOpen} />}
+          {pane === 'profile' && (
+            <ProfilePane
+              bot={bot}
+              onSaved={(saved) => live.updateBot(saved)}
+              onDeleted={() => {
+                live.removeBot(bot.id, bot.chatId)
+                navigate({ to: '/', replace: true })
+              }}
+            />
+          )}
+        </SidePanel>
       )}
+      {fullscreen && <FullscreenScreen bot={bot} takeOver={takeOver} onClose={closeFullscreen} />}
     </div>
   )
 }
 
-const paneLabels = { screen: 'Screen', profile: 'Profile', routines: 'Routines' } as const
-
-/** The DM's bar: the bot, whether it works, and the pane toggles. */
-function DmHeader({ bot, pane, onTogglePane }: { bot: BotInfo; pane: Pane | null; onTogglePane: (pane: Pane) => void }) {
+/** The DM's bar: the way back to the chats on a phone, the bot, whether it works, and the panel's toggle. */
+function DmHeader({ bot, panelOpen, onTogglePanel }: { bot: BotInfo; panelOpen: boolean; onTogglePanel: () => void }) {
   return (
     <header className="chat-material sticky top-0 z-10 flex min-h-[51px] items-center gap-2 px-4">
+      <BackToChats />
       <BotAvatar style={bot.avatarStyle} shape={bot.avatarShape} color={bot.avatarColor} />
-      <span className="font-semibold">{bot.name}</span>
-      {bot.working && <span className="animate-fade-in text-sm text-muted-foreground">Working</span>}
-      <span className="ml-auto flex gap-1">
-        {(['screen', 'profile', 'routines'] as const).map((choice) => (
-          <button
-            key={choice}
-            type="button"
-            aria-pressed={pane === choice}
-            onClick={() => onTogglePane(choice)}
-            className={cn('pressable rounded-md px-2 py-1 text-base hover:bg-secondary-hover', pane === choice && 'bg-selected')}
-          >
-            {paneLabels[choice]}
-          </button>
-        ))}
-        <MoreMenu pane={pane} onToggle={onTogglePane} />
+      <span className="truncate font-semibold">{bot.name}</span>
+      {bot.working && <span className="shrink-0 animate-fade-in text-sm text-muted-foreground">Working</span>}
+      <span className="ml-auto flex shrink-0 gap-1">
+        <PanelToggle open={panelOpen} onToggle={onTogglePanel} />
       </span>
     </header>
-  )
-}
-
-/** "⋯": the bot's other panes: its Memory and Access. */
-function MoreMenu({ pane, onToggle }: { pane: Pane | null; onToggle: (pane: Pane) => void }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLSpanElement>(null)
-  useLayoutEffect(() => {
-    if (open) ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
-  }, [open])
-  useEffect(() => {
-    if (!open) return
-    const close = (event: Event) => {
-      if (!ref.current?.contains(event.target as Node)) setOpen(false)
-    }
-    addEventListener('pointerdown', close, true)
-    return () => removeEventListener('pointerdown', close, true)
-  }, [open])
-  const items: { pane: Pane; label: string }[] = [
-    { pane: 'memory', label: 'Memory' },
-    { pane: 'access', label: 'Access' },
-  ]
-  return (
-    <span ref={ref} className="relative">
-      <button
-        type="button"
-        aria-label="More"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((shown) => !shown)}
-        className={cn('pressable rounded-md px-2 py-1 text-base hover:bg-secondary-hover', items.some((item) => item.pane === pane) && 'bg-selected')}
-      >
-        ⋯
-      </button>
-      {open && (
-        <div
-          role="menu"
-          aria-label="More"
-          onKeyDown={(event) => {
-            if (event.key === 'Escape' || event.key === 'Tab') {
-              event.preventDefault()
-              setOpen(false)
-            }
-          }}
-          className="absolute top-full right-0 z-40 mt-1 flex min-w-[150px] flex-col rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg motion-safe:animate-pop-in motion-reduce:animate-fade-in"
-        >
-          {items.map((item) => (
-            <button
-              key={item.pane}
-              type="button"
-              role="menuitem"
-              tabIndex={-1}
-              onClick={() => {
-                setOpen(false)
-                onToggle(item.pane)
-              }}
-              className="rounded-md px-2.5 py-1.5 text-left text-base outline-none hover:bg-secondary focus-visible:bg-secondary"
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </span>
   )
 }
 

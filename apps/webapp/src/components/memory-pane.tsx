@@ -249,8 +249,7 @@ export function MemoryPane({ bot }: { bot: BotInfo }) {
   }
 
   return (
-    <aside aria-label={`${bot.name}'s memory`} className="flex w-[360px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-border-subtle p-5">
-      <h2 className="text-lg font-semibold">Memory</h2>
+    <section aria-label={`${bot.name}'s memory`} className="flex flex-col gap-4 p-5">
       {error && <p className="text-sm text-destructive-foreground">Couldn't load {bot.name}'s memory: {error}</p>}
       {shown && !shown.length && <p className="text-sm text-muted-foreground">{bot.name} doesn't remember anything yet.</p>}
       {shown && (
@@ -261,6 +260,6 @@ export function MemoryPane({ bot }: { bot: BotInfo }) {
           onChange={(change) => setFacts((current) => (current?.botId === botId ? { botId, facts: change(current.facts) } : current))}
         />
       )}
-    </aside>
+    </section>
   )
 }

@@ -15,8 +15,7 @@ const aspect = '1280 / 800'
  */
 export function ScreenPane({ bot, takeOver, onOpen }: { bot: BotInfo; takeOver?: MessageInfo; onOpen: () => void }) {
   return (
-    <aside aria-label={`${bot.name}'s screen`} className="flex w-[360px] shrink-0 flex-col gap-3 overflow-y-auto border-l border-border-subtle p-5">
-      <h2 className="text-lg font-semibold">Screen</h2>
+    <section aria-label={`${bot.name}'s screen`} className="flex flex-col gap-3 p-5">
       {takeOver?.card?.type === 'take_over' && <AttentionCard key={takeOver.id} message={takeOver} instruction={takeOver.card.instruction} botName={bot.name} />}
       <div className="group relative">
         <ScreenView key={bot.id} bot={bot} className="rounded-md" />
@@ -29,7 +28,7 @@ export function ScreenPane({ bot, takeOver, onOpen }: { bot: BotInfo; takeOver?:
         </button>
       </div>
       <p className="text-xs text-muted-foreground">{bot.name}'s screen</p>
-    </aside>
+    </section>
   )
 }
 

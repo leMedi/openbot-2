@@ -4,6 +4,7 @@ import { cn } from '@openbot/ui/lib/utils'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useRef, useState } from 'react'
 import { BotAvatar, GroupAvatar } from '../../components/bot-avatar.tsx'
+import { BackToChats } from '../../components/side-panel.tsx'
 import { api, errorMessage } from '../../lib/api.ts'
 
 export const Route = createFileRoute('/_app/groups/new')({
@@ -42,6 +43,7 @@ function NewGroup() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="chat-material flex min-h-[51px] items-center gap-2 px-4">
+        <BackToChats />
         <GroupAvatar members={members} />
         <span className="font-semibold">New group chat</span>
       </header>

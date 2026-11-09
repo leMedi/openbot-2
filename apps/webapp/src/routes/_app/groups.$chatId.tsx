@@ -7,6 +7,7 @@ import { BotAvatar, GroupAvatar } from '../../components/bot-avatar.tsx'
 import { Field, inputClass } from '../../components/bot-fields.tsx'
 import { ChatView } from '../../components/chat-view.tsx'
 import { ConfirmDeleteGroup } from '../../components/confirm-delete.tsx'
+import { BackToChats, PanelToggle, SidePanel } from '../../components/side-panel.tsx'
 import { api, errorMessage } from '../../lib/api.ts'
 import { type ChatSearch, chatSearch } from '../../lib/chat-search.ts'
 
@@ -19,7 +20,7 @@ export const Route = createFileRoute('/_app/groups/$chatId')({
   component: Group,
 })
 
-/** A group chat: the owner and its members, who answer in rounds, with the Members pane beside it. */
+/** A group chat: the owner and its members, who answer in rounds, with its panel (Members) beside it. */
 function Group() {
   const { chatId } = Route.useParams()
   const search = Route.useSearch()
@@ -40,18 +41,12 @@ function Group() {
           onFocused={() => void navigate({ to: '.', search: {}, replace: true })}
           header={
             <header className="chat-material sticky top-0 z-10 flex min-h-[51px] items-center gap-2 px-4">
+              <BackToChats />
               <GroupAvatar members={members} />
               <span className="truncate font-semibold">{chat.name}</span>
               {speaking && <span className="shrink-0 animate-fade-in text-sm text-muted-foreground">{speaking.name} is taking a turn</span>}
-              <span className="ml-auto flex gap-1">
-                <button
-                  type="button"
-                  aria-pressed={membersOpen}
-                  onClick={() => setMembersOpen((open) => !open)}
-                  className={cn('pressable rounded-md px-2 py-1 text-base hover:bg-secondary-hover', membersOpen && 'bg-selected')}
-                >
-                  Members
-                </button>
+              <span className="ml-auto flex shrink-0 gap-1">
+                <PanelToggle open={membersOpen} onToggle={() => setMembersOpen((open) => !open)} />
               </span>
             </header>
           }
@@ -62,10 +57,16 @@ function Group() {
           showAuthors
         />
       </div>
-      {membersOpen && <MembersPane chat={chat} members={members} />}
+      {membersOpen && (
+        <SidePanel label={`${chat.name}'s panel`} tabs={groupPanes} tab="members" onTab={() => {}} onClose={() => setMembersOpen(false)}>
+          <MembersPane chat={chat} members={members} />
+        </SidePanel>
+      )}
     </div>
   )
 }
+
+const groupPanes = [{ id: 'members', label: 'Members' }] as const
 
 /** The group's name and members, Grok's Members pane: rename, open a member's DM, remove one, add another, delete the group. */
 function MembersPane({ chat, members }: { chat: ChatInfo; members: BotInfo[] }) {
@@ -97,9 +98,9 @@ function MembersPane({ chat, members }: { chat: ChatInfo; members: BotInfo[] }) 
   }
 
   return (
-    <aside aria-label="Members" className="flex w-[320px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-border-subtle p-5">
-      <header className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Members</h2>
+    <section aria-label="Members" className="relative flex flex-col gap-4 p-5">
+      {/* Saving shows in the top padding, at the right, so it moves nothing. */}
+      <header className="absolute top-0.5 right-5 leading-5">
         <span role="status" className={cn('text-sm', error ? 'text-destructive-foreground' : 'text-muted-foreground')}>
           {saving ? 'Saving…' : error ? "Couldn't save" : ''}
         </span>
@@ -190,6 +191,6 @@ function MembersPane({ chat, members }: { chat: ChatInfo; members: BotInfo[] }) 
           }}
         />
       )}
-    </aside>
+    </section>
   )
 }
