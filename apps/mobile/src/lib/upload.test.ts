@@ -40,7 +40,7 @@ function fakeForm(): FormLike & { fields: [string, unknown][] } {
 const photo = { uri: 'file:///cache/IMG_1.jpg', name: 'IMG_1.jpg', size: 2048, mimeType: 'image/jpeg' }
 const notes = { uri: 'file:///cache/notes.pdf', name: 'notes.pdf', size: 100, mimeType: 'application/pdf' }
 
-function send(options: { onProgress?: (fraction: number) => void; signal?: AbortSignal } = {}) {
+function send(options: { onProgress?: (fraction: number) => void; signal?: AbortSignal; replyToId?: string } = {}) {
   const request = fakeRequest()
   const form = fakeForm()
   const sent = sendWithFiles({
@@ -67,6 +67,14 @@ describe('sending a message with files from the phone', () => {
     ])
     request.answer(200, { id: 'm1', text: 'Look' })
     await expect(sent).resolves.toEqual({ id: 'm1', text: 'Look' })
+  })
+
+  it('says which message it replies to', () => {
+    const { form } = send({ replyToId: 'm0' })
+    expect(form.fields.slice(0, 2)).toEqual([
+      ['text', 'Look'],
+      ['replyToId', 'm0'],
+    ])
   })
 
   it('reports how much has gone up', () => {

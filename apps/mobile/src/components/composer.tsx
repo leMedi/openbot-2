@@ -1,5 +1,5 @@
-import { maxAttachments } from '@openbot/api-contract'
-import { attachmentKind, useLive } from '@openbot/client'
+import { maxAttachments, type ReplyToInfo } from '@openbot/api-contract'
+import { attachmentKind, quotedText, useLive } from '@openbot/client'
 import { Image } from 'expo-image'
 import { useEffect, useRef, useState } from 'react'
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, type TextInputInstance, View } from 'react-native'
@@ -58,6 +58,8 @@ export function Composer({
   chatId,
   label,
   files,
+  replyingTo,
+  onCancelReply,
   notice,
   canSend,
   onAttach,
@@ -68,6 +70,9 @@ export function Composer({
   chatId: string
   label: string
   files: PickedFile[]
+  /** The message the owner is replying to, shown above the field with ✕. */
+  replyingTo?: ReplyToInfo
+  onCancelReply?: () => void
   notice: string | undefined
   /** Whether the instance can be reached; there is no queue of messages to send later. */
   canSend: boolean
@@ -90,6 +95,12 @@ export function Composer({
   const cursor = useRef<Selection>({ start: text.length, end: text.length })
   const [placed, setPlaced] = useState<Selection>()
   const [modelSheet, setModelSheet] = useState(false)
+  // Starting a reply raises the keyboard on the field, as Grok's does.
+  useEffect(() => {
+    if (!replyingTo) return
+    const timer = setTimeout(() => field.current?.focus(), 150)
+    return () => clearTimeout(timer)
+  }, [replyingTo])
   // The field is back once dictation is over: the keyboard comes up on it to edit what was said.
   const focusField = useRef(false)
   const dictation = useDictation({
@@ -139,6 +150,21 @@ export function Composer({
       {dictation.toast && <DictationToastView toast={dictation.toast} onClose={dictation.dismissToast} />}
       {notice && <Text style={[styles.notice, { color: colors.mutedForeground }]}>{notice}</Text>}
       <View style={[styles.box, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
+        {replyingTo && (
+          <View style={[styles.reply, { backgroundColor: colors.background, borderLeftColor: colors.blue }]}>
+            <View style={styles.replyText}>
+              <Text numberOfLines={1} style={[styles.replyAuthor, { color: colors.foreground }]}>
+                Replying to {replyingTo.author === 'owner' ? 'yourself' : replyingTo.authorName}
+              </Text>
+              <Text numberOfLines={1} style={[styles.replyQuote, { color: colors.mutedForeground }]}>
+                {quotedText(replyingTo)}
+              </Text>
+            </View>
+            <Pressable accessibilityRole="button" accessibilityLabel="Cancel reply" hitSlop={8} onPress={onCancelReply} style={styles.replyCancel}>
+              <CloseIcon size={12} color={colors.mutedForeground} />
+            </Pressable>
+          </View>
+        )}
         {files.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.files} keyboardShouldPersistTaps="handled">
             <PickedFiles files={files} onRemove={onRemove} />
@@ -171,8 +197,8 @@ export function Composer({
           </Pressable>
           )}
           <TextInput
-            accessibilityLabel={label}
-            placeholder={label}
+            accessibilityLabel={replyingTo ? `Reply to ${replyingTo.authorName}` : label}
+            placeholder={replyingTo ? 'Reply…' : label}
             placeholderTextColor={colors.faint}
             multiline
             value={text}
@@ -209,6 +235,11 @@ const styles = StyleSheet.create({
   composer: { paddingHorizontal: 10, paddingTop: 6, paddingBottom: 8 },
   notice: { fontSize: 12, paddingHorizontal: 6, paddingBottom: 4 },
   box: { borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, padding: 6, gap: 6 },
+  reply: { flexDirection: 'row', alignItems: 'center', gap: 8, borderLeftWidth: 3, borderRadius: 12, paddingLeft: 10, paddingRight: 4, paddingVertical: 6 },
+  replyText: { flex: 1 },
+  replyAuthor: { fontSize: 12, fontWeight: '600' },
+  replyQuote: { fontSize: 14 },
+  replyCancel: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   files: { gap: 6, paddingHorizontal: 2, paddingTop: 2, alignItems: 'center' },
   row: { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
   round: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },

@@ -31,6 +31,7 @@ export function sendWithFiles({
   chatId,
   text,
   files,
+  replyToId,
   onProgress,
   signal,
   request = () => new XMLHttpRequest() as unknown as RequestLike,
@@ -41,6 +42,8 @@ export function sendWithFiles({
   chatId: string
   text: string
   files: readonly PickedFile[]
+  /** The chat's message it replies to. */
+  replyToId?: string
   /** How much has gone up, from 0 to 1. */
   onProgress?: (fraction: number) => void
   signal?: AbortSignal
@@ -50,6 +53,7 @@ export function sendWithFiles({
   return new Promise((resolve, reject) => {
     const body = form()
     body.append('text', text)
+    if (replyToId) body.append('replyToId', replyToId)
     files.forEach((file, index) => body.append(`files[${index}]`, { uri: file.uri, name: file.name, type: file.mimeType }))
     const xhr = request()
     xhr.open('POST', new URL(`/api/chats/${encodeURIComponent(chatId)}/messages`, url).href)

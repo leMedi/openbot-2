@@ -1,5 +1,20 @@
-import type { BotInfo, BotMessageInfo } from '@openbot/api-contract'
-import { addFiles, chatName, membersOf, type Outgoing, transcript, type TranscriptRow, useLive, useViewingHeartbeat } from '@openbot/client'
+import type { BotInfo, BotMessageInfo, MessageInfo, ReplyToInfo } from '@openbot/api-contract'
+import {
+  addFiles,
+  chatName,
+  membersOf,
+  type Outgoing,
+  quotedText,
+  reactionPills,
+  reactorNames,
+  replyTargetOf,
+  transcript,
+  type TranscriptRow,
+  useLive,
+  useViewingHeartbeat,
+} from '@openbot/client'
+import * as Clipboard from 'expo-clipboard'
+import * as Haptics from 'expo-haptics'
 import { Stack, useIsFocused, useLocalSearchParams } from 'expo-router'
 import { useHeaderHeight } from 'expo-router/react-navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -12,6 +27,7 @@ import { Composer, PickedFiles } from '../../components/composer.tsx'
 import { ConnectionBanner, useUnreachable } from '../../components/connection-banner.tsx'
 import { ScreenIcon } from '../../components/icons.tsx'
 import { Markdown } from '../../components/markdown.tsx'
+import { MessageMenu } from '../../components/message-menu.tsx'
 import { useAppActive } from '../../lib/app-state.ts'
 import { hasBlocks, parseMarkdown } from '../../lib/markdown.ts'
 import { setFrontChat } from '../../lib/notifications/phone.ts'
@@ -39,6 +55,9 @@ const newSendKey = () => `send-${++sends}`
 
 /** Files the owner added to each chat's composer and hasn't sent yet, kept while they leave the chat (not across restarts). */
 const pendingFiles = new Map<string, PickedFile[]>()
+
+/** The message each chat's composer replies to, kept while the owner leaves the chat (not across restarts). */
+const pendingReplies = new Map<string, ReplyToInfo>()
 
 /**
  * A chat, DM or group, pushed from the Chats list or a search hit (at `message`), as the web's (spec: Phone screen map):
@@ -68,6 +87,9 @@ export default function Chat() {
   const outgoing = useSends(chatId)
   const [files, setFilesState] = useState<PickedFile[]>(() => pendingFiles.get(chatId) ?? [])
   const [notice, setNotice] = useState<string>()
+  const [replyingTo, setReplyingToState] = useState<ReplyToInfo | undefined>(() => pendingReplies.get(chatId))
+  /** The message whose long-press menu is open. */
+  const [menu, setMenu] = useState<MessageInfo>()
   const [keyboard, setKeyboard] = useState(false)
   const list = useRef<FlatList<Row>>(null)
   /** Going to a hit beyond what's laid out tries again a few times, as the list measures further each time. */
@@ -86,6 +108,21 @@ export default function Chat() {
       hide.remove()
     }
   }, [])
+
+  function setReplyingTo(next: ReplyToInfo | undefined) {
+    setReplyingToState(next)
+    if (next) pendingReplies.set(chatId, next)
+    else pendingReplies.delete(chatId)
+  }
+
+  function openMenu(message: MessageInfo) {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    setMenu(message)
+  }
+
+  function react(message: MessageInfo, emoji: string) {
+    live.react(chatId, message.id, emoji).catch((caught) => setError(errorMessage(caught)))
+  }
 
   function setFiles(next: PickedFile[]) {
     setFilesState(next)
@@ -157,16 +194,17 @@ export default function Chat() {
     return () => setFrontChat(undefined)
   }, [inFront, chatId])
 
-  async function send(text: string, sending: PickedFile[], key = newSendKey()) {
+  async function send(text: string, sending: PickedFile[], replyTo: ReplyToInfo | undefined, key = newSendKey()) {
     following.current = true
     list.current?.scrollToOffset({ offset: 0, animated: true })
     const after = messages.at(-1)?.id
     const change = (entry: Partial<Sending>) => updateSends(chatId, (entries) => entries.map((other) => (other.key === key ? { ...other, ...entry } : other)))
-    updateSends(chatId, (entries) => [...entries.filter((entry) => entry.key !== key), { key, text, files: sending, after, progress: sending.length ? 0 : undefined }])
+    updateSends(chatId, (entries) => [...entries.filter((entry) => entry.key !== key), { key, text, files: sending, replyTo, after, progress: sending.length ? 0 : undefined }])
+    const replyToId = replyTo?.id
     try {
       const posted = sending.length
-        ? await sendWithFiles({ url, chatId, text, files: sending, onProgress: (progress) => change({ progress }) })
-        : await api.chats.send({ chatId, text })
+        ? await sendWithFiles({ url, chatId, text, files: sending, replyToId, onProgress: (progress) => change({ progress }) })
+        : await api.chats.send({ chatId, text, replyToId })
       live.addMessage(posted)
       updateSends(chatId, (entries) => entries.filter((entry) => entry.key !== key))
     } catch (caught) {
@@ -205,6 +243,29 @@ export default function Chat() {
     const timer = setTimeout(() => list.current?.scrollToIndex({ index: focusIndex, viewPosition: 0.5, animated: false }), 60)
     return () => clearTimeout(timer)
   }, [loaded, seeking, focusMessage, focusIndex])
+  /**
+   * Goes to the message a reply quotes, highlighting it a moment: loading back to it first when it's older than those
+   * loaded, then once the list has them.
+   */
+  async function jumpTo(messageId: string) {
+    const loadedNow = messages.some((entry) => entry.id === messageId)
+    if (!loadedNow) {
+      try {
+        await live.loadUntil(chatId, messageId)
+      } catch (caught) {
+        return setError(errorMessage(caught))
+      }
+    }
+    const index = transcript(live.messages.get(chatId) ?? [], outgoing)
+      .reverse()
+      .findIndex((row) => row.key === messageId)
+    if (index < 0) return
+    retries.current = 0
+    following.current = false
+    setHighlighted(messageId)
+    // Once the list has rendered the older messages it just loaded.
+    setTimeout(() => list.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true }), loadedNow ? 0 : 120)
+  }
   useEffect(() => {
     if (!highlighted) return
     const timer = setTimeout(() => setHighlighted(undefined), highlightMs)
@@ -252,7 +313,20 @@ export default function Chat() {
           {card.type === 'plugin_reconnect' && <PluginReconnectCard card={card} botName={row.authorName} />}
         </View>
       )
-    } else content = <MessageBubble row={row} showAuthor={!!group} onResend={live.connected ? (entry) => void send(entry.text, entry.files, entry.key) : undefined} onDiscard={(entry) => updateSends(chatId, (entries) => entries.filter((other) => other.key !== entry.key))} />
+    } else {
+      content = (
+        <MessageBubble
+          row={row}
+          showAuthor={!!group}
+          bots={live.bots ?? []}
+          onLongPress={live.connected ? openMenu : undefined}
+          onReact={live.connected ? react : undefined}
+          onJumpTo={(messageId) => void jumpTo(messageId)}
+          onResend={live.connected ? (entry) => void send(entry.text, entry.files, entry.replyTo, entry.key) : undefined}
+          onDiscard={(entry) => updateSends(chatId, (entries) => entries.filter((other) => other.key !== entry.key))}
+        />
+      )
+    }
     return <View style={[styles.rowWrap, row.continuesNext ? styles.close : styles.apart, highlight]}>{content}</View>
   }
 
@@ -359,6 +433,8 @@ export default function Chat() {
             chatId={chatId}
             label={`Message ${name}`}
             files={files}
+            replyingTo={replyingTo}
+            onCancelReply={() => setReplyingTo(undefined)}
             notice={notice}
             canSend={live.connected}
             onAttach={(added) => {
@@ -374,10 +450,18 @@ export default function Chat() {
               const sending = files
               setFiles([])
               setNotice(undefined)
-              void send(text, sending)
+              setReplyingTo(undefined)
+              void send(text, sending, replyingTo)
             }}
           />
         </View>
+        <MessageMenu
+          message={menu}
+          onClose={() => setMenu(undefined)}
+          onReact={react}
+          onReply={(message) => setReplyingTo(replyTargetOf(message))}
+          onCopy={(message) => void Clipboard.setStringAsync(message.text)}
+        />
       </KeyboardAvoidingView>
     </>
   )
@@ -387,17 +471,52 @@ export default function Chat() {
 function MessageBubble({
   row,
   showAuthor,
+  bots,
+  onLongPress,
+  onReact,
+  onJumpTo,
   onResend,
   onDiscard,
 }: {
   row: Row
   showAuthor: boolean
+  /** Who may have reacted, to name them. */
+  bots: readonly BotInfo[]
+  /** Opens the message's menu (react, reply, copy); undefined while the instance can't be reached. */
+  onLongPress: ((message: MessageInfo) => void) | undefined
+  /** Toggles the owner's reaction from a pill; undefined while the instance can't be reached. */
+  onReact: ((message: MessageInfo, emoji: string) => void) | undefined
+  /** Goes to the message a reply quotes. */
+  onJumpTo: (messageId: string) => void
   /** Undefined while the instance can't be reached, as there's no queue to send later. */
   onResend: ((entry: Outgoing<PickedFile>) => void) | undefined
   onDiscard: (entry: Outgoing<PickedFile>) => void
 }) {
   const colors = useColors()
   const failed = row.outgoing?.error
+  const message = row.message
+  const replyTo = message?.replyTo ?? row.outgoing?.replyTo
+  const pills = message ? reactionPills(message.reactions) : []
+  const quote = replyTo && (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Replying to ${replyTo.authorName}: ${quotedText(replyTo)}`}
+      accessibilityHint="Goes to the message"
+      onPress={() => onJumpTo(replyTo.id)}
+      style={({ pressed }) => [
+        styles.quote,
+        row.mine ? { backgroundColor: '#ffffff26', borderLeftColor: '#ffffffb3' } : { backgroundColor: colors.background, borderLeftColor: colors.borderStrong },
+        pressed && { opacity: 0.7 },
+      ]}
+    >
+      <Text numberOfLines={1} style={[styles.quoteAuthor, { color: row.mine ? colors.onColor : colors.foreground }]}>
+        {replyTo.author === 'owner' ? 'You' : replyTo.authorName}
+      </Text>
+      <Text numberOfLines={1} style={[styles.quoteText, { color: row.mine ? colors.onColor : colors.mutedForeground }]}>
+        {quotedText(replyTo)}
+      </Text>
+    </Pressable>
+  )
   const markdown = useMemo(() => parseMarkdown(row.text), [row.text])
   const wide = hasBlocks(markdown)
   const corner = 6
@@ -415,13 +534,48 @@ function MessageBubble({
           <PickedFiles files={row.outgoing.files} progress={(row.outgoing as Sending).progress} dimmed={!!failed} />
         </View>
       )}
+      {!row.text && quote}
       {/* Grok doesn't bubble a message of files only. */}
       {!!row.text && (
-        <View
+        <Pressable
           accessibilityLabel={`${row.authorName}: ${row.text}`}
-          style={[styles.bubble, wide && styles.wideBubble, corners, { backgroundColor: row.mine ? colors.bubbleUser : colors.bubbleAgent, opacity: failed ? 0.6 : 1 }]}
+          accessibilityHint={message && onLongPress ? 'Long press to react, reply or copy' : undefined}
+          accessibilityActions={message && onLongPress ? [{ name: 'longpress', label: 'React, reply or copy' }] : undefined}
+          onAccessibilityAction={() => message && onLongPress?.(message)}
+          onLongPress={message && onLongPress ? () => onLongPress(message) : undefined}
+          delayLongPress={350}
+          style={({ pressed }) => [
+            styles.bubble,
+            wide && styles.wideBubble,
+            corners,
+            { backgroundColor: row.mine ? colors.bubbleUser : colors.bubbleAgent, opacity: failed ? 0.6 : 1 },
+            pressed && message && onLongPress && styles.pressedBubble,
+          ]}
         >
+          {quote}
           <Markdown root={markdown} onColor={row.mine} />
+        </Pressable>
+      )}
+      {message && pills.length > 0 && (
+        <View style={[styles.pills, row.mine && styles.end]}>
+          {pills.map((pill) => (
+            <Pressable
+              key={pill.emoji}
+              accessibilityRole="button"
+              accessibilityLabel={`${pill.emoji} ${pill.count}, by ${reactorNames(pill, bots)}`}
+              accessibilityState={{ selected: pill.mine, disabled: !onReact }}
+              disabled={!onReact}
+              onPress={() => onReact?.(message, pill.emoji)}
+              style={({ pressed }) => [
+                styles.pill,
+                pill.mine ? { backgroundColor: colors.blueSubtle, borderColor: colors.blue } : { backgroundColor: colors.card, borderColor: colors.border },
+                pressed && { opacity: 0.7 },
+              ]}
+            >
+              <Text style={styles.pillEmoji}>{pill.emoji}</Text>
+              {pill.count > 1 && <Text style={[styles.pillCount, { color: pill.mine ? colors.blueForeground : colors.mutedForeground }]}>{pill.count}</Text>}
+            </Pressable>
+          ))}
         </View>
       )}
       {failed && row.outgoing && (
@@ -514,6 +668,14 @@ const styles = StyleSheet.create({
   end: { justifyContent: 'flex-end' },
   author: { fontSize: 12, paddingHorizontal: 12 },
   bubble: { borderRadius: 18, paddingHorizontal: 12, paddingVertical: 8 },
+  pressedBubble: { opacity: 0.85, transform: [{ scale: 0.98 }] },
+  quote: { borderLeftWidth: 3, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 6, maxWidth: 260 },
+  quoteAuthor: { fontSize: 12, fontWeight: '600' },
+  quoteText: { fontSize: 14 },
+  pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 3, height: 26, borderRadius: 13, borderWidth: 1, paddingHorizontal: 8 },
+  pillEmoji: { fontSize: 14 },
+  pillCount: { fontSize: 12, fontVariant: ['tabular-nums'] },
   wideBubble: { alignSelf: 'stretch' },
   outgoingFiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   failed: { flexDirection: 'row', gap: 10 },
