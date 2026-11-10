@@ -1318,7 +1318,12 @@ export const contract = {
 export type Contract = typeof contract
 export type ApiClient = ContractRouterClient<Contract>
 
-/** A typed client for the HTTP API at `url` (e.g. `https://host/api`), for the web app and later mobile. */
-export function createApiClient(url: string): ApiClient {
-  return createORPCClient(new OpenAPILink(contract, { url }))
+/** How the client fetches: given each call's procedure `path` (e.g. `['events']`), so the phone can watch its live stream for stalls. */
+export type ApiFetch = (request: Request, init: RequestInit, path: readonly string[]) => Promise<Response>
+
+/** A typed client for the HTTP API at `url` (e.g. `https://host/api`), for the web app and the phone; over the global `fetch` by default. */
+export function createApiClient(url: string, { fetch }: { fetch?: ApiFetch } = {}): ApiClient {
+  return createORPCClient(
+    new OpenAPILink(contract, { url, ...(fetch && { fetch: (request, init, _options, path) => fetch(request, init, path) }) }),
+  )
 }

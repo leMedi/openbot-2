@@ -1,5 +1,5 @@
 # Every push to main is a release (design §2.4, ADR 0004):
-#   test       typecheck and the test suite
+#   test       typecheck, lint (the mobile app's) and the test suite
 #   computer   the computer's contract suite on the real computer, in the runtime image (dev target)
 #   package    builds release 0.<minor>.<run> (minor from VERSION) and smoke-tests it: archive, release.json, SHA256SUMS
 #   image      when the runtime image's definition changed (a new r<N>), builds it for amd64 and arm64 with the release
@@ -50,6 +50,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
+      - run: pnpm lint
       - run: pnpm test
 
   computer:

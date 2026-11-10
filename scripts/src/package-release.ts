@@ -6,7 +6,7 @@
 //   release.json              the manifest
 //   apps/webapp/dist          the built web app; its server build bundles the web app and the workspace packages
 //   apps/desktopd/src         the screen daemon, run with plain Node
-//   apps/*, packages/*        the workspace packages' sources (tests left out)
+//   apps/*, packages/*        the workspace packages' sources (tests left out), except the mobile app, left out
 //   catalog/                  the bundled plugins (design §5.5)
 //   node_modules              production dependencies for linux x64 and arm64, installed flat ("hoisted")
 //
@@ -22,12 +22,14 @@ import { installScript } from './install-script.ts'
 import { readReleaseConfig, type ReleaseConfig, releaseManifest, releaseNotes, type ReleaseManifest } from './manifest.ts'
 
 /** Top-level files every release keeps: pnpm's workspace files, so the release can be inspected and reinstalled. */
-const rootFiles = ['package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml']
+const rootFiles = ['package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml', '.pnpmfile.cjs']
 /**
  * Where the workspace packages live; evals/ too, so the workspace installs as its lockfile says (nothing runs it); and
  * the plugin catalog, which the server reads on boot.
  */
 const packageFolders = ['apps/', 'packages/', 'scripts/', 'evals/', 'catalog/']
+/** The phone app, which the instance never runs: left out, with its dependencies (Expo and React Native). */
+const mobileApp = 'apps/mobile/'
 const isTest = (path: string) => /\.test\.tsx?$/.test(path)
 
 /** The platforms the runtime image runs on, whose native dependencies the release carries. */
@@ -81,8 +83,12 @@ export function packageRelease({
   })
     .split('\0')
     .filter((path) => rootFiles.includes(path) || packageFolders.some((folder) => path.startsWith(folder)))
+    .filter((path) => !path.startsWith(mobileApp))
     .filter((path) => existsSync(join(repo, path)))
   for (const path of files) copy(join(repo, path), join(source, path))
+  // The lockfile still lists the mobile app, and a hoisted install installs all it lists: drop it, offline, so no
+  // version changes (the release keeps this lockfile).
+  pnpm(source, ['install', '--lockfile-only', '--offline'])
   log('building the web app')
   pnpm(source, ['install', '--frozen-lockfile', '--config.node-linker=hoisted'])
   pnpm(source, ['--filter', '@openbot/webapp', 'build'])

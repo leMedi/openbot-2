@@ -560,13 +560,17 @@ export class LiveStore {
 
 const LiveContext = createContext<LiveStore | undefined>(undefined)
 
-/** Provides `store` to the hooks below, following the server's live events while mounted. */
-export function LiveProvider({ store, children }: { store: LiveStore; children: ReactNode }) {
+/**
+ * Provides `store` to the hooks below, following the server's live events while mounted and `active`. The phone
+ * passes `active={false}` in the background: the stream closes, and resumes from its last stamp once active again.
+ */
+export function LiveProvider({ store, active = true, children }: { store: LiveStore; active?: boolean; children: ReactNode }) {
   useEffect(() => {
+    if (!active) return
     const controller = new AbortController()
     void store.run(controller.signal)
     return () => controller.abort()
-  }, [store])
+  }, [store, active])
   return <LiveContext.Provider value={store}>{children}</LiveContext.Provider>
 }
 

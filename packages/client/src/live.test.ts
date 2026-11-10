@@ -207,6 +207,29 @@ describe('the live stream', () => {
     expect(store.connected).toBe(true)
   })
 
+  it('closed and run again, as the phone does in the background, resumes from the last stamp', async () => {
+    const { server, api } = fakeServer()
+    server.bots = [bot('rex')]
+    server.connections = [
+      [hello('e1', 4, false), { epoch: 'e1', seq: 5, event: { type: 'bot.created', bot: bot('ana') } }],
+      [hello('e1', 5, true), { epoch: 'e1', seq: 6, event: { type: 'bot.status', botId: 'ana', working: true, error: null } }],
+    ]
+    const store = new LiveStore({ api, storage: memoryStorage() })
+    const background = new AbortController()
+    const closed = store.run(background.signal)
+    await vi.waitFor(() => expect(store.bots?.map((entry) => entry.id)).toEqual(['rex', 'ana']))
+
+    background.abort()
+    await closed
+    expect(store.connected).toBe(false)
+    expect(server.stamps).toHaveLength(1)
+
+    void store.run(controller.signal)
+    await vi.waitFor(() => expect(store.bots?.find((entry) => entry.id === 'ana')?.working).toBe(true))
+    expect(server.stamps).toEqual([undefined, { epoch: 'e1', seq: 5 }])
+    expect(server.refetches).toBe(1)
+  })
+
   it('reads everything anew when the gap is too old to resume', async () => {
     const { server, api } = fakeServer()
     server.bots = [bot('rex')]

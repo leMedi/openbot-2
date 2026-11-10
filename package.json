@@ -7,6 +7,7 @@
     "build": "turbo run build",
     "start": "turbo run start",
     "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
     "test": "turbo run test",
     "eval": "node --env-file-if-exists=evals/.env --experimental-transform-types --disable-warning=ExperimentalWarning evals/src/cli.ts",
     "db:generate": "turbo run db:generate",
