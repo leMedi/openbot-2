@@ -312,8 +312,13 @@ export function isMuted(chat: Pick<ChatInfo, 'mutedUntil' | 'hidden'>, now: numb
 export const pushKinds = ['message', 'question', 'take_over', 'plugin_request', 'plugin_reconnect'] as const
 export type PushKind = (typeof pushKinds)[number]
 
-/** A push notification's `data`: the chat and message (or card) a tap opens, and what it was for. */
-export type PushData = { chatId: string; messageId: string; kind: PushKind }
+/**
+ * A push notification's `data`: the chat and message (or card) a tap opens, and what it was for; with the bot that
+ * posted it and whether the chat is a group, so the phone can show the bot as the sender (Android's MessagingStyle)
+ * and find its avatar; and whether it quietly replaces the chat's line (a later message of the same turn), which
+ * Android can't tell from the sound, as its sound is the channel's.
+ */
+export type PushData = { chatId: string; messageId: string; kind: PushKind; botId: string; botName: string; group: boolean; quiet: boolean }
 
 /** One line of plain text from Markdown, for previews: the sidebar's, a push notification's. */
 export function previewText(markdown: string): string {

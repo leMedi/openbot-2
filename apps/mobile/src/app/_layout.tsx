@@ -12,6 +12,9 @@ import { useAppActive } from '../lib/app-state.ts'
 import type { CheckResult } from '../lib/connect/check.ts'
 import { checkFromPhone } from '../lib/connect/phone.ts'
 import { modelDownload } from '../lib/dictation/model.ts'
+import { clearShown, phoneOs } from '../lib/notifications/phone.ts'
+import { PhoneNotifications, retryUnregistering } from '../lib/notifications/registration.ts'
+import { useNotificationsBridge } from '../lib/notifications/use-notifications.ts'
 import { useNetworkChanges } from '../lib/network.ts'
 import { phoneSnapshot } from '../lib/snapshot.ts'
 import { InstanceContext, type InstanceInfo } from '../lib/instance-context.ts'
@@ -24,6 +27,8 @@ import { useColors } from '../lib/theme.ts'
 export default function RootLayout() {
   // A voice model download under way when the app last ran carries on (the model belongs to the phone, not to an instance).
   useEffect(() => modelDownload.resume(), [])
+  // Instances the phone left while they couldn't be reached are told again to stop notifying it.
+  useEffect(() => void retryUnregistering(kvStorage, (url) => instanceApi(url).devices), [])
   const dark = useColorScheme() === 'dark'
   const colors = useColors()
   const base = dark ? DarkTheme : DefaultTheme
@@ -80,9 +85,12 @@ function Root() {
     save(undefined)
   }
 
-  /** Drops what this phone keeps of its instance: its cache, drafts and folded sections, and the instance itself. */
+  /**
+   * Drops what this phone keeps of its instance: its cache, drafts and folded sections, its notifications (the
+   * instance is told to stop sending them by Instance as it's left), and the instance itself.
+   */
   const forget = () => {
-    // Unregistering this phone's push token joins here with Notifications on the phone (#116).
+    clearShown()
     forgetInstanceData(kvStorage)
     reloadFolds()
   }
@@ -137,6 +145,11 @@ function Instance({ saved, moveTo, disconnect }: { saved: SavedInstance } & Pick
   const { url, instanceId } = saved
   const [api] = useState(() => instanceApi(url))
   const [store] = useState(() => new LiveStore({ api, storage: kvStorage, snapshot: phoneSnapshot(kvStorage, instanceId) }))
+  const [notifications] = useState(() => new PhoneNotifications({ storage: kvStorage, devices: api.devices, os: phoneOs, instance: { url, instanceId } }))
+  // Leaving the instance unregisters the phone first, while its registration is still kept (the instance's keys go next).
+  const leaving = (options: { forget: boolean }) => {
+    if (options.forget) void notifications.forget()
+  }
   const active = useAppActive()
   // Saved now as the app goes to the background, where it may be ended before the next save is due.
   useEffect(() => {
@@ -165,8 +178,25 @@ function Instance({ saved, moveTo, disconnect }: { saved: SavedInstance } & Pick
     )
   }
   return (
-    <InstanceContext value={{ url, instanceId, api, noteCheck, moveTo, disconnect }}>
+    <InstanceContext
+      value={{
+        url,
+        instanceId,
+        api,
+        noteCheck,
+        moveTo: (instance, options) => {
+          leaving(options)
+          moveTo(instance, options)
+        },
+        disconnect: () => {
+          leaving({ forget: true })
+          disconnect()
+        },
+        notifications,
+      }}
+    >
       <LiveProvider store={store} active={active}>
+        <NotificationsBridge />
         {/* Portrait everywhere but the Screen, which turns with the phone (spec: Screen and take-over → Layout). */}
         <Stack screenOptions={{ orientation: 'portrait' }}>
           <Stack.Screen name="screen/[botId]" options={{ presentation: 'fullScreenModal', headerShown: false, orientation: 'all', animation: 'fade' }} />
@@ -177,4 +207,10 @@ function Instance({ saved, moveTo, disconnect }: { saved: SavedInstance } & Pick
       </LiveProvider>
     </InstanceContext>
   )
+}
+
+/** The phone's notifications while the app is on the instance: asking, the badge, and taps opening their chat. */
+function NotificationsBridge() {
+  useNotificationsBridge()
+  return null
 }

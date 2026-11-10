@@ -4,6 +4,7 @@ import {
   membersOf,
   rangeBetween,
   muteChoices,
+  muteEnd,
   nextMuteEnd,
   relativeTime,
   useNow,
@@ -941,7 +942,7 @@ function ChatRow({
 /** A bell struck through: the chat's bots' messages don't notify the owner's phones. */
 function MutedIcon({ mutedUntil }: { mutedUntil: ChatInfo['mutedUntil'] }) {
   const label =
-    typeof mutedUntil === 'number' ? `Muted until ${new Date(mutedUntil).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : 'Muted'
+    typeof mutedUntil === 'number' ? `Muted until ${muteEnd(mutedUntil)}` : 'Muted'
   return (
     <svg viewBox="0 0 16 16" width="11" height="11" aria-label={label} role="img" className="shrink-0 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <title>{label}</title>

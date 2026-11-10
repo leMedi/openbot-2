@@ -8,6 +8,7 @@ import { BotAvatar } from '../../../components/avatar.tsx'
 import { botModelLabel, useBotModels } from '../../../components/bot-model-list.tsx'
 import { FieldRow, Group, GroupedScroll, Loading, Note, Row } from '../../../components/grouped.tsx'
 import { ClockIcon, KeyIcon, MemoryIcon, ScreenIcon } from '../../../components/icons.tsx'
+import { MuteGroup } from '../../../components/mute-group.tsx'
 import { statusNote, useBotSave, useBotText } from '../../../lib/bot-save.ts'
 import { errorMessage } from '../../../lib/errors.ts'
 import { useInstance } from '../../../lib/instance-context.ts'
@@ -19,7 +20,8 @@ import { useWhenDone } from '../../../lib/when-done.ts'
 /**
  * A bot's info screen, pushed by tapping its chat's header (spec: Phone screen map), the web's Profile pane and the
  * way to its other panes: the avatar (editable), name and title, quick buttons (Screen, Routines, Memory, Access), Name
- * and Title saved as typed, Instructions and Model pushed, rows for Routines, Memory, Access and Activity, then Delete.
+ * and Title saved as typed, Instructions and Model pushed, rows for Routines, Memory, Access and Activity, the DM's
+ * mute, then Delete.
  */
 export default function BotInfoScreen() {
   const { botId } = useLocalSearchParams<{ botId: string }>()
@@ -52,6 +54,7 @@ function Info({ bot }: { bot: BotInfo }) {
   const models = useBotModels()
   const [modelList, settings] = models.data ?? []
   const botId = bot.id
+  const chat = live.chats.get(bot.chatId)
   const counts = useLoadOnFocus(
     useCallback(async () => {
       const [routines, memory, plugins] = await Promise.all([api.routines.list({ botId }), api.bots.memory({ botId }), api.plugins.list()])
@@ -140,6 +143,7 @@ function Info({ bot }: { bot: BotInfo }) {
           <Row label="Access" value={counted && plural(counted.granted, 'grant', 'grants')} onPress={() => openBot(bot.id, 'access')} />
           <Row label="Activity" onPress={() => openBot(bot.id, 'activity')} />
         </Group>
+        {chat && <MuteGroup chat={chat} />}
         <Group>
           <Row label={`Delete ${bot.name}`} tone="danger" onPress={confirmDelete} />
         </Group>

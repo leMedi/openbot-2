@@ -14,6 +14,7 @@ import { ScreenIcon } from '../../components/icons.tsx'
 import { Markdown } from '../../components/markdown.tsx'
 import { useAppActive } from '../../lib/app-state.ts'
 import { hasBlocks, parseMarkdown } from '../../lib/markdown.ts'
+import { setFrontChat } from '../../lib/notifications/phone.ts'
 import { errorMessage } from '../../lib/errors.ts'
 import { useInstance } from '../../lib/instance-context.ts'
 import { openBot, openMembers, openRoutine, openScreen } from '../../lib/routes.ts'
@@ -23,6 +24,9 @@ import { type PickedFile, sendWithFiles } from '../../lib/upload.ts'
 
 /** How close to the end (the bottom) still counts as reading the latest messages. */
 const followThreshold = 80
+
+/** How many times going to a message beyond what's laid out tries again. */
+const maxScrollRetries = 6
 
 /** How long a message a search hit opened stays highlighted. */
 const highlightMs = 2000
@@ -42,7 +46,7 @@ const pendingFiles = new Map<string, PickedFile[]>()
  * the Screen button in a DM; the transcript, live, with
  * cards answered inline and older pages loading as the owner scrolls up; the composer, with files from the photo
  * library, the camera or Files, uploaded with progress. While the chat is in front, it's marked read as messages arrive
- * and the instance is told the owner is viewing it, so it doesn't push for it.
+ * and the instance is told the owner is viewing it, so it doesn't push for it; its notifications on the phone go.
  */
 export default function Chat() {
   const { chatId, message: focusMessage } = useLocalSearchParams<{ chatId: string; message?: string }>()
@@ -66,8 +70,9 @@ export default function Chat() {
   const [notice, setNotice] = useState<string>()
   const [keyboard, setKeyboard] = useState(false)
   const list = useRef<FlatList<Row>>(null)
-  /** Going to a hit beyond what's laid out tries once more, once the list has measured further. */
+  /** Going to a hit beyond what's laid out tries again a few times, as the list measures further each time. */
   const retry = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const retries = useRef(0)
   useEffect(() => () => clearTimeout(retry.current), [])
   /** Whether the view is at the end, following new messages; false once the owner scrolls up to read. */
   const following = useRef(true)
@@ -145,6 +150,12 @@ export default function Chat() {
   }, [inFront, unread, newest, chatId, live, live.connected])
   // Not while the instance can't be reached: it would only fail.
   useViewingHeartbeat(chatId, inFront && live.connected)
+  // Nor does the phone show one that crossed the heartbeat, and the chat's notifications already shown go.
+  useEffect(() => {
+    if (!inFront) return
+    setFrontChat(chatId)
+    return () => setFrontChat(undefined)
+  }, [inFront, chatId])
 
   async function send(text: string, sending: PickedFile[], key = newSendKey()) {
     following.current = true
@@ -188,6 +199,7 @@ export default function Chat() {
   useEffect(() => {
     if (!loaded || seeking || !focusMessage || wentTo.current === focusMessage || focusIndex < 0) return
     wentTo.current = focusMessage
+    retries.current = 0
     following.current = false
     setHighlighted(focusMessage)
     const timer = setTimeout(() => list.current?.scrollToIndex({ index: focusIndex, viewPosition: 0.5, animated: false }), 60)
@@ -312,8 +324,10 @@ export default function Chat() {
               }}
               scrollEventThrottle={64}
               onScrollToIndexFailed={({ index, averageItemLength }) => {
-                // Not laid out that far yet: near it first, then to it once measured, once.
-                if (retry.current) return
+                // Not laid out that far yet: near it first, then to it once measured; each try lays out further.
+                if (retries.current >= maxScrollRetries) return
+                retries.current++
+                clearTimeout(retry.current)
                 list.current?.scrollToOffset({ offset: averageItemLength * index, animated: false })
                 retry.current = setTimeout(() => list.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false }), 120)
               }}

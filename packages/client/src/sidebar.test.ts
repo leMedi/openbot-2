@@ -1,6 +1,6 @@
 import type { BotInfo, ChatInfo, SectionInfo } from '@openbot/api-contract'
 import { describe, expect, it } from 'vitest'
-import { adjacentChat, hiddenFoldKey, navigableChatIds, rangeBetween, rowLine, selectableChatIds, type SidebarLayout, sidebarLayout } from './sidebar.ts'
+import { adjacentChat, badgeCount, hiddenFoldKey, muteState, navigableChatIds, rangeBetween, rowLine, selectableChatIds, type SidebarLayout, sidebarLayout } from './sidebar.ts'
 
 const chat = (id: string, changes: Partial<ChatInfo> = {}): ChatInfo => ({
   id,
@@ -151,5 +151,35 @@ describe("a row's second line", () => {
     const group = { chatId: 'g', chat: chat('g', { kind: 'group', lastMessage: last({ text: '' , attachments: [{ id: 'a', name: 'a.png', mimeType: 'image/png', size: 1, path: '/a' }, { id: 'b', name: 'b.png', mimeType: 'image/png', size: 1, path: '/b' }] }) }), pinned: false }
     expect(rowLine(group, undefined, undefined).text).toBe('Rex: Sent 2 images')
     expect(rowLine(group, { ...rex, name: 'Ana' }, undefined)).toEqual({ text: 'Ana is taking a turn…', tone: 'working' })
+  })
+})
+
+describe('the app badge', () => {
+  it('counts the chats unread or with a card waiting, each once, hidden ones included', () => {
+    const chats = [
+      chat('a', { unread: true }),
+      chat('b', { waitingFor: 'Which database?' }),
+      chat('c', { unread: true, waitingFor: 'Sign in' }),
+      chat('d'),
+      chat('e', { unread: true, hidden: true }),
+    ]
+    expect(badgeCount(chats)).toBe(4)
+    expect(badgeCount([])).toBe(0)
+  })
+})
+
+describe("a chat's mute, in words", () => {
+  const now = new Date(2026, 10, 10, 9, 0).getTime()
+  it('says when it ends, or that it lasts until unmuted', () => {
+    expect(muteState(chat('a'), now)).toEqual({ muted: false, label: 'Off' })
+    expect(muteState(chat('a', { mutedUntil: now - 1 }), now)).toEqual({ muted: false, label: 'Off' })
+    expect(muteState(chat('a', { mutedUntil: 'forever' }), now)).toEqual({ muted: true, label: 'Until I unmute' })
+    const later = muteState(chat('a', { mutedUntil: new Date(2026, 10, 10, 17, 30).getTime() }), now)
+    expect(later.muted).toBe(true)
+    expect(later.label).toMatch(/^Until .*5:30/)
+  })
+
+  it('counts a hidden chat as muted, its own mute aside', () => {
+    expect(muteState(chat('a', { hidden: true }), now)).toEqual({ muted: true, label: 'Hidden' })
   })
 })

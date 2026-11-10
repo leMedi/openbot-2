@@ -1,0 +1,28 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.notificationsnative'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.notificationsnative"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+// expo-notifications comes prebuilt (its local Maven repository), at the version the app installed.
+def expoNotificationsVersion = new groovy.json.JsonSlurper().parse(file('../../../node_modules/expo-notifications/package.json')).version
+
+dependencies {
+  // Extends expo-notifications' service and presentation (its designated-receiver lookup picks this one); the app
+  // links expo-notifications itself.
+  compileOnly "host.exp.exponent:expo.modules.notifications:${expoNotificationsVersion}"
+  implementation 'androidx.core:core:1.17.0'
+}

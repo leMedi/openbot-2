@@ -21,5 +21,13 @@ export const dictationDownloadKey = 'openbot.dictation.download'
 /** Android: the id of the voice model's download in the system's DownloadManager, which outlives the app. */
 export const systemDownloadKey = 'openbot.dictation.systemDownload'
 
+/** This phone's notifications from the instance: asked for once, and its registration there (its row and push token). */
+export const notificationsKey = 'openbot.notifications'
+/**
+ * Push tokens still to unregister from instances the phone left while they couldn't be reached, with their address:
+ * the phone's own, kept until done, so Disconnect stops notifications even when it happened offline.
+ */
+export const unregisterKey = 'openbot.notifications.unregister'
+
 /** What belongs to the phone rather than to an instance, kept when it disconnects or moves to another. */
-export const phoneKeys: readonly string[] = [localNetworkAskedKey, turnHintKey, dictationDownloadKey, systemDownloadKey]
+export const phoneKeys: readonly string[] = [localNetworkAskedKey, turnHintKey, dictationDownloadKey, systemDownloadKey, unregisterKey]

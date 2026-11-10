@@ -1,4 +1,4 @@
-import { type BotInfo, type ChatInfo, type MuteDuration, previewText, type SectionInfo, unassignedSectionId } from '@openbot/api-contract'
+import { type BotInfo, type ChatInfo, isMuted, type MuteDuration, previewText, type SectionInfo, unassignedSectionId } from '@openbot/api-contract'
 
 /** One sidebar row: a bot's DM (with its bot) or a group chat. */
 export type SidebarRow = { chatId: string; chat: ChatInfo | undefined; pinned: boolean; bot?: BotInfo }
@@ -136,3 +136,22 @@ export const muteChoices: readonly (readonly [MuteDuration, string])[] = [
   ['1d', 'For 1 day'],
   ['forever', 'Until I unmute'],
 ]
+
+/** When a timed mute ends, as both apps say it: "Tue 5:30 PM". */
+export function muteEnd(mutedUntil: number): string {
+  return new Date(mutedUntil).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
+}
+
+/** Whether a chat's bot messages notify, in words for its info screen: Off, Until Tue 5:30 PM, Until I unmute, Hidden. */
+export function muteState(chat: Pick<ChatInfo, 'mutedUntil' | 'hidden'>, now: number): { muted: boolean; label: string } {
+  if (chat.hidden) return { muted: true, label: 'Hidden' }
+  if (!isMuted(chat, now)) return { muted: false, label: 'Off' }
+  return { muted: true, label: typeof chat.mutedUntil === 'number' ? `Until ${muteEnd(chat.mutedUntil)}` : 'Until I unmute' }
+}
+
+/** The app's badge: the chats unread or with a card waiting, as the instance counts it for each push. */
+export function badgeCount(chats: Iterable<Pick<ChatInfo, 'unread' | 'waitingFor'>>): number {
+  let count = 0
+  for (const chat of chats) if (chat.unread || chat.waitingFor !== null) count++
+  return count
+}

@@ -22,11 +22,14 @@ describe("forgetting an instance's data on this phone", () => {
       'openbot.chats.folds': '{"research":true}',
       'openbot.localNetworkAsked': 'yes',
       'openbot.dictation.download': '{"cellular":false}',
+      'openbot.notifications': '{"asked":true,"device":{"id":"d1","token":"ExponentPushToken[a]"}}',
+      'openbot.notifications.unregister': '[{"url":"http://old:3000","instanceId":"old","token":"ExponentPushToken[a]"}]',
     })
     forgetInstanceData(storage)
     expect([...storage.entries]).toEqual([
       ['openbot.localNetworkAsked', 'yes'],
       ['openbot.dictation.download', '{"cellular":false}'],
+      ['openbot.notifications.unregister', '[{"url":"http://old:3000","instanceId":"old","token":"ExponentPushToken[a]"}]'],
     ])
   })
 

@@ -6,6 +6,7 @@ import { Alert, StyleSheet, Text, View } from 'react-native'
 import { ActionSheet, type SheetContent } from '../../components/action-sheet.tsx'
 import { BotAvatar, GroupAvatar } from '../../components/avatar.tsx'
 import { FieldRow, Group, GroupedScroll, Loading, Note, Row } from '../../components/grouped.tsx'
+import { MuteGroup } from '../../components/mute-group.tsx'
 import { SwipeRow } from '../../components/swipe-row.tsx'
 import { statusNote, useSaveQueue } from '../../lib/save-queue.ts'
 import { errorMessage } from '../../lib/errors.ts'
@@ -16,7 +17,7 @@ import { useSaveSoon } from '../../lib/use-save-soon.ts'
 /**
  * A group chat's Members, pushed by tapping its header (spec: Phone screen map), as the web's pane: its name (saved as
  * typed; blank names it after its members), its members (a tap opens one's DM, a swipe left removes one), Add member,
- * and Delete.
+ * its mute, and Delete.
  */
 export default function Members() {
   const { chatId } = useLocalSearchParams<{ chatId: string }>()
@@ -141,6 +142,7 @@ function GroupMembers({ chat }: { chat: ChatInfo }) {
             onPress={add}
           />
         </Group>
+        <MuteGroup chat={chat} />
         <Group>
           <Row label="Delete group chat" tone="danger" onPress={confirmDelete} />
         </Group>

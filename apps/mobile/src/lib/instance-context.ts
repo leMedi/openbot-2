@@ -1,6 +1,7 @@
 import type { ApiClient } from '@openbot/api-contract'
 import { createContext, useContext } from 'react'
 import type { CheckResult } from './connect/check.ts'
+import type { PhoneNotifications } from './notifications/registration.ts'
 import type { SavedInstance } from './saved-instance.ts'
 
 /** The instance the app is on, for screens that reach it outside the live store. */
@@ -18,6 +19,8 @@ export type InstanceInfo = {
   moveTo: (instance: SavedInstance, options: { forget: boolean }) => void
   /** Leaves the instance (Settings → Instance → Disconnect): forgets what this phone keeps of it, back to Connect. */
   disconnect: () => void
+  /** This phone's notifications from it. */
+  notifications: PhoneNotifications
 }
 
 export const InstanceContext = createContext<InstanceInfo | undefined>(undefined)

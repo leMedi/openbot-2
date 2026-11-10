@@ -142,9 +142,17 @@ export class PushSender {
     const badge = (await listChatSummaries(this.#db)).filter((each) => each.unread || each.waitingFor !== null).length
     const title = chat.kind === 'group' ? (chat.name ?? message.authorName) : message.authorName
     const body = bodyOf(message, kind, chat)
-    const data: PushData = { chatId: chat.id, messageId: message.id, kind }
     // Only a push that went out makes the turn's next ones quiet: one the owner never got replaces nothing.
     const loud = kind !== 'message' || !turn || this.#turns.get(chat.id) !== turn
+    const data: PushData = {
+      chatId: chat.id,
+      messageId: message.id,
+      kind,
+      botId: message.authorBotId ?? '',
+      botName: message.authorName,
+      group: chat.kind === 'group',
+      quiet: !loud,
+    }
     // A card's line isn't replaced quietly: the turn's next message, after it, plays the sound again.
     if (kind === 'message' && turn) this.#turns.set(chat.id, turn)
     else this.#turns.delete(chat.id)

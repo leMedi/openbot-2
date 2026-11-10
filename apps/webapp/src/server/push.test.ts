@@ -61,6 +61,7 @@ describe('push notifications', () => {
     expect(first).toMatchObject({ to: iphone.expoPushToken, title: 'Rex', body: 'On it!', sound: 'default', collapseId: bot.chatId })
     expect(second).toMatchObject({ to: iphone.expoPushToken, title: 'Rex', body: 'Fixed: the lockfile was stale.', collapseId: bot.chatId })
     expect(second).not.toHaveProperty('sound')
+    expect([first!.data.quiet, second!.data.quiet]).toEqual([false, true])
 
     // The next turn notifies again, with a sound.
     await ownerAsks(server, bot, 'Thanks, and the tests?', callsTools(['sendMessage', { text: 'All green.' }]), endsSilently())
@@ -77,7 +78,7 @@ describe('push notifications', () => {
 
     const pushed = server.expoPush.messages.at(-1)!
     const message = (await server.messages(bot.chatId)).at(-1)!
-    expect(pushed).toMatchObject({ title: 'Rex', data: { chatId: bot.chatId, messageId: message.id, kind: 'message' }, badge: 2 })
+    expect(pushed).toMatchObject({ title: 'Rex', data: { chatId: bot.chatId, messageId: message.id, kind: 'message', botId: bot.id, botName: 'Rex', group: false, quiet: false }, badge: 2 })
     expect(pushed.body.startsWith('Here is the report with code and very very')).toBe(true)
     expect(Array.from(pushed.body)).toHaveLength(200)
     expect(pushed.body.endsWith('…')).toBe(true)
@@ -235,6 +236,9 @@ describe('push notifications', () => {
       { title: 'Rex, Ana', body: expect.stringMatching(/^(Rex|Ana): Morning!$/), sound: 'default' },
     ])
     expect(new Set(pushed.map((message) => message.body.split(':')[0]))).toEqual(new Set(['Rex', 'Ana']))
+    // The sender rides along, for the phone to show as the speaker.
+    for (const message of pushed) expect(message.body.startsWith(`${message.data.botName}: `)).toBe(true)
+    expect(pushed.every((message) => message.data.group && [bot.id, ana.id].includes(message.data.botId))).toBe(true)
   })
 
   it("follow each phone's switches: Messages for messages, When a bot needs you for cards", async () => {

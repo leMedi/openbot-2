@@ -1,0 +1,16 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!--
+      expo-notifications hands every notification event to the first receiver in the app for this action, by priority:
+      this one (0) comes before its own (-1), so OpenBot's notifications are drawn as conversations.
+    -->
+    <receiver
+      android:name="expo.modules.notificationsnative.ConversationNotificationsService"
+      android:enabled="true"
+      android:exported="false">
+      <intent-filter android:priority="0">
+        <action android:name="expo.modules.notifications.NOTIFICATION_EVENT" />
+      </intent-filter>
+    </receiver>
+  </application>
+</manifest>

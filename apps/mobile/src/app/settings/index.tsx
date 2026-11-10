@@ -7,12 +7,13 @@ import { shownAddress } from '../../lib/connect/address.ts'
 import { modelStatus } from '../../lib/dictation/model-download.ts'
 import { useModelState } from '../../lib/dictation/model.ts'
 import { useInstance } from '../../lib/instance-context.ts'
+import { useNotifications } from '../../lib/notifications/use-notifications.ts'
 import { openOnWeb } from '../../lib/open-on-web.ts'
 import { useColors } from '../../lib/theme.ts'
 
 /**
  * The Settings sheet (spec: Phone screen map, Connect flow): the instance (its address, Edit address, Disconnect),
- * then General, Models, Plugins and Shared memory pushed in the sheet, This phone (Dictation), and Providers, which open the
+ * then General, Models, Plugins and Shared memory pushed in the sheet, This phone (Notifications, Dictation), and Providers, which open the
  * instance in the browser, as signing in to a provider stays on the web.
  */
 export default function Settings() {
@@ -20,6 +21,7 @@ export default function Settings() {
   const live = useLive()
   const colors = useColors()
   const model = useModelState()
+  const { device, permission } = useNotifications()
 
   const confirmDisconnect = () =>
     Alert.alert(
@@ -67,9 +69,8 @@ export default function Settings() {
           <Row label="Plugins" onPress={() => router.push('/settings/plugins')} />
           <Row label="Shared memory" onPress={() => router.push('/settings/shared-memory')} />
         </Group>
-        {/* Notifications is filled by Notifications on the phone (#116). */}
         <Group label="This phone">
-          <Row label="Notifications" value="Coming soon" disabled />
+          <Row label="Notifications" value={device && permission?.status !== 'denied' ? 'On' : 'Off'} onPress={() => router.push('/settings/notifications')} />
           <Row label="Dictation" value={modelStatus(model)} onPress={() => router.push('/settings/dictation')} />
         </Group>
         <Group label="On the web" note="Signing in to a provider happens in the browser.">
