@@ -81,6 +81,11 @@ export function ChatView({
   const [error, setError] = useState<string>()
   const [outgoing, setOutgoing] = useState<Outgoing[]>([])
   const scroller = useRef<HTMLDivElement>(null)
+  /**
+   * The router's scroll restoration finds scrolled elements by their place in the page and carries their position to
+   * the next page, so the chat opened next would get this one's; an id of this view's own leaves the transcript to it.
+   */
+  const [scrollRestorationId] = useState(() => `chat-${crypto.randomUUID()}`)
   /** Whether the view follows new messages; false once the owner scrolls up to read. */
   const following = useRef(true)
   const [unseen, setUnseen] = useState(false)
@@ -275,6 +280,7 @@ export function ChatView({
       <div className="relative flex min-h-0 flex-1 flex-col">
         <div
           ref={scroller}
+          data-scroll-restoration-id={scrollRestorationId}
           onScroll={(event) => {
             const element = event.currentTarget
             following.current = element.scrollHeight - element.scrollTop - element.clientHeight < followThresholdPx
