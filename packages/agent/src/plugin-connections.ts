@@ -39,8 +39,18 @@ export class AccountCredentials implements McpOAuthStateStore {
 /** A plugin account's MCP server: `<plugin>_<accountN>`, as its tools' names and audit entries name it. */
 export const serverName = (plugin: string, slug: string) => `${plugin}_${slug}`
 
-/** A plugin account, and the hosted MCP server its connection signs in to. */
-export type AccountServer = { plugin: string; slug: string; serverUrl: string }
+/**
+ * An OAuth client registered in advance, for a server whose authorization server has no dynamic client registration
+ * (Google's): the catalog's `oauth` (`PluginOAuthClient` in `@openbot/plugins`).
+ */
+export type OAuthClient = { clientId: string; clientSecret?: string; scopes: string[]; authorizationParams: Record<string, string> }
+
+/** A plugin account, and the hosted MCP server its connection signs in to, with the client it signs in as, if registered in advance. */
+export type AccountServer = { plugin: string; slug: string; serverUrl: string; oauth?: OAuthClient }
+
+/** `McpOAuthProvider`'s options for a client registered in advance; none (dynamic registration) without one. */
+export const configuredClient = (oauth: OAuthClient | undefined) =>
+  oauth ? { clientId: oauth.clientId, ...(oauth.clientSecret ? { clientSecret: oauth.clientSecret } : {}) } : {}
 
 /** One live MCP client. */
 type Connection = { client: McpClient }
@@ -137,7 +147,7 @@ export class PluginConnections {
   }
 
   /** Connects to the account's server, signed in with its stored OAuth state, which it writes unless `retired()`. */
-  async #connect({ plugin, slug, serverUrl }: AccountServer, retired: () => boolean): Promise<Connection> {
+  async #connect({ plugin, slug, serverUrl, oauth }: AccountServer, retired: () => boolean): Promise<Connection> {
     const credentials = new AccountCredentials(this.#db, this.#box, plugin, slug)
     const provider = new McpOAuthProvider({
       serverUrl,
@@ -145,6 +155,7 @@ export class PluginConnections {
       // must be connected again by the owner.
       redirectUrl: 'http://127.0.0.1:8976/callback',
       clientMetadata: { client_name: 'OpenBot' },
+      ...configuredClient(oauth),
       store: { load: () => credentials.load(), save: async (state) => void (retired() || (await credentials.save(state))) },
       onRedirect: () => {},
     })

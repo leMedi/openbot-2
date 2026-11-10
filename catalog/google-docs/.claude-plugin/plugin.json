@@ -1,0 +1,19 @@
+{
+  "name": "google-docs",
+  "displayName": "Google Docs",
+  "version": "1.0.0",
+  "description": "Read and edit your Google Docs.",
+  "keywords": [
+    "docs",
+    "documents",
+    "writing",
+    "word processor",
+    "google",
+    "google workspace"
+  ],
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://docs.google.com/document",
+  "icon": "./logo.svg"
+}

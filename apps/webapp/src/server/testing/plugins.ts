@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { type FakeMcpServer, type FakeMcpTool, startFakeMcpServer } from '@openbot/agent/testing'
+import { type FakeMcpServer, type FakeMcpTool, type FakeRegisteredClient, startFakeMcpServer } from '@openbot/agent/testing'
 import type { SignInStep } from '@openbot/api-contract'
 import { expect } from 'vitest'
 import type { TestServer } from './harness.ts'
@@ -34,14 +34,19 @@ export async function writeCatalog(plugins: Record<string, FixturePlugin>, into?
 
 /**
  * A hosted plugin `name` served by a fake MCP server, offering `tools`, behind its own OAuth authorization server;
- * returns both.
+ * returns both. With `registered`, that server knows only that client, registered in advance, and `oauth` is the
+ * server's `oauth` in `.mcp.json`.
  */
-export async function hostedPlugin(name = 'notes', tools: FakeMcpTool[] = []) {
-  const fake = await startFakeMcpServer({ tools })
+export async function hostedPlugin(
+  name = 'notes',
+  tools: FakeMcpTool[] = [],
+  { registered, oauth }: { registered?: FakeRegisteredClient; oauth?: object } = {},
+) {
+  const fake = await startFakeMcpServer({ tools, registered })
   made.push(() => fake.close())
   const plugin: FixturePlugin = {
     '.claude-plugin/plugin.json': { name, displayName: 'Notes', description: 'Your notes workspace', icon: './logo.svg' },
-    '.mcp.json': { mcpServers: { [name]: { type: 'http', url: fake.url } } },
+    '.mcp.json': { mcpServers: { [name]: { type: 'http', url: fake.url, ...(oauth && { oauth }) } } },
     'logo.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>',
   }
   return { fake, plugin }

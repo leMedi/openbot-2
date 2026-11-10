@@ -13,6 +13,22 @@ export type PluginServer = {
   name: string
   /** Its Streamable HTTP endpoint, `${CLAUDE_PLUGIN_ROOT}` expanded. */
   url: string
+  /** `.mcp.json`'s `oauth`: the client registered in advance for a server without dynamic client registration. */
+  oauth?: PluginOAuthClient
+}
+
+/**
+ * An OAuth client registered in advance with a server's authorization server (Google's, for one), from the server's
+ * `oauth` in `.mcp.json`, its `${VAR}`s taken from the environment, so the owner's client ID and secret stay out of the
+ * catalog.
+ */
+export type PluginOAuthClient = {
+  clientId: string
+  clientSecret?: string
+  /** The scopes to ask for; without them, every scope the server lists is asked for. */
+  scopes: string[]
+  /** More parameters for the authorization URL, e.g. Google's `access_type: offline` for a refresh token. */
+  authorizationParams: Record<string, string>
 }
 
 /** A skill a plugin brings: `skills/<folder>/SKILL.md` and the files beside it. */
@@ -42,6 +58,9 @@ export type Plugin = {
   skills: PluginSkill[]
 }
 
+/** Where a server's `oauth` takes its `${VAR}`s from; `process.env` by default. */
+export type LoadOptions = { env?: Record<string, string | undefined> }
+
 /** A plugin the loader won't load, e.g. one with a stdio server; the message says why. */
 export class PluginRefusedError extends Error {}
 
@@ -62,7 +81,7 @@ const ignoredPaths = ['hooks/', 'commands/', 'agents/', 'output-styles/', 'workf
  * and `skills/*\/SKILL.md`. What OpenBot doesn't run (hooks, commands, agents, config fields…) is ignored, with a
  * warning; a server that would run on this machine, or isn't hosted over Streamable HTTP, refuses the whole plugin.
  */
-export async function loadPlugin(root: string): Promise<{ plugin: Plugin; warnings: string[] }> {
+export async function loadPlugin(root: string, { env = process.env }: LoadOptions = {}): Promise<{ plugin: Plugin; warnings: string[] }> {
   root = resolve(root)
   const warnings: string[] = []
   const manifest = await readJson(root, '.claude-plugin/plugin.json')
@@ -91,7 +110,7 @@ export async function loadPlugin(root: string): Promise<{ plugin: Plugin; warnin
       keywords: Array.isArray(manifest.keywords) ? manifest.keywords.map(text).filter(Boolean).map((keyword) => keyword.toLowerCase()) : [],
       root,
       icon,
-      servers: await readServers(root),
+      servers: await readServers(root, env),
       skills: await readSkills(root, warnings),
     },
     warnings,
@@ -102,7 +121,7 @@ export async function loadPlugin(root: string): Promise<{ plugin: Plugin; warnin
  * Every plugin of the catalog folder `catalog`, one per subfolder, by name; none when there is no such folder. A plugin
  * the loader refuses, or one named like an earlier one, is left out; `problems` says why, beside each plugin's warnings.
  */
-export async function loadCatalog(catalog: string): Promise<{ plugins: Plugin[]; problems: string[] }> {
+export async function loadCatalog(catalog: string, options: LoadOptions = {}): Promise<{ plugins: Plugin[]; problems: string[] }> {
   const plugins: Plugin[] = []
   const problems: string[] = []
   const entries = await readdir(catalog, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
@@ -112,7 +131,7 @@ export async function loadCatalog(catalog: string): Promise<{ plugins: Plugin[];
   })
   for (const folder of entries.filter((entry) => entry.isDirectory() && !entry.name.startsWith('.')).map((entry) => entry.name).sort()) {
     try {
-      const { plugin, warnings } = await loadPlugin(join(catalog, folder))
+      const { plugin, warnings } = await loadPlugin(join(catalog, folder), options)
       problems.push(...warnings.map((warning) => `${plugin.name}: ${warning}`))
       if (plugins.some((other) => other.name === plugin.name)) problems.push(`${folder}: refused, another plugin is named ${plugin.name}`)
       else plugins.push(plugin)
@@ -125,7 +144,7 @@ export async function loadCatalog(catalog: string): Promise<{ plugins: Plugin[];
 }
 
 /** `.mcp.json`'s servers, either under `mcpServers` or as the whole file; none without the file. */
-async function readServers(root: string): Promise<PluginServer[]> {
+async function readServers(root: string, env: Record<string, string | undefined>): Promise<PluginServer[]> {
   if (!existsSync(join(root, '.mcp.json'))) return []
   const config = await readJson(root, '.mcp.json')
   const servers = isObject(config) && isObject(config.mcpServers) ? config.mcpServers : config
@@ -137,8 +156,37 @@ async function readServers(root: string): Promise<PluginServer[]> {
     if (type !== 'http') throw new PluginRefusedError(`server ${name} is ${type ?? 'of no type'}; only hosted http servers are allowed`)
     const url = typeof server.url === 'string' ? server.url.replaceAll('${CLAUDE_PLUGIN_ROOT}', root) : undefined
     if (!url || !/^https?:$/.test(URL.parse(url)?.protocol ?? '')) throw new PluginRefusedError(`server ${name} needs an http(s) url`)
-    return { name, url }
+    return server.oauth === undefined ? { name, url } : { name, url, oauth: readOAuthClient(name, server.oauth, env) }
   })
+}
+
+/**
+ * A server's `oauth`: `clientId`, and optionally `clientSecret`, `scopes` and `authorizationParams`. A `${VAR}` in the
+ * ID or secret that the environment doesn't set refuses the plugin, as it can't be signed in to.
+ */
+function readOAuthClient(name: string, oauth: unknown, env: Record<string, string | undefined>): PluginOAuthClient {
+  if (!isObject(oauth)) throw new PluginRefusedError(`server ${name}'s oauth must be an object`)
+  const unset: string[] = []
+  const expand = (field: string, value: unknown): string | undefined => {
+    if (value === undefined) return undefined
+    if (typeof value !== 'string') throw new PluginRefusedError(`server ${name}'s oauth.${field} must be a string`)
+    return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, variable: string) => {
+      const set = env[variable]?.trim()
+      if (!set) unset.push(variable)
+      return set ?? ''
+    })
+  }
+  const clientId = expand('clientId', oauth.clientId)
+  const clientSecret = expand('clientSecret', oauth.clientSecret)
+  if (unset.length) throw new PluginRefusedError(`server ${name} needs ${unset.join(' and ')} set: its OAuth client is registered in advance`)
+  if (!clientId) throw new PluginRefusedError(`server ${name}'s oauth needs a clientId`)
+  const scopes = oauth.scopes ?? []
+  if (!Array.isArray(scopes) || !scopes.every((scope) => typeof scope === 'string')) throw new PluginRefusedError(`server ${name}'s oauth.scopes must be strings`)
+  const params = oauth.authorizationParams ?? {}
+  if (!isObject(params) || !Object.values(params).every((value) => typeof value === 'string')) {
+    throw new PluginRefusedError(`server ${name}'s oauth.authorizationParams must be an object of strings`)
+  }
+  return { clientId, ...(clientSecret ? { clientSecret } : {}), scopes, authorizationParams: params as Record<string, string> }
 }
 
 /** The skills in `skills/`, by folder; a folder without a readable `SKILL.md` is skipped with a warning. */

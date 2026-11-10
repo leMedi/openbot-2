@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "google-drive": {
+      "type": "http",
+      "url": "https://drivemcp.googleapis.com/mcp/v1",
+      "oauth": {
+        "clientId": "${OPENBOT_GOOGLE_WORKSPACE_MCP_CLIENT_ID}",
+        "clientSecret": "${OPENBOT_GOOGLE_WORKSPACE_MCP_CLIENT_SECRET}",
+        "scopes": [
+          "https://www.googleapis.com/auth/drive.readonly",
+          "https://www.googleapis.com/auth/drive.file"
+        ],
+        "authorizationParams": {
+          "access_type": "offline",
+          "prompt": "consent"
+        }
+      }
+    }
+  }
+}

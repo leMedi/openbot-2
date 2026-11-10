@@ -1,0 +1,20 @@
+{
+  "name": "google-sheets",
+  "displayName": "Google Sheets",
+  "version": "1.0.0",
+  "description": "Read and update the values, formulas, rows and columns of your Google Sheets.",
+  "keywords": [
+    "spreadsheets",
+    "sheets",
+    "tables",
+    "data",
+    "formulas",
+    "google",
+    "google workspace"
+  ],
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://docs.google.com/spreadsheets",
+  "icon": "./logo.svg"
+}

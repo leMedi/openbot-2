@@ -16,6 +16,9 @@ services:
       OPENBOT_PUBLIC_URL: ${OPENBOT_PUBLIC_URL:-http://localhost:3000}
       # Empty means generate one into the data volume on first start.
       OPENBOT_SECRET_KEY: ${OPENBOT_SECRET_KEY:-}
+      # Your Google OAuth client, for the Google plugins (catalog/README.md); empty leaves them out.
+      OPENBOT_GOOGLE_WORKSPACE_MCP_CLIENT_ID: ${OPENBOT_GOOGLE_WORKSPACE_MCP_CLIENT_ID:-}
+      OPENBOT_GOOGLE_WORKSPACE_MCP_CLIENT_SECRET: ${OPENBOT_GOOGLE_WORKSPACE_MCP_CLIENT_SECRET:-}
     volumes:
       - openbot-data:/var/lib/openbot
       - openbot-home:/home/openbot

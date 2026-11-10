@@ -196,7 +196,8 @@ export function toPluginInfo(plugin: Plugin, accounts: PluginAccountSummary[], g
     keywords: plugin.keywords,
     icon: plugin.icon && pluginIconPath(plugin.name),
     status: own.length ? 'connected' : 'not_connected',
-    servers: plugin.servers,
+    // Not `oauth`: its client secret stays on the server.
+    servers: plugin.servers.map(({ name, url }) => ({ name, url })),
     skills: plugin.skills.map(({ name, description }) => ({ name, description })),
     accounts: own,
     grantedTo: grantedWithoutAccount.get(plugin.name) ?? [],

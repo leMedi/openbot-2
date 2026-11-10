@@ -1,0 +1,21 @@
+{
+  "name": "gmail",
+  "displayName": "Gmail",
+  "version": "1.0.0",
+  "description": "Search and read your Gmail threads, label them and write drafts for you to send.",
+  "keywords": [
+    "email",
+    "mail",
+    "inbox",
+    "messages",
+    "threads",
+    "drafts",
+    "google",
+    "google workspace"
+  ],
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://mail.google.com",
+  "icon": "./logo.svg"
+}

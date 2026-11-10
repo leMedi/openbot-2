@@ -25,6 +25,8 @@ export type FakeMcpServer = {
   issuedTokens: string[]
   /** Tool calls answered so far. */
   calls: FakeMcpCall[]
+  /** The query of every authorization URL the owner's browser opened, e.g. to check the scope asked for. */
+  authorizationRequests: URLSearchParams[]
   /** Forgets every session, as a restarted server does: requests in one are answered 404 until the client starts anew. */
   dropSessions(): void
   /** Expires every access token issued so far: calls with one are answered 401 until the client refreshes it. */
@@ -46,12 +48,22 @@ export type FakeMcpServer = {
 
 type Code = { clientId: string; redirectUri: string; challenge: string; user: string }
 
+/** A client registered in advance with the fake authorization server, which then has no dynamic client registration. */
+export type FakeRegisteredClient = { clientId: string; clientSecret: string; redirectUris: string[] }
+
 /**
  * A hosted MCP server (Streamable HTTP, JSON responses) behind its own OAuth authorization server (discovery, dynamic
  * client registration, PKCE, refresh tokens), in process over real HTTP on 127.0.0.1, as Notion's or Linear's are.
+ * With `registered`, its authorization server knows only that client, registered in advance, which authenticates with
+ * its secret, as Google's does.
  */
-export async function startFakeMcpServer({ tools = [] }: { tools?: FakeMcpTool[] } = {}): Promise<FakeMcpServer> {
-  const clients: FakeOAuthClient[] = []
+export async function startFakeMcpServer({ tools = [], registered }: { tools?: FakeMcpTool[]; registered?: FakeRegisteredClient } = {}): Promise<FakeMcpServer> {
+  const clients: FakeOAuthClient[] = registered
+    ? [{ clientId: registered.clientId, redirectUris: registered.redirectUris, applicationType: undefined, clientName: undefined }]
+    : []
+  const authorizationRequests: URLSearchParams[] = []
+  /** Whether the token request authenticates as its client: with the secret of the one registered in advance. */
+  const authenticated = (params: URLSearchParams) => !registered || params.get('client_secret') === registered.clientSecret
   const issuedTokens: string[] = []
   const calls: FakeMcpCall[] = []
   const codes = new Map<string, Code>()
@@ -89,19 +101,21 @@ export async function startFakeMcpServer({ tools = [] }: { tools?: FakeMcpTool[]
           issuer: origin,
           authorization_endpoint: `${origin}/authorize`,
           token_endpoint: `${origin}/token`,
-          registration_endpoint: `${origin}/register`,
+          ...(registered ? {} : { registration_endpoint: `${origin}/register` }),
           response_types_supported: ['code'],
           grant_types_supported: ['authorization_code', 'refresh_token'],
           code_challenge_methods_supported: ['S256'],
-          token_endpoint_auth_methods_supported: ['none'],
+          token_endpoint_auth_methods_supported: registered ? ['client_secret_post'] : ['none'],
         })
       case '/register': {
+        if (registered) return json(404, { error: 'not_found' })
         const metadata = JSON.parse(body) as { redirect_uris?: string[]; application_type?: string; client_name?: string }
         const clientId = `client-${clients.length + 1}`
         clients.push({ clientId, redirectUris: metadata.redirect_uris ?? [], applicationType: metadata.application_type, clientName: metadata.client_name })
         return json(201, { ...metadata, client_id: clientId, token_endpoint_auth_method: 'none' })
       }
       case '/authorize': {
+        authorizationRequests.push(new URLSearchParams(url.searchParams))
         const client = clients.find((entry) => entry.clientId === url.searchParams.get('client_id'))
         const redirectUri = url.searchParams.get('redirect_uri') ?? ''
         if (!client || !client.redirectUris.includes(redirectUri)) return json(400, { error: 'invalid_request' })
@@ -123,7 +137,7 @@ export async function startFakeMcpServer({ tools = [] }: { tools?: FakeMcpTool[]
           const code = codes.get(params.get('code') ?? '')
           codes.delete(params.get('code') ?? '')
           const challenge = createHash('sha256').update(params.get('code_verifier') ?? '').digest('base64url')
-          if (!code || code.clientId !== params.get('client_id') || code.redirectUri !== params.get('redirect_uri') || code.challenge !== challenge) {
+          if (!code || code.clientId !== params.get('client_id') || code.redirectUri !== params.get('redirect_uri') || code.challenge !== challenge || !authenticated(params)) {
             return json(400, { error: 'invalid_grant' })
           }
           return json(200, issue(code.clientId, code.user))
@@ -134,7 +148,7 @@ export async function startFakeMcpServer({ tools = [] }: { tools?: FakeMcpTool[]
             await hold.released
           }
           const grant = refreshTokens.get(params.get('refresh_token') ?? '')
-          if (!grant || grant.clientId !== params.get('client_id')) return json(400, { error: 'invalid_grant' })
+          if (!grant || grant.clientId !== params.get('client_id') || !authenticated(params)) return json(400, { error: 'invalid_grant' })
           refreshTokens.delete(params.get('refresh_token')!)
           return json(200, issue(grant.clientId, grant.user))
         }
@@ -200,6 +214,7 @@ export async function startFakeMcpServer({ tools = [] }: { tools?: FakeMcpTool[]
     clients,
     issuedTokens,
     calls,
+    authorizationRequests,
     dropSessions: () => sessions.clear(),
     expireAccessTokens: () => accessTokens.clear(),
     holdRefreshes() {

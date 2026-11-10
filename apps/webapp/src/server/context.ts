@@ -429,7 +429,7 @@ export async function createServerContext({
 
 /** The catalog's plugins whose accounts bots can call: those with one server (OpenBot can't sign in to several yet). */
 const connectable = (plugins: Plugin[]): ConnectablePlugin[] =>
-  plugins.flatMap(({ name, displayName, servers: [server, ...more] }) => (server && !more.length ? [{ name, displayName, serverUrl: server.url }] : []))
+  plugins.flatMap(({ name, displayName, servers: [server, ...more] }) => (server && !more.length ? [{ name, displayName, serverUrl: server.url, oauth: server.oauth }] : []))
 
 /**
  * The catalog's plugins, with what the loader refused or ignored logged, and their skills copied into `pluginsDir` in

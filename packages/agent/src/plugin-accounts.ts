@@ -5,7 +5,7 @@ import { authorizeMcp, McpOAuthAuthorizationRequiredError, McpOAuthProvider, Mem
 import type { SecretBox } from '@openbot/core'
 import { type Db, type PluginAccount, pluginAccounts, pluginGrants } from '@openbot/db'
 import { and, asc, count, eq, isNull } from 'drizzle-orm'
-import { AccountCredentials, type AccountServer, PluginConnections, serverName } from './plugin-connections.ts'
+import { AccountCredentials, type AccountServer, configuredClient, type OAuthClient, PluginConnections, serverName } from './plugin-connections.ts'
 import type { BotTool } from './runtime.ts'
 import { SignInNotFoundError, type SignInStep, stepQueue } from './sign-in.ts'
 
@@ -22,8 +22,11 @@ export type PluginAccountSummary = {
   grantedTo: string[]
 }
 
-/** The plugin to connect: its catalog name and display name, and the hosted MCP server an account signs in to. */
-export type ConnectablePlugin = { name: string; displayName: string; serverUrl: string }
+/**
+ * The plugin to connect: its catalog name and display name, the hosted MCP server an account signs in to, and the OAuth
+ * client it signs in as when the server's has no dynamic client registration.
+ */
+export type ConnectablePlugin = { name: string; displayName: string; serverUrl: string; oauth?: OAuthClient }
 
 export class PluginAccountNotFoundError extends Error {}
 export class InvalidAccountNameError extends Error {}
@@ -311,7 +314,7 @@ export class PluginAccounts {
         const plugin = this.#plugins.get(name)
         // A plugin gone from the catalog with a release.
         if (!plugin) return []
-        const account = { plugin: name, slug, serverUrl: plugin.serverUrl }
+        const account = { plugin: name, slug, serverUrl: plugin.serverUrl, oauth: plugin.oauth }
         const label = accountLabel(plugin, displayName)
         const call = (tool: Tool) => (args: Record<string, unknown>, signal?: AbortSignal) => this.#call(account, label, tool.name, args, signal)
         try {
@@ -512,12 +515,17 @@ export class PluginAccounts {
       serverUrl: plugin.serverUrl,
       redirectUrl,
       clientMetadata: { client_name: 'OpenBot' },
+      ...configuredClient(plugin.oauth),
       store,
       onRedirect: (url) => void (authorizationUrl = url),
     })
-    // Nothing is stored yet, so this registers a client and starts an authorization; it never refreshes.
-    await authorizeMcp(provider, { serverUrl: plugin.serverUrl, signal })
+    // The catalog's scopes, else (undefined) every scope the server lists.
+    const scope = plugin.oauth?.scopes.length ? plugin.oauth.scopes.join(' ') : undefined
+    // Nothing is stored yet, so this registers a client (unless one is registered in advance) and starts an authorization;
+    // it never refreshes.
+    await authorizeMcp(provider, { serverUrl: plugin.serverUrl, scope, signal })
     if (!authorizationUrl) throw new Error(`${plugin.displayName} didn't ask for a sign-in`)
+    for (const [key, value] of Object.entries(plugin.oauth?.authorizationParams ?? {})) authorizationUrl.searchParams.set(key, value)
 
     const state = store.load()?.oauthState
     if (!state) throw new Error(`The sign-in to ${plugin.displayName} has no state`)
@@ -544,6 +552,7 @@ export class PluginAccounts {
     await authorizeMcp(provider, {
       serverUrl: plugin.serverUrl,
       authorizationCode: answer.get('code')!,
+      scope,
       iss: answer.get('iss') ?? undefined,
       signal,
     })

@@ -1,0 +1,21 @@
+{
+  "name": "google-calendar",
+  "displayName": "Google Calendar",
+  "version": "1.0.0",
+  "description": "See your calendars, find free time, and create, update and answer events in Google Calendar.",
+  "keywords": [
+    "calendar",
+    "events",
+    "meetings",
+    "schedule",
+    "availability",
+    "invites",
+    "google",
+    "google workspace"
+  ],
+  "author": {
+    "name": "OpenBot"
+  },
+  "homepage": "https://calendar.google.com",
+  "icon": "./logo.svg"
+}

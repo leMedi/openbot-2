@@ -801,7 +801,7 @@ export const router = os.router({
       const [server, ...more] = plugin.servers
       if (!server) throw new ORPCError('BAD_REQUEST', { message: `${plugin.displayName} brings skills only: it has no account to connect` })
       if (more.length) throw new ORPCError('BAD_REQUEST', { message: `${plugin.displayName} has several servers, which OpenBot can't sign in to yet` })
-      const connectable = { name: plugin.name, displayName: plugin.displayName, serverUrl: server.url }
+      const connectable = { name: plugin.name, displayName: plugin.displayName, serverUrl: server.url, oauth: server.oauth }
       const callbackUrl = new URL(pluginCallbackPath, input.origin)
       if (input.account !== undefined) {
         if (input.requestId) throw new ORPCError('BAD_REQUEST', { message: 'A request is answered with a new account, not a reconnected one' })

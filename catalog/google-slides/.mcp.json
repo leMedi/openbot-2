@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "google-slides": {
+      "type": "http",
+      "url": "https://slidesmcp.googleapis.com/mcp/v1",
+      "oauth": {
+        "clientId": "${OPENBOT_GOOGLE_WORKSPACE_MCP_CLIENT_ID}",
+        "clientSecret": "${OPENBOT_GOOGLE_WORKSPACE_MCP_CLIENT_SECRET}",
+        "scopes": [
+          "https://www.googleapis.com/auth/presentations",
+          "https://www.googleapis.com/auth/drive.readonly"
+        ],
+        "authorizationParams": {
+          "access_type": "offline",
+          "prompt": "consent"
+        }
+      }
+    }
+  }
+}
