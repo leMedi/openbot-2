@@ -679,10 +679,26 @@ export type PluginInfo = z.infer<typeof plugin>
 /** The path of a plugin's icon on this API. */
 export const pluginIconPath = (name: string) => `/plugins/${name}/icon`
 
+/** The version of this API, which `/api/health` reports; the mobile app blocks on a version it doesn't support. */
+export const apiVersion = 1
+
+/** What `/api/health` reports: the installer and the updater wait for it, the mobile app checks an address with it. */
+const health = z.object({
+  status: z.literal('ok'),
+  /** Changes each time the server starts; the live stream's stamps belong to one epoch. */
+  epoch: z.string(),
+  /** The running release, e.g. `1.4.0`; `dev` when running the repo. */
+  version: z.string(),
+  /** This instance's ID, created on its first start and kept across restarts and updates. */
+  instanceId: z.string(),
+  /** The version of this API (`apiVersion`). */
+  apiVersion: z.number().int().positive(),
+})
+
 export const contract = {
   health: oc
-    .route({ method: 'GET', path: '/health', summary: 'Liveness, used by the installer and the updater' })
-    .output(z.object({ status: z.literal('ok'), epoch: z.string(), version: z.string() })),
+    .route({ method: 'GET', path: '/health', summary: "Liveness, used by the installer and the updater; the mobile app checks an address against the instance's ID and API version" })
+    .output(health),
   events: oc
     .route({
       method: 'GET',

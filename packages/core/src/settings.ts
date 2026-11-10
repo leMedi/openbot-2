@@ -141,3 +141,14 @@ export async function installationId(db: Db): Promise<string> {
   const [row] = await db.select().from(settings).where(eq(settings.key, 'installationId'))
   return row!.value as string
 }
+
+/**
+ * This instance's ID, created on first use (the server's first start) and kept across restarts and updates;
+ * `/api/health` reports it, so the mobile app can tell whether an edited address leads to the same instance. Apart from
+ * `installationId`, which is sent to OpenAI, since anyone on the network can read health.
+ */
+export async function getInstanceId(db: Db): Promise<string> {
+  await db.insert(settings).values({ key: 'instanceId', value: crypto.randomUUID() }).onConflictDoNothing()
+  const [row] = await db.select().from(settings).where(eq(settings.key, 'instanceId'))
+  return row!.value as string
+}

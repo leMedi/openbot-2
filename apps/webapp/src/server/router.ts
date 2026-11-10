@@ -10,7 +10,7 @@ import {
   toolPrefix,
 } from '@openbot/agent'
 import type { Plugin } from '@openbot/plugins'
-import { contract, type MessageInfo, type PluginRequestChoice } from '@openbot/api-contract'
+import { apiVersion, contract, type MessageInfo, type PluginRequestChoice } from '@openbot/api-contract'
 import { ScreenDaemonError } from '@openbot/computer'
 import {
   answerQuestion,
@@ -359,7 +359,7 @@ const runningVersion = process.env.OPENBOT_VERSION || 'dev'
 export const router = os.router({
   health: os.health.handler(async ({ context }) => {
     await context.db.$client.execute('select 1')
-    return { status: 'ok' as const, epoch: context.bus.epoch, version: runningVersion }
+    return { status: 'ok' as const, epoch: context.bus.epoch, version: runningVersion, instanceId: context.instanceId, apiVersion }
   }),
 
   events: os.events.handler(async function* ({ context, input, signal }) {

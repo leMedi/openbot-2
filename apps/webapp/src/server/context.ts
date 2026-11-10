@@ -32,6 +32,7 @@ import {
   readModelSettings,
   Routines,
   getBot,
+  getInstanceId,
 } from '@openbot/core'
 import type { Db } from '@openbot/db'
 import { installedSkillFile, installSkills, loadCatalog, type Plugin } from '@openbot/plugins'
@@ -41,6 +42,8 @@ import { toChatInfo, toMessageInfo, toRoutineInfo, toRoutineRunInfo } from './vi
 /** What every procedure runs against; built once per server start, or per test by the harness. */
 export type ServerContext = {
   db: Db
+  /** This instance's ID, which `/api/health` reports; created on its first start. */
+  instanceId: string
   bus: EventBus<LiveEvent>
   providers: Providers
   runtime: BotRuntime
@@ -173,6 +176,9 @@ export async function createServerContext({
   /** The bots' home, where plugins' skills are copied for them to read. */
   home: string
 }): Promise<ServerContext> {
+  // Created on the first start, and first: written later in boot, it could find the database busy with the writes
+  // the server starts in the background (SQLITE_BUSY).
+  const instanceId = await getInstanceId(db)
   const bus = new EventBus<LiveEvent>()
   const pluginsDir = join(home, 'plugins')
   const plugins = await openCatalog(catalog, pluginsDir)
@@ -377,6 +383,7 @@ export async function createServerContext({
   }
   return {
     db,
+    instanceId,
     bus,
     providers,
     runtime,
