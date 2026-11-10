@@ -517,6 +517,9 @@ const textOf = (answer: AssistantMessage) =>
 /** The tools that reach the owner; any of them answers the owner, and the owner's newer message holds them all back. */
 const ownerTools = new Set(['sendMessage', 'askQuestion', 'request_plugin'])
 
+/** The tools that answer the owner without reaching them as a message: a reaction is a whole answer (Grok's `reacted`). */
+const answeringTools = new Set(['react'])
+
 /** The tools that post a card and end the bot's turn until the owner decides. */
 const cardTools = new Set(['askQuestion', 'request_plugin'])
 
@@ -534,14 +537,13 @@ const reachedOwner = (entry: EntryRecord) =>
       message.role === 'toolResult' &&
       !message.isError &&
       (ownerTools.has(message.toolName) ||
-        // A reaction is a whole answer too (Grok's `reacted`).
-        message.toolName === 'react' ||
+        answeringTools.has(message.toolName) ||
         (message.toolName === 'use_computer' && Boolean((message.details as UseComputerDetails | undefined)?.takeOver))),
   )
 
 /** A tool's result in a run, other than of one reaching the owner: work whose outcome they may be owed. */
 const isWork = (entry: EntryRecord) =>
-  entry.kind === 'pi.tool-result' && entry.model?.some((message) => message.role === 'toolResult' && !ownerTools.has(message.toolName) && message.toolName !== 'react')
+  entry.kind === 'pi.tool-result' && entry.model?.some((message) => message.role === 'toolResult' && !ownerTools.has(message.toolName) && !answeringTools.has(message.toolName))
 
 /** The tools a bot sends its own messages with: to the owner or a group, to teammates, and questions. */
 const sendingTools = new Set(['sendMessage', 'message_bot', 'askQuestion'])

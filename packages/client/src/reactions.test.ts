@@ -41,15 +41,16 @@ describe("a message's reaction pills", () => {
 })
 
 describe('what a reply quotes', () => {
-  it("is the message's text on one line without Markdown, or its files' names", () => {
+  it("is the message's text on one line, cut as the server cuts it, or its files' names", () => {
     expect(replyTargetOf(message({ text: 'Fixed **the build**:\n\n- `pnpm i`' }))).toEqual({
       id: 'm1',
       author: 'bot',
       botId: 'rex',
       authorName: 'Rex',
-      text: 'Fixed the build: - pnpm i',
+      text: 'Fixed **the build**: - `pnpm i`',
     })
     const files = message({ author: 'owner', botId: null, authorName: 'You', attachments: [{ id: 'a', name: 'plan.pdf', mimeType: 'application/pdf', size: 1, path: '' }] })
     expect(replyTargetOf(files)).toMatchObject({ author: 'owner', text: 'plan.pdf' })
+    expect(replyTargetOf(message({ text: 'a'.repeat(300) })).text).toBe(`${'a'.repeat(280)}…`)
   })
 })

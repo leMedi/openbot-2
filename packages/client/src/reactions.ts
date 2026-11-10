@@ -16,6 +16,10 @@ export function reactionPills(reactions: readonly ReactionInfo[]): ReactionPill[
   return [...pills.values()]
 }
 
+/** Whether the owner left `emoji` on a message. */
+export const ownerReacted = ({ reactions }: { reactions: readonly ReactionInfo[] }, emoji: string) =>
+  reactions.some((reaction) => reaction.emoji === emoji && reaction.by === ownerReactor)
+
 /** Who left a pill, for its label: "You, Rex", the owner first, a bot that's gone as "Deleted bot". */
 export function reactorNames({ by }: Pick<ReactionPill, 'by'>, bots: readonly { id: string; name: string }[]): string {
   const names = [...by].sort((a, b) => Number(b === ownerReactor) - Number(a === ownerReactor))
@@ -24,12 +28,16 @@ export function reactorNames({ by }: Pick<ReactionPill, 'by'>, bots: readonly { 
 
 /**
  * What the owner's reply quotes of `message`, as the composer's reply pill and the sent bubble show it until the server
- * returns its own: its text on one line without Markdown, or its files' names.
+ * returns its own, cut as the server cuts it: its text on one line, or its files' names.
  */
 export function replyTargetOf(message: MessageInfo): ReplyToInfo {
-  const text = previewText(message.text) || message.attachments.map((file) => file.name).join(', ')
-  return { id: message.id, author: message.author, botId: message.botId, authorName: message.authorName, text: text.slice(0, maxReplyPreviewLength) }
+  const line = (message.text.trim() || message.attachments.map((file) => file.name).join(', ')).replace(/\s+/g, ' ').trim()
+  const text = line.length > maxReplyPreviewLength ? `${line.slice(0, maxReplyPreviewLength)}…` : line
+  return { id: message.id, author: message.author, botId: message.botId, authorName: message.authorName, text }
 }
+
+/** Who a reply quotes, as it shows: You for the owner. */
+export const quotedAuthor = (reply: Pick<ReplyToInfo, 'author' | 'authorName'>) => (reply.author === 'owner' ? 'You' : reply.authorName)
 
 /** A reply's quote as it shows on one line: its text without Markdown, or "Message" when it has none. */
 export const quotedText = (reply: Pick<ReplyToInfo, 'text'>) => previewText(reply.text) || 'Message'

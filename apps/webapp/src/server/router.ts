@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
 import {
@@ -30,10 +29,11 @@ import {
   describeOwnerPreface,
   describeReaction,
   getGroup,
+  groupTag,
   InvalidReactionError,
   MessageNotFoundError,
-  othersIn,
   ownerReactor,
+  reactionInputId,
   reactionWakes,
   replyQuoteOf,
   toggleReaction,
@@ -293,13 +293,12 @@ async function wakeForReaction(context: ServerContext, message: Message, emoji: 
   const bot = botId && (await getBot(context.db, botId))
   if (!bot || (await whyCantRun(context, bot))) return
   const cue = describeReaction(emoji, message)
-  const id = `reaction:${message.id}:${randomUUID()}`
+  const id = reactionInputId(message.id)
   try {
     if (message.chatId === bot.chatId) return await context.runtime.wake(bot.id, { lane: 'background', text: cue, id })
     const group = await getGroup(context.db, message.chatId)
     if (!group?.members.includes(bot.id)) return
-    const tag = `[Group chat: "${group.name}" - with ${othersIn(group, bot.id)}]`
-    await context.runtime.wake(bot.id, { lane: 'owner', groupChatId: group.id, text: `${tag}\n${cue}`, id })
+    await context.runtime.wake(bot.id, { lane: 'owner', groupChatId: group.id, text: `${groupTag(group, bot.id)}\n${cue}`, id })
   } catch (error) {
     console.error(`[reactions] Couldn't wake ${bot.name} with a reaction:`, error)
   }

@@ -4,6 +4,8 @@ import {
   type TranscriptRow,
   addFiles,
   formatSize,
+  ownerReacted,
+  quotedAuthor,
   quotedText,
   reactionPills,
   reactorNames,
@@ -704,7 +706,7 @@ function ReplyQuote({ replyTo, mine, onJumpTo }: { replyTo: ReplyToInfo; mine: b
         mine ? 'border-on-color/70 bg-on-color/15 text-on-color' : 'border-border-strong bg-background/60 hover:bg-background',
       )}
     >
-      <span className="text-xs font-medium">{replyTo.author === 'owner' ? 'You' : replyTo.authorName}</span>
+      <span className="text-xs font-medium">{quotedAuthor(replyTo)}</span>
       <span className={cn('truncate', !mine && 'text-muted-foreground')}>{quotedText(replyTo)}</span>
     </button>
   )
@@ -730,7 +732,7 @@ function MessageActions({
     const timer = setTimeout(() => setCopied(false), 1500)
     return () => clearTimeout(timer)
   }, [copied])
-  const own = (emoji: string) => message.reactions.some((reaction) => reaction.emoji === emoji && reaction.by === 'owner')
+  const own = (emoji: string) => ownerReacted(message, emoji)
   const action = 'pressable grid size-7 shrink-0 place-items-center rounded-full hover:bg-secondary-hover'
   return (
     <div

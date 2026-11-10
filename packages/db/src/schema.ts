@@ -189,7 +189,6 @@ export type Attachment = {
 export const messageAuthors = ['owner', 'bot'] as const
 export type MessageAuthor = (typeof messageAuthors)[number]
 
-/** A message between bots, as it appears in a bot's DM: `to` the peer (outgoing) or `from` the peer (incoming). */
 /** An emoji someone left on a message: `by` is `owner` or the id of the bot that reacted. */
 export type Reaction = { emoji: string; by: string }
 
@@ -199,6 +198,7 @@ export type Reaction = { emoji: string; by: string }
  */
 export type ReplyQuote = { id: string; author: MessageAuthor; botId: string | null; authorName: string; text: string }
 
+/** A message between bots, as it appears in a bot's DM: `to` the peer (outgoing) or `from` the peer (incoming). */
 export const botMessageDirections = ['to', 'from'] as const
 export type BotMessageDirection = (typeof botMessageDirections)[number]
 

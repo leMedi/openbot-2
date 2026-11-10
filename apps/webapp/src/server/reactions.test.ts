@@ -151,7 +151,7 @@ describe('replies', () => {
     expect((await server.messages(bots[0]!.chatId)).find((message) => message.id === sent.id)!.replyTo).toEqual(replyTo)
     const address = `m${reply.id.slice(-8)}`
     expect(JSON.stringify(server.providers.requests.at(-2)!.messages.at(-1))).toContain(
-      `[m${sent.id.slice(-8)}]\\n[In reply to ${address}: \\"Shipped to beta and stable.\\"]\\nRoll back stable`,
+      `[m${sent.id.slice(-8)}]\\n[In reply to ${address}: \\"Shipped to\\n\\nbeta and stable.\\"]\\nRoll back stable`,
     )
   })
 

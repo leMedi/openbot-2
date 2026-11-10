@@ -1,5 +1,5 @@
 import { type MessageInfo, previewText, quickReactions } from '@openbot/api-contract'
-import { ownerReactor } from '@openbot/client'
+import { ownerReacted, quotedAuthor } from '@openbot/client'
 import { useRef, useState } from 'react'
 import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -39,7 +39,7 @@ export function MessageMenu({
     pending.current = undefined
     run?.()
   }
-  const own = (emoji: string) => !!shown?.reactions.some((reaction) => reaction.emoji === emoji && reaction.by === ownerReactor)
+  const own = (emoji: string) => !!shown && ownerReacted(shown, emoji)
   const line = shown ? previewText(shown.text) || shown.attachments.map((file) => file.name).join(', ') : ''
   const items = shown
     ? [
@@ -55,7 +55,7 @@ export function MessageMenu({
         <View style={[styles.group, { backgroundColor: colors.popover }]}>
           {!!line && (
             <Text numberOfLines={2} style={[styles.title, { color: colors.mutedForeground, borderBottomColor: colors.border }]}>
-              {shown?.author === 'owner' ? 'You' : shown?.authorName}: {line}
+              {shown && quotedAuthor(shown)}: {line}
             </Text>
           )}
           <View accessibilityRole="toolbar" accessibilityLabel="Reactions" style={[styles.reactions, { borderBottomColor: colors.border }]}>

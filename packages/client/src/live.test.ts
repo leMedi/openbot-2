@@ -1,4 +1,4 @@
-import { type ApiClient, type BotInfo, type ChatInfo, type LiveEvent, type MessageInfo, type SectionInfo, unassignedSectionId, viewingHeartbeatInterval } from '@openbot/api-contract'
+import { toggledReactions, type ApiClient, type BotInfo, type ChatInfo, type LiveEvent, type MessageInfo, type SectionInfo, unassignedSectionId, viewingHeartbeatInterval } from '@openbot/api-contract'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type KeyValueStorage, type LiveSnapshot, LiveStore, type SnapshotStore } from './live.tsx'
 
@@ -142,8 +142,7 @@ function fakeServer() {
         for (const [chatId, list] of server.messages) {
           const found = list.find((entry) => entry.id === messageId)
           if (!found) continue
-          const has = found.reactions.some((entry) => entry.emoji === emoji && entry.by === 'owner')
-          const reacted = { ...found, reactions: has ? found.reactions.filter((entry) => entry.emoji !== emoji) : [...found.reactions, { emoji, by: 'owner' }] }
+          const reacted = { ...found, reactions: toggledReactions(found.reactions, emoji, 'owner') }
           server.messages.set(chatId, list.map((entry) => (entry.id === messageId ? reacted : entry)))
           return reacted
         }

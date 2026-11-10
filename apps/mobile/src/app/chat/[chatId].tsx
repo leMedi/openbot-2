@@ -4,6 +4,7 @@ import {
   chatName,
   membersOf,
   type Outgoing,
+  quotedAuthor,
   quotedText,
   reactionPills,
   reactorNames,
@@ -505,12 +506,12 @@ function MessageBubble({
       onPress={() => onJumpTo(replyTo.id)}
       style={({ pressed }) => [
         styles.quote,
-        row.mine ? { backgroundColor: '#ffffff26', borderLeftColor: '#ffffffb3' } : { backgroundColor: colors.background, borderLeftColor: colors.borderStrong },
+        row.mine ? { backgroundColor: `${colors.onColor}26`, borderLeftColor: `${colors.onColor}b3` } : { backgroundColor: colors.background, borderLeftColor: colors.borderStrong },
         pressed && { opacity: 0.7 },
       ]}
     >
       <Text numberOfLines={1} style={[styles.quoteAuthor, { color: row.mine ? colors.onColor : colors.foreground }]}>
-        {replyTo.author === 'owner' ? 'You' : replyTo.authorName}
+        {quotedAuthor(replyTo)}
       </Text>
       <Text numberOfLines={1} style={[styles.quoteText, { color: row.mine ? colors.onColor : colors.mutedForeground }]}>
         {quotedText(replyTo)}

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { type Db, type Message, type ReplyQuote, messages } from '@openbot/db'
 import { and, desc, eq, inArray, like } from 'drizzle-orm'
 import { isRoutineChangeCard } from './routines.ts'
@@ -78,9 +79,9 @@ export function replyQuoteOf(message: Message): ReplyQuote {
 
 /**
  * What a bot reads before the owner's message that replies to another (Grok's `buildReplyContextNote`): the replied
- * message's address and its whole text.
+ * message's address and its whole text, as it was.
  */
-export const describeReply = (quote: ReplyQuote) => `[In reply to ${messageAddress(quote.id)}: "${quoteOf(quote.text)}"]`
+export const describeReply = (quote: ReplyQuote) => `[In reply to ${messageAddress(quote.id)}: "${quote.text.trim()}"]`
 
 /**
  * What a bot reads before the owner's message in its DM (`BotInput.preface`): its address, which `react` takes, then
@@ -101,5 +102,8 @@ export const describeReaction = (emoji: string, message: Message) =>
 export const reactionWakes = (message: Message): string | undefined =>
   message.author === 'bot' && message.authorBotId && !message.direction && !isRoutineChangeCard(message.card) ? message.authorBotId : undefined
 
-/** Whether an input's id is that of a reaction's wake: it asks for no reply, so no reminder follows it. */
+/** The id of a reaction's wake, its own each time, as the same reaction may be left again. */
+export const reactionInputId = (messageId: string) => `reaction:${messageId}:${randomUUID()}`
+
+/** Whether an input's id is that of a reaction's wake (`reactionInputId`): it asks for no reply, so no reminder follows it. */
 export const isReactionInput = (inputId: string | undefined) => inputId?.startsWith('reaction:') ?? false

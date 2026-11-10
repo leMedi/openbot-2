@@ -196,13 +196,16 @@ function describeGroupMessage(message: Message): string {
   return files.length ? `${author}: ${text}\n[attached, on the computer:\n${files.join('\n')}]` : `${author}: ${text}`
 }
 
+/** The tag that starts what a member of a group chat reads there: `[Group chat: "Launch" - with Ana, Rex]`. */
+export const groupTag = (group: Group, botId: string) => `[Group chat: "${group.name}" - with ${othersIn(group, botId)}]`
+
 /**
  * What a member reads when its turn comes, as Grok's `buildGroupTurnPrompt`: the group tag
  * (`[Group chat: "Launch" - with Ana, Rex]`), the messages since its last turn, then the rules of its turn.
  */
 export function describeTurn(group: Group, botId: string, since: TurnMessages): string {
   const name = group.roster.find((member) => member.id === botId)?.name ?? 'you'
-  const lines = [`[Group chat: "${group.name}" - with ${othersIn(group, botId)}]`]
+  const lines = [groupTag(group, botId)]
   if (since.omitted > 0) lines.push(`(${since.omitted} earlier message${since.omitted === 1 ? '' : 's'} not shown)`)
   lines.push(
     ...since.messages.map(describeGroupMessage),
