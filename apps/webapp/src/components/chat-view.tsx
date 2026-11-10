@@ -1,5 +1,18 @@
-import { type BotInfo, type BotMessageInfo, type MessageInfo, type RoutineChangeCardInfo, maxAttachments } from '@openbot/api-contract'
-import { type Outgoing as SentMessage, type TranscriptRow, addFiles, formatSize, routineChangeVerbs, transcript, useLive, useViewingHeartbeat } from '@openbot/client'
+import { type BotInfo, type BotMessageInfo, type MessageInfo, type ReplyToInfo, type RoutineChangeCardInfo, maxAttachments, quickReactions } from '@openbot/api-contract'
+import {
+  type Outgoing as SentMessage,
+  type TranscriptRow,
+  addFiles,
+  formatSize,
+  quotedText,
+  reactionPills,
+  reactorNames,
+  replyTargetOf,
+  routineChangeVerbs,
+  transcript,
+  useLive,
+  useViewingHeartbeat,
+} from '@openbot/client'
 import { cn } from '@openbot/ui/lib/utils'
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
@@ -30,6 +43,9 @@ type Row = TranscriptRow<File> & {
 
 /** Files the owner added to each chat's composer and hasn't sent yet, kept while they switch chats. */
 const pendingFiles = new Map<string, File[]>()
+
+/** The message each chat's composer replies to, kept while the owner switches chats. */
+const pendingReplies = new Map<string, ReplyToInfo>()
 
 /**
  * A chat's transcript and composer, for a DM or a group chat: messages arrive live, the view follows them while the owner
@@ -92,6 +108,7 @@ export function ChatView({
   /** The newest message when the chat loaded (null for none): it and older ones, loaded later as the owner scrolls up, don't animate. */
   const loadedUpTo = useRef<string | null>(undefined)
   const [files, setFilesState] = useState<File[]>(() => pendingFiles.get(chatId) ?? [])
+  const [replyingTo, setReplyingToState] = useState<ReplyToInfo | undefined>(() => pendingReplies.get(chatId))
   const [notice, setNotice] = useState<string>()
   const [dragging, setDragging] = useState(false)
   /** Nested elements fire their own enter and leave; the overlay stays until the drag leaves them all. */
@@ -101,6 +118,12 @@ export function ChatView({
     setFilesState(next)
     if (next.length) pendingFiles.set(chatId, next)
     else pendingFiles.delete(chatId)
+  }
+
+  function setReplyingTo(next: ReplyToInfo | undefined) {
+    setReplyingToState(next)
+    if (next) pendingReplies.set(chatId, next)
+    else pendingReplies.delete(chatId)
   }
 
   function attach(added: File[]) {
@@ -148,12 +171,12 @@ export function ChatView({
   const tabFocused = useFocusedTab()
   useViewingHeartbeat(chatId, loaded && tabFocused && !covered)
 
-  async function send(text: string, files: File[], key: string = crypto.randomUUID()) {
+  async function send(text: string, files: File[], replyTo: ReplyToInfo | undefined, key: string = crypto.randomUUID()) {
     following.current = true
     const after = messages.at(-1)?.id
-    setOutgoing((list) => [...list.filter((entry) => entry.key !== key), { key, text, files, after }])
+    setOutgoing((list) => [...list.filter((entry) => entry.key !== key), { key, text, files, replyTo, after }])
     try {
-      live.addMessage(await api().chats.send({ chatId, text, files }))
+      live.addMessage(await api().chats.send({ chatId, text, files, replyToId: replyTo?.id }))
       setOutgoing((list) => list.filter((entry) => entry.key !== key))
     } catch (caught) {
       setOutgoing((list) => list.map((entry) => (entry.key === key ? { ...entry, error: errorMessage(caught) } : entry)))
@@ -243,6 +266,30 @@ export function ChatView({
     return () => clearTimeout(timer)
   }, [highlighted])
 
+  /** Goes to a message a reply quotes, smoothly, highlighting it a moment; loads back to it when it's older than those loaded. */
+  async function jumpTo(messageId: string) {
+    const find = () => scroller.current?.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`)
+    if (!find()) {
+      try {
+        await live.loadUntil(chatId, messageId)
+      } catch (caught) {
+        return setError(errorMessage(caught))
+      }
+      await new Promise(requestAnimationFrame)
+    }
+    const element = find()
+    if (!element) return
+    following.current = false
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches
+    element.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' })
+    setHighlighted(messageId)
+  }
+
+  function startReply(message: MessageInfo) {
+    setReplyingTo(replyTargetOf(message))
+    document.querySelector<HTMLTextAreaElement>('[data-composer]')?.focus()
+  }
+
   function jumpToEnd() {
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: reduce ? 'auto' : 'smooth' })
@@ -300,9 +347,13 @@ export function ChatView({
             hasOlder={hasOlder}
             loadingOlder={loadingOlder}
             highlighted={highlighted}
-            onResend={(entry) => void send(entry.text, entry.files, entry.key)}
+            bots={live.bots ?? []}
+            onResend={(entry) => void send(entry.text, entry.files, entry.replyTo, entry.key)}
             onDiscard={(entry) => setOutgoing((list) => list.filter((other) => other.key !== entry.key))}
             onAnswered={(message) => live.addMessage(message)}
+            onReact={(message, emoji) => live.react(chatId, message.id, emoji).catch((caught) => setError(errorMessage(caught)))}
+            onReply={startReply}
+            onJumpTo={(messageId) => void jumpTo(messageId)}
             onScreen={onScreen}
             onOpenRoutine={onOpenRoutine}
           />
@@ -324,6 +375,8 @@ export function ChatView({
         label={composerLabel}
         allowFiles={allowFiles}
         files={files}
+        replyingTo={replyingTo}
+        onCancelReply={() => setReplyingTo(undefined)}
         notice={notice}
         onAttach={attach}
         onRemove={(file) => {
@@ -334,7 +387,8 @@ export function ChatView({
           const sending = files
           setFiles([])
           setNotice(undefined)
-          void send(text, sending)
+          setReplyingTo(undefined)
+          void send(text, sending, replyingTo)
         }}
       />
     </div>
@@ -350,9 +404,13 @@ function MessageList({
   hasOlder,
   loadingOlder,
   highlighted,
+  bots,
   onResend,
   onDiscard,
   onAnswered,
+  onReact,
+  onReply,
+  onJumpTo,
   onScreen,
   onOpenRoutine,
 }: {
@@ -367,10 +425,18 @@ function MessageList({
   loadingOlder: boolean
   /** The message the palette opened, highlighted a moment. */
   highlighted: string | undefined
+  /** Who may have reacted, to name them. */
+  bots: readonly BotInfo[]
   onResend: (entry: Outgoing) => void
   onDiscard: (entry: Outgoing) => void
   /** A card was answered, dismissed, handed back or decided: the server's message as it is now. */
   onAnswered: (message: MessageInfo) => void
+  /** Toggles the owner's reaction on a message. */
+  onReact: (message: MessageInfo, emoji: string) => void
+  /** Starts a reply to a message in the composer. */
+  onReply: (message: MessageInfo) => void
+  /** Goes to the message a reply quotes. */
+  onJumpTo: (messageId: string) => void
   onScreen?: () => void
   onOpenRoutine?: (routineId: string) => void
 }) {
@@ -429,9 +495,13 @@ function MessageList({
         </CardRow>
       )
     }
+    const message = row.message
+    const replyTo = message?.replyTo ?? row.outgoing?.replyTo
+    const pills = message ? reactionPills(message.reactions) : []
     return (
-      <div key={row.key} role="article" className={cn('flex', row.mine && 'justify-end', continuesNext ? 'mb-1' : 'mb-[22px]')}>
+      <div key={row.key} role="article" className={cn('group/message relative flex', row.mine && 'justify-end', continuesNext && !pills.length ? 'mb-1' : 'mb-[22px]')}>
         <span className="sr-only">{row.authorName}: </span>
+        {message && <MessageActions message={message} mine={row.mine} onReact={onReact} onReply={onReply} />}
         <div
           className={cn(
             'flex max-w-[min(88%,640px)] min-w-0 flex-col gap-1',
@@ -451,6 +521,7 @@ function MessageList({
               ))}
             </div>
           )}
+          {replyTo && !row.text && <ReplyQuote replyTo={replyTo} mine={row.mine} onJumpTo={onJumpTo} />}
           {/* Grok doesn't bubble a message of files only. */}
           {row.text && (
             <div
@@ -463,7 +534,29 @@ function MessageList({
                 failed && 'opacity-60',
               )}
             >
+              {replyTo && <ReplyQuote replyTo={replyTo} mine={row.mine} onJumpTo={onJumpTo} />}
               <Markdown text={row.text} onColor={row.mine} />
+            </div>
+          )}
+          {message && pills.length > 0 && (
+            <div className={cn('-mt-0.5 flex flex-wrap gap-1', row.mine && 'justify-end')}>
+              {pills.map((pill) => (
+                <button
+                  key={pill.emoji}
+                  type="button"
+                  aria-pressed={pill.mine}
+                  aria-label={`${pill.emoji} ${pill.count}, by ${reactorNames(pill, bots)}`}
+                  title={reactorNames(pill, bots)}
+                  onClick={() => onReact(message, pill.emoji)}
+                  className={cn(
+                    'pressable inline-flex h-6 items-center gap-1 rounded-full border px-2 text-sm motion-safe:animate-pop-in motion-reduce:animate-fade-in',
+                    pill.mine ? 'border-blue bg-blue-subtle text-blue-foreground' : 'border-border bg-card hover:bg-secondary-hover',
+                  )}
+                >
+                  <span>{pill.emoji}</span>
+                  {pill.count > 1 && <span className="text-xs tabular-nums">{pill.count}</span>}
+                </button>
+              ))}
             </div>
           )}
           {failed && row.outgoing && (
@@ -599,6 +692,98 @@ function BotMessageLabel({ botMessage }: { botMessage: BotMessageInfo }) {
   )
 }
 
+/** At the top of a reply's bubble: who and what it replies to, which it goes to when clicked. */
+function ReplyQuote({ replyTo, mine, onJumpTo }: { replyTo: ReplyToInfo; mine: boolean; onJumpTo: (messageId: string) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onJumpTo(replyTo.id)}
+      aria-label={`Replying to ${replyTo.authorName}: ${quotedText(replyTo)}. Go to the message`}
+      className={cn(
+        'pressable mb-1 flex w-full max-w-[420px] min-w-0 flex-col rounded-[10px] border-l-[3px] px-2 py-1 text-left text-sm/[18px]',
+        mine ? 'border-on-color/70 bg-on-color/15 text-on-color' : 'border-border-strong bg-background/60 hover:bg-background',
+      )}
+    >
+      <span className="text-xs font-medium">{replyTo.author === 'owner' ? 'You' : replyTo.authorName}</span>
+      <span className={cn('truncate', !mine && 'text-muted-foreground')}>{quotedText(replyTo)}</span>
+    </button>
+  )
+}
+
+/**
+ * The toolbar a message shows on hover or focus, just over its bubble's top edge: Grok's quick reactions, Reply and Copy.
+ */
+function MessageActions({
+  message,
+  mine,
+  onReact,
+  onReply,
+}: {
+  message: MessageInfo
+  mine: boolean
+  onReact: (message: MessageInfo, emoji: string) => void
+  onReply: (message: MessageInfo) => void
+}) {
+  const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    if (!copied) return
+    const timer = setTimeout(() => setCopied(false), 1500)
+    return () => clearTimeout(timer)
+  }, [copied])
+  const own = (emoji: string) => message.reactions.some((reaction) => reaction.emoji === emoji && reaction.by === 'owner')
+  const action = 'pressable grid size-7 shrink-0 place-items-center rounded-full hover:bg-secondary-hover'
+  return (
+    <div
+      role="toolbar"
+      aria-label="Message actions"
+      className={cn(
+        'absolute bottom-full z-10 -mb-2 flex items-center gap-0.5 rounded-full border border-border bg-popover p-0.5 shadow-md',
+        'pointer-events-none opacity-0 transition-opacity duration-100 group-hover/message:pointer-events-auto group-hover/message:opacity-100 has-focus-visible:pointer-events-auto has-focus-visible:opacity-100',
+        mine ? 'right-1' : 'left-1',
+      )}
+    >
+      {quickReactions.map((emoji) => (
+        <button
+          key={emoji}
+          type="button"
+          aria-label={own(emoji) ? `Take back ${emoji}` : `React ${emoji}`}
+          aria-pressed={own(emoji)}
+          onClick={() => onReact(message, emoji)}
+          className={cn(action, 'text-base', own(emoji) && 'bg-blue-subtle')}
+        >
+          {emoji}
+        </button>
+      ))}
+      <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />
+      <button type="button" aria-label="Reply" title="Reply" onClick={() => onReply(message)} className={action}>
+        <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M6.5 4 2.5 8l4 4M2.5 8h6.75a4.25 4.25 0 0 1 4.25 4.25V13" />
+        </svg>
+      </button>
+      {message.text && (
+        <button
+          type="button"
+          aria-label={copied ? 'Copied' : 'Copy'}
+          title={copied ? 'Copied' : 'Copy'}
+          onClick={() => navigator.clipboard.writeText(message.text).then(() => setCopied(true), () => {})}
+          className={action}
+        >
+          {copied ? (
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="m3.5 8.5 3 3 6-7" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden>
+              <rect x="5.25" y="5.25" width="8" height="8" rx="1.75" />
+              <path d="M10.75 5.25V4a1.75 1.75 0 0 0-1.75-1.75H4A1.75 1.75 0 0 0 2.25 4v5A1.75 1.75 0 0 0 4 10.75h1.25" />
+            </svg>
+          )}
+        </button>
+      )}
+    </div>
+  )
+}
+
 const roundButton =
   'pressable grid size-[30px] shrink-0 place-items-center rounded-full bg-primary text-primary-foreground hover:bg-primary-hover disabled:opacity-40'
 
@@ -715,6 +900,8 @@ function Composer({
   label,
   allowFiles,
   files,
+  replyingTo,
+  onCancelReply,
   notice,
   onAttach,
   onRemove,
@@ -724,6 +911,9 @@ function Composer({
   label: string
   allowFiles: boolean
   files: File[]
+  /** The message the owner is replying to, shown above the field. */
+  replyingTo: ReplyToInfo | undefined
+  onCancelReply: () => void
   notice: string | undefined
   onAttach: (files: File[]) => void
   onRemove: (file: File) => void
@@ -758,6 +948,22 @@ function Composer({
         }}
         className="flex flex-col gap-2 rounded-2xl border border-border bg-secondary p-[9px] shadow-sm transition-colors duration-100 focus-within:border-border-strong"
       >
+        {replyingTo && (
+          <div className="flex items-center gap-2 rounded-[10px] border-l-[3px] border-blue bg-background py-1 pr-1 pl-2 motion-safe:animate-pop-in motion-reduce:animate-fade-in">
+            <span className="flex min-w-0 flex-1 flex-col text-sm/[18px]">
+              <span className="text-xs font-medium">Replying to {replyingTo.author === 'owner' ? 'yourself' : replyingTo.authorName}</span>
+              <span className="truncate text-muted-foreground">{quotedText(replyingTo)}</span>
+            </span>
+            <button
+              type="button"
+              aria-label="Cancel reply"
+              onClick={onCancelReply}
+              className="pressable grid size-6 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-secondary-hover hover:text-foreground"
+            >
+              ×
+            </button>
+          </div>
+        )}
         {files.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {files.map((file, index) => (
@@ -808,8 +1014,8 @@ function Composer({
           <textarea
             ref={field}
             data-composer
-            aria-label={label}
-            placeholder={label}
+            aria-label={replyingTo ? `Reply to ${replyingTo.authorName}` : label}
+            placeholder={replyingTo ? 'Reply…' : label}
             enterKeyHint="send"
             rows={1}
             value={text}
@@ -821,6 +1027,10 @@ function Composer({
               onAttach(pasted)
             }}
             onKeyDown={(event) => {
+              if (event.key === 'Escape' && replyingTo) {
+                event.preventDefault()
+                onCancelReply()
+              }
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault()
                 send()
