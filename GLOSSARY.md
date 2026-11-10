@@ -32,6 +32,14 @@ _Avoid_: Persona, system prompt
 Something the owner or a bot posts in a chat, readable by everyone in that chat; a bot may also send one straight to another bot, which then appears in both bots' DMs. A bot's history, thinking and tool use are private and never messages.
 _Avoid_: Memo, agent message, bubble
 
+**Reaction**:
+An emoji the owner or a bot leaves on a message, shown as a pill under it; leaving the same one again takes it back. The owner's reaction to a bot's message tells that bot, without asking for a reply.
+_Avoid_: Like, tapback (for ours), emoji reply
+
+**Reply**:
+The owner's message that answers a particular earlier message of the chat, showing a quote of it at its top; the bot reads that quote before the owner's words. Not a thread.
+_Avoid_: Quote, thread
+
 **Attachment**:
 A file posted with a message: one the owner sends, saved in the bot's uploads folder on the computer, or one a bot sends from the computer. The owner downloads it as it was when posted.
 _Avoid_: Upload (for the message's file), asset

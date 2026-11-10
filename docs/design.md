@@ -13,7 +13,7 @@ This document records the decisions agreed on 2026-10-25 and 2026-10-26. The res
 | Deploy | Runtime image, compose sample, `install.sh`, env-configured paths | In-app updater with GitHub Releases, auto-update when idle | |
 | Onboarding | Name and time zone → about you (optional) → connect provider → models → first bot | | |
 | Bots | Create (popup), edit, hard delete, per-bot model override | | Animated avatars |
-| Chat | Multi-bubble SendMessage chat, markdown, reply guarantee, question / take-over cards, attachments | Reactions, threads, ⌘K palette, global search, browser notifications | KaTeX, Mermaid, link previews, file viewers, find-in-chat |
+| Chat | Multi-bubble SendMessage chat, markdown, reply guarantee, question / take-over cards, attachments | Reactions and replies (done), threads, ⌘K palette, global search, browser notifications | KaTeX, Mermaid, link previews, file viewers, find-in-chat |
 | Sidebar | Status dots, unread, Draft / Waiting lines, pin, rename, delete | Named sections, multi-select, hidden bots, ⌘B rail | |
 | Computer | Per-bot display (always on), noVNC preview + take control, computerUse subagent | | |
 | Bot ↔ bot | `message_bot` (Grok semantics) | | |
@@ -160,6 +160,14 @@ As built (#40), question cards dismiss as Grok's do:
 - The owner's next message in the DM dismisses every card they left open: replying below a card is moving on from it, and the bot reads their message after the list of unanswered questions. (Grok's `dismissOnMoveOn` was a per-card flag, off by default; left open, a card the owner had answered in words stayed answerable.)
 - Each run the scheduler starts in the bot's DM (not a group turn) begins with `Unanswered questions:\n- <prompt>` for every question still unanswered, open or dismissed; `messages.card_state.reminded` then keeps it from being listed again.
 - **Seam 1:** `questions.test.ts`.
+
+As built (no issue; the owner's ask), reactions and replies, as Grok's:
+
+- **Reactions:** a message holds `{emoji, by}` reactions (`messages.reactions`; `by` is `owner` or a bot's id), several emoji per message; leaving the same emoji again takes it back (`chats.react`, one emoji only). The quick set is Grok's 👍 👎 ❤️ 😂 🎉 😮, with no picker. The owner adding one to a bot's message wakes the bot that wrote it with a hidden cue, `[The owner reacted 👍 to your message: "<its text on one line, cut to 80 characters>". You don't need to reply; act on it only if it's useful (e.g. acknowledge, adjust, or continue).]`: in its DM in the background lane (it never interrupts or supersedes a run), for a group's message as a turn in that group. No reminder follows it. Taking one back, reacting to one's own message, to a message between bots or a timeline row, wakes nobody.
+- **Bots react** with `react` (`{message, emoji}`), Grok's ReactToMessage: the owner's messages only, in the bot's DM and its group chats, toggling, never ending the turn; very sparingly, never instead of a reply. A run whose only answer is a reaction is complete (no reply reminder). To name a message, each of the owner's messages starts with its address, `[m1a2b3c4]` (`m` and the last 8 hex digits of its id, Grok's `[t3u]`): in the DM as the input's preface, which memory extraction doesn't take as the owner's words, and in a group turn as `The owner [m1a2b3c4]: …`.
+- **Replies:** the owner's message may reply to another of the chat's (`chats.send`'s `replyToId`); it keeps a quote of it (`messages.reply_to`: id, author, name, its whole text), shown cut to 280 characters at the top of its bubble, which goes to the original. The bot reads `[In reply to m1a2b3c4: "<the whole quote>"]` before the owner's text (Grok's `buildReplyContextNote`). Bots don't reply to a message, and there are no threads yet.
+- **Copy** copies a message's Markdown, on the client.
+- **Seam 1:** `reactions.test.ts`.
 
 As built (#12), attachments:
 
