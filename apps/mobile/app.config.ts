@@ -17,7 +17,20 @@ export default ({ config }: ConfigContext): ExpoConfig =>
       userInterfaceStyle: 'automatic',
       ios: { bundleIdentifier: bundleId, supportsTablet: false },
       android: { package: bundleId },
-      plugins: ['expo-router', 'expo-sqlite'],
+      plugins: [
+        'expo-router',
+        'expo-sqlite',
+        'expo-image',
+        'expo-sharing',
+        // The chat's + → Photo Library / Take Photo. The microphone's prompt is left to Dictation (#115).
+        [
+          'expo-image-picker',
+          {
+            photosPermission: 'OpenBot lets you send photos from your library to your bots.',
+            cameraPermission: 'OpenBot lets you take a photo to send to your bots.',
+          },
+        ],
+      ],
     },
     { localNetworkUsage: 'OpenBot connects to your OpenBot computer on your network.' },
   )

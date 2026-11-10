@@ -91,3 +91,46 @@ export const SearchIcon = ({ size = 17, color }: IconProps) => (
     <Path d="M20 20l-4-4" />
   </Icon>
 )
+
+export const CloseIcon = ({ size = 14, color }: IconProps) => (
+  <Icon size={size} color={color} box={16} stroke={1.75}>
+    <Path d="M4 4l8 8M12 4l-8 8" />
+  </Icon>
+)
+
+/** A routine chip's clock. */
+export const ClockIcon = ({ size = 13, color }: IconProps) => (
+  <Icon size={size} color={color} box={16} stroke={1.4}>
+    <Circle cx="8" cy="8" r="6.25" />
+    <Path d="M8 4.75V8l2.25 1.5" />
+  </Icon>
+)
+
+/** The composer's Send: an arrow up. */
+export const SendIcon = ({ size = 18, color }: IconProps) => (
+  <Icon size={size} color={color} box={16} stroke={1.9}>
+    <Path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" />
+  </Icon>
+)
+
+/** A file chip's page with a folded corner. */
+export const FileIcon = ({ size = 18, color }: IconProps) => (
+  <Icon size={size} color={color} box={16} stroke={1.4}>
+    <Path d="M4 1.75h5.25L12.5 5v9.25H4z" />
+    <Path d="M9 1.75V5.25h3.5" />
+  </Icon>
+)
+
+/** A video or a sound to play. */
+export const PlayIcon = ({ size = 18, color }: IconProps) => (
+  <Icon size={size} color={color} box={16} fill>
+    <Path d="M5 3.2v9.6L12.6 8Z" />
+  </Icon>
+)
+
+/** The chat header's Screen button: a display. */
+export const ScreenIcon = ({ size = 22, color }: IconProps) => (
+  <Icon size={size} color={color}>
+    <Path d="M3.5 5h17v11h-17zM9 20h6M12 16v4" />
+  </Icon>
+)

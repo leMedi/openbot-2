@@ -1,21 +1,15 @@
 import { type AttachmentInfo, attachmentPath } from '@openbot/api-contract'
+import { attachmentKind, formatSize } from '@openbot/client'
 import { cn } from '@openbot/ui/lib/utils'
 import { useLayoutEffect, useRef, useState } from 'react'
 
 /** Where the browser downloads a message's file. */
 export const attachmentUrl = (messageId: string, attachment: AttachmentInfo) => `/api${attachmentPath(messageId, attachment.id)}`
 
-/** `size` bytes, for people: `512 B`, `12 KB`, `3.4 MB`. */
-export function formatSize(size: number): string {
-  if (size < 1024) return `${size} B`
-  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
-  return `${(size / 1024 / 1024).toFixed(1)} MB`
-}
-
 /** Images and videos show in the gallery, audio as a player; every other file is a chip. */
-const isMedia = (file: { mimeType: string }) => isImage(file) || file.mimeType.startsWith('video/')
-const isAudio = (file: { mimeType: string }) => file.mimeType.startsWith('audio/')
-const isImage = (file: { mimeType: string }) => file.mimeType.startsWith('image/') && file.mimeType !== 'image/svg+xml'
+const isMedia = (file: { mimeType: string }) => isImage(file) || attachmentKind(file) === 'video'
+const isAudio = (file: { mimeType: string }) => attachmentKind(file) === 'audio'
+const isImage = (file: { mimeType: string }) => attachmentKind(file) === 'image'
 
 /**
  * A message's files in Grok's transcript styles: images and videos in a gallery (320px high at most, 10px corners) that

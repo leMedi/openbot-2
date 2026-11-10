@@ -1,10 +1,10 @@
 import type { MessageInfo, QuestionAnswer, QuestionCardInfo } from '@openbot/api-contract'
+import { optionLetter, shownAnswer } from '@openbot/client'
 import { cn } from '@openbot/ui/lib/utils'
 import { useEffect, useRef, useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
 import { Markdown } from './markdown.tsx'
 
-const letter = (index: number) => String.fromCharCode(65 + index)
 
 /** Whether a key press belongs to something else: a field being typed in, an open dialog, or a shortcut. */
 function keyIsTaken(event: KeyboardEvent) {
@@ -75,7 +75,7 @@ export function QuestionCard({
   }
 
   if (card.answer) {
-    const shown = 'option' in card.answer ? `${letter(card.answer.option)}. ${card.options[card.answer.option]?.label}` : card.answer.text
+    const shown = shownAnswer(card)
     return (
       <section aria-label="Answered question" className="w-full rounded-2xl bg-bubble-agent p-3 text-base/5">
         <p className="text-muted-foreground">{card.prompt}</p>
@@ -119,7 +119,7 @@ export function QuestionCard({
             type="button"
             disabled={sending}
             onClick={() => void answer({ option: index })}
-            aria-keyshortcuts={letterKeys ? letter(index) : undefined}
+            aria-keyshortcuts={letterKeys ? optionLetter(index) : undefined}
             className={cn(
               'pressable flex items-start gap-2.5 rounded-xl px-3 py-2 text-left transition-colors duration-100 disabled:opacity-60',
               option.style === 'primary' && 'bg-primary text-primary-foreground hover:bg-primary-hover',
@@ -131,7 +131,7 @@ export function QuestionCard({
               aria-hidden
               className="mt-px grid size-5 shrink-0 place-items-center rounded-md border border-current/25 font-sans text-xs font-medium opacity-80"
             >
-              {letter(index)}
+              {optionLetter(index)}
             </kbd>
             <span className="min-w-0 [overflow-wrap:anywhere]">
               <span className="block font-medium">{option.label}</span>

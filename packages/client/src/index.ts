@@ -1,3 +1,4 @@
+export * from './chat.ts'
 export * from './devices.ts'
 export * from './facts.ts'
 export * from './groups.ts'

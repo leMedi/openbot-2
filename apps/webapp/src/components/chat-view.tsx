@@ -1,10 +1,10 @@
-import { type BotInfo, type BotMessageInfo, type MessageInfo, type RoutineChangeCardInfo, maxAttachmentBytes, maxAttachments } from '@openbot/api-contract'
-import { useLive, useViewingHeartbeat } from '@openbot/client'
+import { type BotInfo, type BotMessageInfo, type MessageInfo, type RoutineChangeCardInfo, maxAttachments } from '@openbot/api-contract'
+import { type Outgoing as SentMessage, type TranscriptRow, addFiles, formatSize, routineChangeVerbs, transcript, useLive, useViewingHeartbeat } from '@openbot/client'
 import { cn } from '@openbot/ui/lib/utils'
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
 import { useFocusedTab } from '../lib/focused-tab.ts'
-import { Attachments, FileIcon, formatSize } from './attachments.tsx'
+import { Attachments, FileIcon } from './attachments.tsx'
 import { Markdown } from './markdown.tsx'
 import { PluginReconnectCard } from './plugin-reconnect-card.tsx'
 import { PluginRequestCard } from './plugin-request-card.tsx'
@@ -21,40 +21,15 @@ const loadOlderThresholdPx = 600
 const highlightMs = 2000
 
 /** A message the owner sent that the server hasn't returned yet, or that failed. */
-type Outgoing = {
-  key: string
-  text: string
-  files: File[]
-  /** The chat's last message id when it was sent; the server's copy sorts after it. */
-  after: string | undefined
-  error?: string
-}
+type Outgoing = SentMessage<File>
 
-type Row = {
-  key: string
-  author: string
-  authorName: string
-  mine: boolean
-  text: string
+type Row = TranscriptRow<File> & {
   /** Arrived while the chat was open, so it animates in. */
   enter: boolean
-  outgoing?: Outgoing
-  /** The server's message, when it has one; a card and attachments render from it. */
-  message?: MessageInfo
 }
 
 /** Files the owner added to each chat's composer and hasn't sent yet, kept while they switch chats. */
 const pendingFiles = new Map<string, File[]>()
-
-/** Adds `added` to `files`, up to Grok's 6; returns them and why any were left out. */
-function addFiles(files: File[], added: File[]): { files: File[]; notice?: string } {
-  const tooLarge = added.filter((file) => file.size > maxAttachmentBytes)
-  const fitting = added.filter((file) => file.size <= maxAttachmentBytes)
-  const next = [...files, ...fitting].slice(0, maxAttachments)
-  if (tooLarge.length) return { files: next, notice: `${tooLarge[0]!.name} is larger than ${maxAttachmentBytes / 1024 / 1024} MB` }
-  if (files.length + fitting.length > maxAttachments) return { files: next, notice: `You can attach up to ${maxAttachments} files` }
-  return { files: next }
-}
 
 /**
  * A chat's transcript and composer, for a DM or a group chat: messages arrive live, the view follows them while the owner
@@ -180,31 +155,13 @@ export function ChatView({
     }
   }
 
-  const rows: Row[] = [
-    ...messages.map((message: MessageInfo) => ({
-      key: message.id,
-      author: message.author === 'owner' ? 'owner' : `bot:${message.botId}`,
-      authorName: message.authorName,
-      mine: message.author === 'owner',
-      text: message.text,
-      // The owner's own messages already animated in as outgoing ones.
-      enter: loadedUpTo.current !== undefined && (loadedUpTo.current === null || message.id > loadedUpTo.current) && message.author !== 'owner',
-      message,
-    })),
-    ...outgoing
-      // The live stream can deliver the server's copy before the send returns.
-      .filter(
-        (entry) =>
-          !messages.some(
-            (message) =>
-              message.author === 'owner' &&
-              message.text === entry.text &&
-              message.attachments.map((file) => file.size).join() === entry.files.map((file) => file.size).join() &&
-              (!entry.after || message.id > entry.after),
-          ),
-      )
-      .map((entry) => ({ key: entry.key, author: 'owner', authorName: 'You', mine: true, text: entry.text, enter: true, outgoing: entry })),
-  ]
+  const rows: Row[] = transcript(messages, outgoing).map((row) => ({
+    ...row,
+    // The owner's own messages already animated in as outgoing ones.
+    enter: row.outgoing
+      ? true
+      : loadedUpTo.current !== undefined && (loadedUpTo.current === null || row.key > loadedUpTo.current) && !row.mine,
+  }))
 
   // Older messages loaded above keep what the owner is reading in place.
   const oldest = messages[0]?.id
@@ -417,8 +374,7 @@ function MessageList({
     .find((row) => row.message?.card?.type === 'question' && !row.message.card.answer && !row.message.card.dismissed)?.key
   function rowElement(row: Row, index: number) {
     // Consecutive messages of one author sit close together, with tighter corners on the sender's side.
-    const continuesPrevious = rows[index - 1]?.author === row.author
-    const continuesNext = rows[index + 1]?.author === row.author
+    const { continuesPrevious, continuesNext } = row
     const failed = row.outgoing?.error
     const card = row.message?.card
     if (card?.type === 'take_over') {
@@ -570,14 +526,6 @@ function CardRow({ row, continuesNext, children }: { row: Row; continuesNext: bo
   )
 }
 
-const changeVerbs: Record<RoutineChangeCardInfo['change'], string> = {
-  created: 'created',
-  updated: 'changed',
-  paused: 'paused',
-  resumed: 'resumed',
-  deleted: 'deleted',
-}
-
 /**
  * Grok's timeline event: a thin row noting a bot's change to one of its routines ("Rex created routine"), with a clock
  * chip naming the routine that opens it and the time, centred between two rules.
@@ -610,7 +558,7 @@ function TimelineRow({
     >
       <span aria-hidden className="h-px min-w-4 flex-1 bg-border" />
       <span className="shrink-0">
-        {message.authorName} {changeVerbs[card.change]} routine
+        {message.authorName} {routineChangeVerbs[card.change]} routine
       </span>
       {onOpenRoutine && card.change !== 'deleted' ? (
         <button type="button" onClick={() => onOpenRoutine(card.routineId)} className={cn('pressable hover:bg-secondary-hover', chipClass)}>
