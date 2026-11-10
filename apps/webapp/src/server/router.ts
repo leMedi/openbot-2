@@ -31,6 +31,7 @@ import {
   listGroups,
   listChatSummaries,
   markChatRead,
+  markChatUnread,
   setPinnedChats,
   createSection,
   deleteSection,
@@ -578,6 +579,11 @@ export const router = os.router({
 
     read: os.chats.read.handler(async ({ context, input }) => {
       await chatMustExist(markChatRead(context.db, input.chatId, input.upTo))
+      return (await publishChat(context, input.chatId))!
+    }),
+
+    unread: os.chats.unread.handler(async ({ context, input }) => {
+      await chatMustExist(markChatUnread(context.db, input.chatId))
       return (await publishChat(context, input.chatId))!
     }),
 

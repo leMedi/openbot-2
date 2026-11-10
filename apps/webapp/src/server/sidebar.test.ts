@@ -106,6 +106,35 @@ describe('unread chats', () => {
   it('refuses to mark a chat that does not exist', async () => {
     const { server } = await startWithRex()
     await expect(server.client.chats.read({ chatId: 'nope' })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(server.client.chats.unread({ chatId: 'nope' })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+
+  it("marks a read chat unread from its bot's latest message, until it is opened again", async () => {
+    const { server, bot } = await startWithRex()
+    await rexReplies(server, bot, 'Fix the build', 'Done.')
+    await rexReplies(server, bot, 'And the tests?', 'Green too.')
+    await server.client.chats.read({ chatId: bot.chatId })
+
+    expect(await server.client.chats.unread({ chatId: bot.chatId })).toMatchObject({ id: bot.chatId, unread: true })
+    expect(await chatOf(server, bot)).toMatchObject({ unread: true })
+
+    // Only the latest of the bot's messages turned unread: reading up to the one before it leaves the chat unread.
+    const messages = await server.messages(bot.chatId)
+    const beforeLatest = messages.at(-2)!.id
+    await server.client.chats.read({ chatId: bot.chatId, upTo: beforeLatest })
+    expect(await chatOf(server, bot)).toMatchObject({ unread: true })
+
+    await server.client.chats.read({ chatId: bot.chatId })
+    expect(await chatOf(server, bot)).toMatchObject({ unread: false })
+  })
+
+  it('leaves a chat its bot never posted in read', async () => {
+    const { server, bot } = await startWithRex()
+    server.providers.script(endsSilently())
+    await server.client.chats.send({ chatId: bot.chatId, text: 'Hi' })
+    await untilIdle(server, bot)
+
+    expect(await server.client.chats.unread({ chatId: bot.chatId })).toMatchObject({ unread: false })
   })
 })
 

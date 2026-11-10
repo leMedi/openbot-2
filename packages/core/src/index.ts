@@ -34,6 +34,7 @@ export {
   listChatSummaries,
   listMessagesPage,
   markChatRead,
+  markChatUnread,
   maxBotMessageLength,
   postMessage,
   setPinnedChats,

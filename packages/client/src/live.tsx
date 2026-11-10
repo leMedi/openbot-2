@@ -280,6 +280,14 @@ export class LiveStore {
     }
   }
 
+  /**
+   * Marks a chat unread from its bot's latest message, as the phone's Mark as unread does. Shown once the server
+   * answers, not before: a chat no bot posted in for the owner stays read, which only the server knows.
+   */
+  async markUnread(chatId: string) {
+    this.setChat(await this.#api.chats.unread({ chatId }))
+  }
+
   /** Chat ids pinned in the sidebar, in the owner's order. */
   get pinnedChatIds(): string[] {
     return [...this.chats.values()]

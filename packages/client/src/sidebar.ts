@@ -1,4 +1,4 @@
-import { type BotInfo, type ChatInfo, type SectionInfo, unassignedSectionId } from '@openbot/api-contract'
+import { type BotInfo, type ChatInfo, type MuteDuration, previewText, type SectionInfo, unassignedSectionId } from '@openbot/api-contract'
 
 /** One sidebar row: a bot's DM (with its bot) or a group chat. */
 export type SidebarRow = { chatId: string; chat: ChatInfo | undefined; pinned: boolean; bot?: BotInfo }
@@ -82,3 +82,57 @@ export function adjacentChat(order: readonly string[], current: string | undefin
   if (index === -1) return step === 1 ? order[0] : order.at(-1)
   return order[(index + step + order.length) % order.length]
 }
+
+const isImage = (file: { mimeType: string }) => file.mimeType.startsWith('image/') && file.mimeType !== 'image/svg+xml'
+
+/** Grok's sidebar summary of a message with files and no text: "Sent 2 images", "Sent a file". */
+export function summarizeAttachments(attachments: readonly { mimeType: string }[]): string {
+  const count = attachments.length
+  const kind = attachments.every(isImage) ? 'image' : attachments.every((file) => file.mimeType.startsWith('video/')) ? 'video' : 'file'
+  return count === 1 ? `Sent ${kind === 'image' ? 'an image' : `a ${kind}`}` : `Sent ${count} ${kind}s`
+}
+
+/** A row's second line: its text in a tone, after a label in its own (the draft's red, the wait's amber). */
+export type RowLine = { label?: { text: string; tone: 'draft' | 'waiting' }; text: string; tone: 'muted' | 'working' | 'error' }
+
+/**
+ * The row's second line, in Grok's priority: the owner's draft, what the bot waits for, its activity (in a group, the
+ * member taking its turn, `speaking`), the latest message.
+ */
+export function rowLine(row: Pick<SidebarRow, 'bot' | 'chat'>, speaking: BotInfo | undefined, draft: string | undefined): RowLine {
+  const { bot, chat } = row
+  if (draft?.trim()) return { label: { text: 'Draft: ', tone: 'draft' }, text: previewText(draft), tone: 'muted' }
+  if (chat?.waitingFor) return { label: { text: 'Waiting for you: ', tone: 'waiting' }, text: previewText(chat.waitingFor), tone: 'muted' }
+  if (bot?.working) return { text: 'Working…', tone: 'working' }
+  if (bot?.error) return { text: "Couldn't reach its model", tone: 'error' }
+  if (speaking) return { text: `${speaking.name} is taking a turn…`, tone: 'working' }
+  const last = chat?.lastMessage
+  if (last) {
+    const text = previewText(last.text) || (last.attachments.length ? summarizeAttachments(last.attachments) : '')
+    // A message between bots shows who it went to or came from: "→ Ana: …", "← Rex: …"; a group's shows who posted it.
+    const prefix = last.botMessage
+      ? `${last.botMessage.direction === 'to' ? '→' : '←'} ${last.botMessage.name}: `
+      : last.author === 'owner'
+        ? 'You: '
+        : bot
+          ? ''
+          : `${last.authorName}: `
+    return { text: prefix + text, tone: 'muted' }
+  }
+  return { text: bot?.title ?? 'No messages yet', tone: 'muted' }
+}
+
+/** A row's status dot: the chat waits for the owner, or a bot posted since they looked (unless they're reading it now). */
+export function rowStatus(chat: ChatInfo | undefined, reading = false): 'attention' | 'unread' | undefined {
+  if (chat?.waitingFor) return 'attention'
+  if (chat?.unread && !reading) return 'unread'
+  return undefined
+}
+
+/** The mute durations a chat's menu offers, in order, as both apps word them. */
+export const muteChoices: readonly (readonly [MuteDuration, string])[] = [
+  ['1h', 'For 1 hour'],
+  ['8h', 'For 8 hours'],
+  ['1d', 'For 1 day'],
+  ['forever', 'Until I unmute'],
+]

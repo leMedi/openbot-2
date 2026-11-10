@@ -901,6 +901,14 @@ export const contract = {
       })
       .input(z.object({ chatId: z.string(), upTo: z.string().optional() }))
       .output(chat),
+    unread: oc
+      .route({
+        method: 'POST',
+        path: '/chats/{chatId}/unread',
+        summary: "Mark a chat unread from its bot's latest message for the owner, as the owner's Mark as unread does; a chat no bot posted in stays read",
+      })
+      .input(z.object({ chatId: z.string() }))
+      .output(chat),
     setPinned: oc
       .route({
         method: 'PUT',

@@ -129,6 +129,12 @@ function fakeServer() {
     },
     chats: {
       list: async () => server.chats,
+      unread: async ({ chatId }: { chatId: string }) => {
+        if (server.unreachable) throw new TypeError('Failed to fetch')
+        const marked = { ...server.chats.find((entry) => entry.id === chatId)!, unread: true }
+        server.chats = server.chats.map((entry) => (entry.id === chatId ? marked : entry))
+        return marked
+      },
       viewing: async ({ chatId }: { chatId: string }) => {
         if (server.unreachable) throw new TypeError('Failed to fetch')
         server.viewing.push(chatId)
@@ -366,6 +372,34 @@ describe('the snapshot', () => {
     void store.run(controller.signal)
     await vi.advanceTimersByTimeAsync(10)
     expect(store.bots).toBeUndefined()
+  })
+})
+
+describe('marking a chat unread', () => {
+  async function connectedStore() {
+    const { server, api } = fakeServer()
+    server.chats = [chat('dm-1')]
+    server.connections.push([hello('e1', 1, false)])
+    const store = new LiveStore({ api, storage: memoryStorage() })
+    const controller = new AbortController()
+    void store.run(controller.signal)
+    await vi.waitFor(() => expect(store.connected).toBe(true))
+    return { server, store, stop: () => controller.abort() }
+  }
+
+  it('shows it unread as the instance has it then', async () => {
+    const { store, stop } = await connectedStore()
+    await store.markUnread('dm-1')
+    expect(store.chats.get('dm-1')?.unread).toBe(true)
+    stop()
+  })
+
+  it('leaves it as it was when the save fails', async () => {
+    const { server, store, stop } = await connectedStore()
+    server.unreachable = true
+    await expect(store.markUnread('dm-1')).rejects.toThrow('Failed to fetch')
+    expect(store.chats.get('dm-1')?.unread).toBe(false)
+    stop()
   })
 })
 

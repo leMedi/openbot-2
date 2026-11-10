@@ -1,9 +1,15 @@
-import { type BotInfo, type ChatInfo, isMuted, maxSectionNameLength, previewText, type MuteDuration, type SectionInfo, unassignedSectionId } from '@openbot/api-contract'
+import { type ChatInfo, isMuted, maxSectionNameLength, type SectionInfo, unassignedSectionId } from '@openbot/api-contract'
 import {
   hiddenFoldKey,
   membersOf,
   rangeBetween,
+  muteChoices,
+  nextMuteEnd,
   relativeTime,
+  useNow,
+  type RowLine,
+  rowLine,
+  rowStatus,
   selectableChatIds,
   type SidebarBlock,
   sidebarLayout,
@@ -26,7 +32,6 @@ import {
 import { api, errorMessage } from '../lib/api.ts'
 import { runCommand, useCommand } from '../lib/commands.ts'
 import { useNarrowWindow, useSidebarPrefs } from '../lib/sidebar-prefs.ts'
-import { summarizeAttachments } from './attachments.tsx'
 import { BotAvatar, GroupAvatar } from './bot-avatar.tsx'
 import { NewBotDialog } from './new-bot-dialog.tsx'
 import { OpenBotMark } from './openbot-mark.tsx'
@@ -669,9 +674,9 @@ function RailRow({ row, active, visible, onMenu }: { row: Row; active: boolean; 
   const { bot, chat } = row
   const members = chat && !bot ? membersOf(chat, live.bots) : []
   const working = bot ? bot.working : !!chat?.speaking
-  const needsYou = !!chat?.waitingFor
-  const unread = !!chat?.unread && !(active && visible)
-  const status = needsYou ? 'Needs attention' : unread ? 'Unread activity' : undefined
+  const dot = rowStatus(chat, active && visible)
+  const needsYou = dot === 'attention'
+  const status = dot && statusLabel[dot]
   return (
     <Link
       {...(bot ? { to: '/bots/$botId', params: { botId: bot.id } } : { to: '/groups/$chatId', params: { chatId: row.chatId } })}
@@ -802,68 +807,11 @@ function useTabVisible() {
   return visible
 }
 
-/** The current time, ticking each minute so relative times stay right, and at `wakeAt` (a mute ending) too. */
-function useNow(wakeAt?: number) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 60_000)
-    return () => clearInterval(timer)
-  }, [])
-  useEffect(() => {
-    if (wakeAt === undefined) return
-    // A timer can't wait longer than about 24.8 days; the minute tick catches anything later.
-    const wait = wakeAt - Date.now()
-    if (wait > 2 ** 31 - 1) return
-    const timer = setTimeout(() => setNow(Date.now()), Math.max(wait, 0))
-    return () => clearTimeout(timer)
-  }, [wakeAt])
-  return now
-}
+/** What a status dot says, for screen readers. */
+const statusLabel = { attention: 'Needs attention', unread: 'Unread activity' } as const
 
-/** The mute durations the chat menu offers, in order. */
-const muteChoices: [MuteDuration, string][] = [
-  ['1h', 'For 1 hour'],
-  ['8h', 'For 8 hours'],
-  ['1d', 'For 1 day'],
-  ['forever', 'Until I unmute'],
-]
-
-/** When the next of these chats' mutes ends, or undefined when none will. */
-function nextMuteEnd(chats: Iterable<ChatInfo>): number | undefined {
-  const now = Date.now()
-  let next: number | undefined
-  for (const { mutedUntil } of chats) if (typeof mutedUntil === 'number' && mutedUntil > now && (next === undefined || mutedUntil < next)) next = mutedUntil
-  return next
-}
-
-/**
- * The row's second line, in Grok's priority: the owner's draft, what the bot waits for, its activity (in a group, the
- * member taking its turn), the latest message.
- */
-function secondLine(row: Row, speaking: BotInfo | undefined, draft: string | undefined) {
-  const { bot, chat } = row
-  if (draft?.trim()) return { label: 'Draft: ', text: previewText(draft), className: 'text-muted-foreground', labelClass: 'text-red-foreground' }
-  if (chat?.waitingFor) {
-    return { label: 'Waiting for you: ', text: previewText(chat.waitingFor), className: 'text-muted-foreground', labelClass: 'text-amber-foreground' }
-  }
-  if (bot?.working) return { text: 'Working…', className: 'text-green-foreground' }
-  if (bot?.error) return { text: "Couldn't reach its model", className: 'text-red-foreground' }
-  if (speaking) return { text: `${speaking.name} is taking a turn…`, className: 'text-green-foreground' }
-  const last = chat?.lastMessage
-  if (last) {
-    const text = previewText(last.text) || (last.attachments.length ? summarizeAttachments(last.attachments) : '')
-    // A message between bots shows who it went to or came from: "→ Ana: …", "← Rex: …"; a group's shows who posted it.
-    const prefix = last.botMessage
-      ? `${last.botMessage.direction === 'to' ? '→' : '←'} ${last.botMessage.name}: `
-      : last.author === 'owner'
-        ? 'You: '
-        : bot
-          ? ''
-          : `${last.authorName}: `
-    return { text: prefix + text, className: 'text-muted-foreground' }
-  }
-  return { text: bot?.title ?? 'No messages yet', className: 'text-muted-foreground' }
-}
+const lineClass: Record<RowLine['tone'], string> = { muted: 'text-muted-foreground', working: 'text-green-foreground', error: 'text-red-foreground' }
+const labelClass: Record<NonNullable<RowLine['label']>['tone'], string> = { draft: 'text-red-foreground', waiting: 'text-amber-foreground' }
 
 function ChatRow({
   row,
@@ -903,12 +851,13 @@ function ChatRow({
   const { bot, chat, pinned } = row
   const members = chat && !bot ? membersOf(chat, live.bots) : []
   const speaking = members.find((member) => member.id === chat?.speaking)
-  const line = secondLine(row, speaking, draft)
+  const line = rowLine(row, speaking, draft)
   const working = bot ? bot.working : !!speaking
   // The open chat in a visible tab is being read, so it doesn't show as unread.
-  const needsYou = !!chat?.waitingFor
+  const dot = rowStatus(chat, active && visible)
+  const needsYou = dot === 'attention'
+  const status = dot && statusLabel[dot]
   const unread = !!chat?.unread && !(active && visible)
-  const status = needsYou ? 'Needs attention' : unread ? 'Unread activity' : undefined
 
   const avatar = (working: boolean) =>
     bot ? <BotAvatar style={bot.avatarStyle} shape={bot.avatarShape} color={bot.avatarColor} working={working} waiting={needsYou} /> : <GroupAvatar members={members} working={working} />
@@ -966,8 +915,8 @@ function ChatRow({
           {/* Not on hidden rows: the Hidden section says they're muted. */}
           {chat && !chat.hidden && isMuted(chat, now) && <MutedIcon mutedUntil={chat.mutedUntil} />}
         </span>
-        <span className={cn('truncate text-xs', line.className)}>
-          {line.label && <span className={line.labelClass}>{line.label}</span>}
+        <span className={cn('truncate text-xs', lineClass[line.tone])}>
+          {line.label && <span className={labelClass[line.label.tone]}>{line.label.text}</span>}
           {line.text}
         </span>
       </span>

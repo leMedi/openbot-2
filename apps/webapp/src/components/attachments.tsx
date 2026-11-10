@@ -17,13 +17,6 @@ const isMedia = (file: { mimeType: string }) => isImage(file) || file.mimeType.s
 const isAudio = (file: { mimeType: string }) => file.mimeType.startsWith('audio/')
 const isImage = (file: { mimeType: string }) => file.mimeType.startsWith('image/') && file.mimeType !== 'image/svg+xml'
 
-/** Grok's sidebar summary of a message with files and no text: "Sent 2 images", "Sent a file". */
-export function summarizeAttachments(attachments: readonly { mimeType: string }[]): string {
-  const count = attachments.length
-  const kind = attachments.every(isImage) ? 'image' : attachments.every((file) => file.mimeType.startsWith('video/')) ? 'video' : 'file'
-  return count === 1 ? `Sent ${kind === 'image' ? 'an image' : `a ${kind}`}` : `Sent ${count} ${kind}s`
-}
-
 /**
  * A message's files in Grok's transcript styles: images and videos in a gallery (320px high at most, 10px corners) that
  * opens the full-screen viewer, every other file as a chip that downloads it.

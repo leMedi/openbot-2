@@ -146,6 +146,21 @@ export async function markChatRead(db: Db, chatId: string, upTo?: string): Promi
 }
 
 /**
+ * Marks a chat unread from its latest bot message for the owner (not one between bots): read state goes back to the
+ * message before it, or to none. A chat with no such message stays as it is. Throws `ChatNotFoundError` for no such chat.
+ */
+export async function markChatUnread(db: Db, chatId: string): Promise<void> {
+  const latest = sql`(select max(${messages.id}) from ${messages} where ${messages.chatId} = ${chatId} and ${messages.author} = 'bot' and ${messages.direction} is null)`
+  const before = sql`(select max(${messages.id}) from ${messages} where ${messages.chatId} = ${chatId} and ${messages.id} < ${latest})`
+  const [chat] = await db
+    .update(chats)
+    .set({ lastReadMessageId: sql`case when ${latest} is null then ${chats.lastReadMessageId} else ${before} end` })
+    .where(eq(chats.id, chatId))
+    .returning({ id: chats.id })
+  if (!chat) throw new ChatNotFoundError('No such chat')
+}
+
+/**
  * Pins exactly `chatIds`, in that order, and unpins every other chat. Returns the ids of chats whose place changed.
  * Throws `ChatNotFoundError` when one of them doesn't exist, changing nothing.
  */

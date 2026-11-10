@@ -1,5 +1,17 @@
-import type { ChatInfo, FileHit, MessageHit, RoutineInfo, SearchResults } from '@openbot/api-contract'
-import { adjacentChat, describeSchedule, hitDetail, type LiveStore, navigableChatIds, rankByMatch, sidebarLayout, useLive } from '@openbot/client'
+import type { ChatInfo, MessageHit } from '@openbot/api-contract'
+import {
+  adjacentChat,
+  navigableChatIds,
+  rankByMatch,
+  searchEmptyText,
+  searchesServer,
+  searchHits,
+  searchSections,
+  searchTabLabels,
+  sidebarLayout,
+  useLive,
+  useSearchSources,
+} from '@openbot/client'
 import { cn } from '@openbot/ui/lib/utils'
 import { useNavigate } from '@tanstack/react-router'
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -9,20 +21,10 @@ import { type PaletteTab, paletteTabs } from '../lib/palette.ts'
 import { sidebarPrefs } from '../lib/sidebar-prefs.ts'
 import { useActiveChatId } from './sidebar.tsx'
 
-const tabLabels: Record<PaletteTab, string> = {
-  all: 'All',
-  messages: 'Messages',
-  chats: 'Chats',
-  files: 'Files',
-  routines: 'Routines',
-  actions: 'Actions',
-}
+const tabLabels: Record<PaletteTab, string> = { ...searchTabLabels, actions: 'Actions' }
 
-/** How many entries of each kind the All tab shows. */
+/** How many actions the All tab shows. */
 const allTabLimit = 5
-
-/** How long typing pauses before the server is searched. */
-const searchDelayMs = 150
 
 /** One palette row: an icon, a label, its detail on the right, and what Enter does. */
 type Entry = { key: string; icon: EntryIcon; label: ReactNode; detail: string; run: () => void }
@@ -32,11 +34,6 @@ type EntryIcon = 'bot' | 'group' | 'message' | 'file' | 'routine' | 'action'
 function typing(event: KeyboardEvent): boolean {
   const target = event.target
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
-}
-
-/** A chat's name, as the sidebar shows it. */
-function chatName(live: LiveStore, chat: ChatInfo): string {
-  return chat.kind === 'dm' ? (live.bots?.find((bot) => bot.id === chat.botId)?.name ?? '') : (chat.name ?? '')
 }
 
 /**
@@ -112,8 +109,6 @@ function Palette({
   const [tab, setTab] = useState(initialTab)
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
-  const [routines, setRoutines] = useState<RoutineInfo[]>()
-  const [results, setResults] = useState<{ query: string; found: SearchResults } | { query: string; failed: true }>()
   const list = useRef<HTMLDivElement>(null)
   const restoreFocus = useRef<Element | null>(null)
   const now = Date.now()
@@ -127,54 +122,13 @@ function Palette({
     if (restoreFocus.current instanceof HTMLElement && restoreFocus.current.isConnected) restoreFocus.current.focus()
   }
 
-  // Every bot's routines, read once the palette opens.
-  const botIds = (live.bots ?? []).map((bot) => bot.id).join()
-  useEffect(() => {
-    let current = true
-    Promise.all((live.bots ?? []).map((bot) => api().routines.list({ botId: bot.id })))
-      .then((lists) => current && setRoutines(lists.flat()))
-      .catch(() => current && setRoutines([]))
-    return () => {
-      current = false
-    }
-  }, [botIds]) // `live.bots` changes on every status update; only the bots themselves matter here.
-
-  // Messages and files come from the server's search, once typing pauses.
+  // Every bot's routines, read once the palette opens; messages and files from the server's search, once typing pauses.
   const trimmed = query.trim()
-  const searches = tab === 'all' || tab === 'messages' || tab === 'files'
-  useEffect(() => {
-    if (!searches || !trimmed) return
-    let current = true
-    const timer = setTimeout(() => {
-      api()
-        .chats.search({ query: trimmed })
-        .then(
-          (found) => current && setResults({ query: trimmed, found }),
-          () => current && setResults({ query: trimmed, failed: true }),
-        )
-    }, searchDelayMs)
-    return () => {
-      current = false
-      clearTimeout(timer)
-    }
-  }, [trimmed, searches])
+  const sources = useSearchSources(api(), live.bots, query, tab !== 'actions' && searchesServer(tab))
+  const hits = searchHits({ bots: live.bots, chats: live.chats, routines: sources.routines ?? [], found: sources.found, query, now })
 
-  const chats = [...live.chats.values()]
-    .flatMap((chat) => {
-      const name = chatName(live, chat)
-      return name ? [{ chat, name }] : []
-    })
-    // The latest active first.
-    .sort((a, b) => (b.chat.lastMessage?.createdAt ?? 0) - (a.chat.lastMessage?.createdAt ?? 0))
-
-  const chatEntries = rankByMatch(chats, (entry) => entry.name, query).map(
-    ({ chat, name }): Entry => ({
-      key: `chat:${chat.id}`,
-      icon: chat.kind === 'dm' ? 'bot' : 'group',
-      label: name,
-      detail: chat.hidden ? `${chat.kind === 'dm' ? 'Bot' : 'Group'} · Hidden` : chat.kind === 'dm' ? 'Bot' : 'Group',
-      run: () => onOpenChat(chat),
-    }),
+  const chatEntries = hits.chats.map(
+    ({ chat, name, detail }): Entry => ({ key: `chat:${chat.id}`, icon: chat.kind === 'dm' ? 'bot' : 'group', label: name, detail, run: () => onOpenChat(chat) }),
   )
 
   const actions: { label: string; run: () => void }[] = [
@@ -193,89 +147,44 @@ function Palette({
     (action): Entry => ({ key: `action:${action.label}`, icon: 'action', label: action.label, detail: 'Action', run: action.run }),
   )
 
-  const botNames = new Map((live.bots ?? []).map((bot) => [bot.id, bot.name]))
-  const routineEntries = rankByMatch(routines ?? [], (routine) => `${routine.name} ${botNames.get(routine.botId) ?? ''}`, query).map(
-    (routine): Entry => ({
+  const routineEntries = hits.routines.map(
+    ({ routine, detail }): Entry => ({
       key: `routine:${routine.id}`,
       icon: 'routine',
       label: routine.name,
-      detail: [botNames.get(routine.botId), routine.enabled ? describeSchedule(routine.schedule) : 'Paused'].filter(Boolean).join(' · '),
+      detail,
       run: () => void navigate({ to: '/bots/$botId', params: { botId: routine.botId }, search: { routine: routine.id } }),
     }),
   )
+  const messageEntries = hits.messages.map(
+    ({ hit, chat, detail }): Entry => ({
+      key: `message:${hit.messageId}`,
+      icon: 'message',
+      label: <Snippet parts={hit.snippet} />,
+      detail,
+      run: () => onOpenChat(chat, hit.messageId),
+    }),
+  )
+  const fileEntries = hits.files.map(
+    ({ hit, chat, detail }): Entry => ({
+      key: `file:${hit.messageId}:${hit.attachment.id}`,
+      icon: 'file',
+      label: hit.attachment.name,
+      detail,
+      run: () => onOpenChat(chat, hit.messageId),
+    }),
+  )
 
-  const found = results && results.query === trimmed && 'found' in results ? results.found : undefined
-  const searchFailed = !!results && results.query === trimmed && 'failed' in results
-  const hitChat = (hit: MessageHit | FileHit) => {
-    const chat = live.chats.get(hit.chatId)
-    return chat && { chat, name: chatName(live, chat) }
-  }
-  const messageEntries = (found?.messages ?? []).flatMap((hit): Entry[] => {
-    const where = hitChat(hit)
-    if (!where) return []
-    return [
-      {
-        key: `message:${hit.messageId}`,
-        icon: 'message',
-        label: <Snippet parts={hit.snippet} />,
-        detail: hitDetail(hit, { kind: where.chat.kind, name: where.name }, now),
-        run: () => onOpenChat(where.chat, hit.messageId),
-      },
-    ]
-  })
-  const fileEntries = (found?.files ?? []).flatMap((hit): Entry[] => {
-    const where = hitChat(hit)
-    if (!where) return []
-    return [
-      {
-        key: `file:${hit.messageId}:${hit.attachment.id}`,
-        icon: 'file',
-        label: hit.attachment.name,
-        detail: where.name,
-        run: () => onOpenChat(where.chat, hit.messageId),
-      },
-    ]
-  })
-
-  /** The rows of the open tab, under their headings on All. */
+  /** The rows of the open tab, under their headings on All, where actions follow chats. */
   const sections: { heading?: string; entries: Entry[] }[] =
-    tab === 'all'
-      ? trimmed
-        ? [
-            { heading: 'Chats', entries: chatEntries.slice(0, allTabLimit) },
-            { heading: 'Actions', entries: actionEntries.slice(0, allTabLimit) },
-            { heading: 'Routines', entries: routineEntries.slice(0, allTabLimit) },
-            { heading: 'Messages', entries: messageEntries.slice(0, allTabLimit) },
-            { heading: 'Files', entries: fileEntries.slice(0, allTabLimit) },
-          ]
-        : [{ heading: 'Chats', entries: chatEntries.slice(0, 8) }]
-      : [
-          {
-            entries: {
-              messages: trimmed ? messageEntries : [],
-              chats: chatEntries,
-              files: trimmed ? fileEntries : [],
-              routines: routineEntries,
-              actions: actionEntries,
-            }[tab],
-          },
-        ]
+    tab === 'actions'
+      ? [{ entries: actionEntries }]
+      : searchSections({ chats: chatEntries, routines: routineEntries, messages: messageEntries, files: fileEntries }, tab, query)
+  if (tab === 'all' && trimmed) sections.splice(1, 0, { heading: 'Actions', entries: actionEntries.slice(0, allTabLimit) })
   const entries = sections.flatMap((section) => section.entries)
   const selected = Math.min(active, Math.max(0, entries.length - 1))
 
-  const emptyText = searchFailed
-    ? 'Search unavailable — Try again in a moment.'
-    : tab === 'messages' && !trimmed
-      ? 'Search messages'
-      : tab === 'files' && !trimmed
-        ? 'Search files'
-        : tab === 'routines' && !trimmed && routines?.length === 0
-          ? 'No routines yet'
-          : tab === 'chats' && !chats.length
-            ? 'No chats yet'
-            : searches && trimmed && !found
-              ? 'Searching…'
-              : 'No results'
+  const emptyText = tab === 'actions' ? 'No results' : searchEmptyText({ tab, query, sources, chats: live.chats.size })
 
   useEffect(() => setActive(0), [query, tab])
 

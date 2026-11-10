@@ -161,6 +161,7 @@ describe('system credentials', () => {
       'bots.delete': null,
       'chats.list': await server.client.chats.list(),
       'chats.read': await server.client.chats.read({ chatId: bot.chatId }),
+      'chats.unread': await server.client.chats.unread({ chatId: bot.chatId }),
       'chats.setPinned': await server.client.chats.setPinned({ chatIds: [bot.chatId] }),
       'chats.messages': await server.client.chats.messages({ chatId: bot.chatId }),
       'chats.send': sent,

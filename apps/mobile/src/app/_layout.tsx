@@ -85,7 +85,8 @@ function Root() {
  * looked for: that's Settings → Instance's Edit address.
  */
 function Instance({ url }: { url: string }) {
-  const [store] = useState(() => new LiveStore({ api: instanceApi(url), storage: draftStorage }))
+  const [api] = useState(() => instanceApi(url))
+  const [store] = useState(() => new LiveStore({ api, storage: draftStorage }))
   const active = useAppActive()
   const [block, setBlock] = useState<VersionBlock>()
   const connected = useSyncExternalStore(store.subscribe, () => store.connected)
@@ -102,7 +103,7 @@ function Instance({ url }: { url: string }) {
 
   if (block) return <Blocked kind={block} url={url} onResult={noteCheck} />
   return (
-    <InstanceContext value={{ url, noteCheck }}>
+    <InstanceContext value={{ url, api, noteCheck }}>
       <LiveProvider store={store} active={active}>
         <Stack />
       </LiveProvider>

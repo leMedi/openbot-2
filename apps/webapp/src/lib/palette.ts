@@ -1,3 +1,5 @@
-/** The palette's tabs, in order: Grok's, with bots and groups as Chats, and without Links. */
-export const paletteTabs = ['all', 'messages', 'chats', 'files', 'routines', 'actions'] as const
+import { searchTabs } from '@openbot/client'
+
+/** The palette's tabs, in order: the search tabs both apps show, then the web's Actions. */
+export const paletteTabs = [...searchTabs, 'actions'] as const
 export type PaletteTab = (typeof paletteTabs)[number]

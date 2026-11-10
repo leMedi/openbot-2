@@ -1,6 +1,6 @@
 import type { BotInfo, ChatInfo, SectionInfo } from '@openbot/api-contract'
 import { describe, expect, it } from 'vitest'
-import { adjacentChat, hiddenFoldKey, navigableChatIds, rangeBetween, selectableChatIds, type SidebarLayout, sidebarLayout } from './sidebar.ts'
+import { adjacentChat, hiddenFoldKey, navigableChatIds, rangeBetween, rowLine, selectableChatIds, type SidebarLayout, sidebarLayout } from './sidebar.ts'
 
 const chat = (id: string, changes: Partial<ChatInfo> = {}): ChatInfo => ({
   id,
@@ -119,5 +119,37 @@ describe('moving through the sidebar', () => {
     expect(rangeBetween(selectableChatIds(layout), 'e', 'a')).toEqual(['a', 'c', 'e'])
     expect(rangeBetween(selectableChatIds(layout), 'a', 'a')).toEqual(['a'])
     expect(rangeBetween(selectableChatIds(layout), 'd', 'c')).toEqual(['c'])
+  })
+})
+
+describe("a row's second line", () => {
+  const rex = { ...bot('rex'), name: 'Rex', title: 'Builder', working: false, error: null } as BotInfo
+  const last = (changes: Partial<NonNullable<ChatInfo['lastMessage']>>): ChatInfo['lastMessage'] => ({
+    author: 'bot',
+    authorName: 'Rex',
+    text: 'Done, **green**.',
+    attachments: [],
+    botMessage: null,
+    createdAt: 0,
+    ...changes,
+  })
+  const dm = (changes: Partial<ChatInfo> = {}) => ({ chatId: 'rex', bot: rex, chat: chat('rex', changes), pinned: false })
+
+  it("puts the owner's draft first, then what waits for them, then the bot's activity, then the latest message", () => {
+    const waiting = dm({ waitingFor: 'Which **database**?', lastMessage: last({}) })
+    expect(rowLine(waiting, undefined, 'half a *thought*')).toEqual({ label: { text: 'Draft: ', tone: 'draft' }, text: 'half a thought', tone: 'muted' })
+    expect(rowLine(waiting, undefined, '  ')).toEqual({ label: { text: 'Waiting for you: ', tone: 'waiting' }, text: 'Which database?', tone: 'muted' })
+    expect(rowLine({ ...dm({ lastMessage: last({}) }), bot: { ...rex, working: true } }, undefined, undefined)).toEqual({ text: 'Working…', tone: 'working' })
+    expect(rowLine({ ...dm(), bot: { ...rex, error: 'boom' } }, undefined, undefined)).toEqual({ text: "Couldn't reach its model", tone: 'error' })
+    expect(rowLine(dm({ lastMessage: last({}) }), undefined, undefined)).toEqual({ text: 'Done, green.', tone: 'muted' })
+    expect(rowLine(dm(), undefined, undefined)).toEqual({ text: 'Builder', tone: 'muted' })
+  })
+
+  it('says who wrote the latest message, and sums up files sent alone', () => {
+    expect(rowLine(dm({ lastMessage: last({ author: 'owner', authorName: 'You', text: 'Hi' }) }), undefined, undefined).text).toBe('You: Hi')
+    expect(rowLine(dm({ lastMessage: last({ botMessage: { direction: 'to', botId: 'b', name: 'Ana' } }) }), undefined, undefined).text).toBe('→ Ana: Done, green.')
+    const group = { chatId: 'g', chat: chat('g', { kind: 'group', lastMessage: last({ text: '' , attachments: [{ id: 'a', name: 'a.png', mimeType: 'image/png', size: 1, path: '/a' }, { id: 'b', name: 'b.png', mimeType: 'image/png', size: 1, path: '/b' }] }) }), pinned: false }
+    expect(rowLine(group, undefined, undefined).text).toBe('Rex: Sent 2 images')
+    expect(rowLine(group, { ...rex, name: 'Ana' }, undefined)).toEqual({ text: 'Ana is taking a turn…', tone: 'working' })
   })
 })
