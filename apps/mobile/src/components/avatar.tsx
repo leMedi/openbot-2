@@ -19,7 +19,7 @@ const elements: Record<AvatarNode['tag'], ComponentType<Record<string, unknown>>
 }
 
 /** Draws the avatar data with react-native-svg; the motions aren't played on the phone yet, so the avatar stays still. */
-function draw(node: AvatarNode, key: number): ReactNode {
+export function draw(node: AvatarNode, key: number): ReactNode {
   return createElement(elements[node.tag], { key, ...node.attrs }, node.children?.map(draw))
 }
 

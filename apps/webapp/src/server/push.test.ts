@@ -58,8 +58,10 @@ describe('push notifications', () => {
 
     const [first, second] = server.expoPush.messages
     expect(server.expoPush.messages).toHaveLength(2)
-    expect(first).toMatchObject({ to: iphone.expoPushToken, title: 'Rex', body: 'On it!', sound: 'default', collapseId: bot.chatId })
-    expect(second).toMatchObject({ to: iphone.expoPushToken, title: 'Rex', body: 'Fixed: the lockfile was stale.', collapseId: bot.chatId })
+    expect(first).toMatchObject({ to: iphone.expoPushToken, title: 'Rex', body: 'On it!', sound: 'default', collapseId: bot.chatId, mutableContent: true })
+    expect(first).not.toHaveProperty('interruptionLevel')
+    // iOS replaces the line silently only as a passive notification: no banner, no sound, the screen left dark.
+    expect(second).toMatchObject({ to: iphone.expoPushToken, title: 'Rex', body: 'Fixed: the lockfile was stale.', collapseId: bot.chatId, mutableContent: true, interruptionLevel: 'passive' })
     expect(second).not.toHaveProperty('sound')
     expect([first!.data.quiet, second!.data.quiet]).toEqual([false, true])
 
@@ -117,6 +119,7 @@ describe('push notifications', () => {
       body: 'Which database?',
       sound: 'default',
       collapseId: bot.chatId,
+      mutableContent: true,
       data: { chatId: bot.chatId, messageId: card.id, kind: 'question' },
       badge: 1,
     })

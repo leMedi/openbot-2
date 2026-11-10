@@ -7,11 +7,13 @@ import { ScreenStack, ScreenStackItem } from 'react-native-screens'
 import { Blocked } from '../components/blocked.tsx'
 import { Connect } from '../components/connect.tsx'
 import { FinishSetup } from '../components/finish-setup.tsx'
+import { NotificationAvatars } from '../components/notification-avatars.tsx'
 import { instanceApi } from '../lib/api.ts'
 import { useAppActive } from '../lib/app-state.ts'
 import type { CheckResult } from '../lib/connect/check.ts'
 import { checkFromPhone } from '../lib/connect/phone.ts'
 import { modelDownload } from '../lib/dictation/model.ts'
+import { notificationAvatars } from '../lib/notifications/avatars.ts'
 import { clearShown, phoneOs } from '../lib/notifications/phone.ts'
 import { PhoneNotifications, retryUnregistering } from '../lib/notifications/registration.ts'
 import { useNotificationsBridge } from '../lib/notifications/use-notifications.ts'
@@ -87,10 +89,12 @@ function Root() {
 
   /**
    * Drops what this phone keeps of its instance: its cache, drafts and folded sections, its notifications (the
-   * instance is told to stop sending them by Instance as it's left), and the instance itself.
+   * instance is told to stop sending them by Instance as it's left) and its bots' avatars kept for them, and the
+   * instance itself.
    */
   const forget = () => {
     clearShown()
+    notificationAvatars?.clear()
     forgetInstanceData(kvStorage)
     reloadFolds()
   }
@@ -197,6 +201,7 @@ function Instance({ saved, moveTo, disconnect }: { saved: SavedInstance } & Pick
     >
       <LiveProvider store={store} active={active}>
         <NotificationsBridge />
+        <NotificationAvatars />
         {/* Portrait everywhere but the Screen, which turns with the phone (spec: Screen and take-over → Layout). */}
         <Stack screenOptions={{ orientation: 'portrait' }}>
           <Stack.Screen name="screen/[botId]" options={{ presentation: 'fullScreenModal', headerShown: false, orientation: 'all', animation: 'fade' }} />

@@ -44,6 +44,13 @@ export type ExpoPushMessage = {
   collapseId: string
   /** `default` plays the sound; absent, a replacement arrives quietly. */
   sound?: 'default'
+  /**
+   * iOS: a quiet replacement is passive, which iOS adds to the list without a banner, a sound or lighting the screen;
+   * otherwise a replacement with the same collapse ID shows its banner again, only without the sound.
+   */
+  interruptionLevel?: 'passive'
+  /** iOS: the app's Notification Service Extension draws it as a communication notification, with the bot's avatar. */
+  mutableContent: true
   priority: 'high'
 }
 
@@ -158,7 +165,17 @@ export class PushSender {
     else this.#turns.delete(chat.id)
     await this.#send(
       phones.map(({ expoPushToken }) =>
-        fit({ to: expoPushToken, title, body, data, badge, collapseId: chat.id, ...(loud && { sound: 'default' as const }), priority: 'high' }),
+        fit({
+          to: expoPushToken,
+          title,
+          body,
+          data,
+          badge,
+          collapseId: chat.id,
+          ...(loud ? { sound: 'default' as const } : { interruptionLevel: 'passive' as const }),
+          mutableContent: true,
+          priority: 'high',
+        }),
       ),
     )
   }
