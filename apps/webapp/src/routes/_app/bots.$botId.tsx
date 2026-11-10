@@ -75,6 +75,7 @@ function Dm() {
           typing={bot.working ? bot : undefined}
           allowFiles
           showAuthors={false}
+          covered={fullscreen}
           onScreen={() => setFullscreen(true)}
           onOpenRoutine={(routineId) => {
             setRoutineToOpen({ routineId, requestedAt: Date.now() })

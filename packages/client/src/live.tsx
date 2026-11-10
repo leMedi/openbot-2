@@ -12,6 +12,7 @@ import {
   type SectionInfo,
   type StampedEvent,
   unassignedSectionId,
+  viewingHeartbeatInterval,
 } from '@openbot/api-contract'
 import { type ReactNode, createContext, useContext, useEffect, useRef, useSyncExternalStore } from 'react'
 
@@ -125,6 +126,8 @@ export class LiveStore {
   #eventListeners = new Set<(event: LiveEvent) => void>()
   #version = 0
   readonly #api: ApiClient
+  /** The latest viewing heartbeat sent, so viewing the chat again soon after doesn't send another at once. */
+  #lastViewing: { chatId: string; at: number } | undefined
   readonly #storage: KeyValueStorage
   readonly #snapshot: SnapshotStore | undefined
   /** Settles once the snapshot is restored (or there is none). */
@@ -349,6 +352,24 @@ export class LiveStore {
     this.#setChats(await this.#api.chats.unmute({ chatIds }))
   }
 
+  /**
+   * Tells the instance the owner is viewing the chat, at once and every `viewingHeartbeatInterval` until the returned
+   * stop is called, so it doesn't notify them of it. Call it only while the chat is in front of the owner (see
+   * `viewingHeartbeatInterval`). Viewing it again within the interval, as the owner switches windows, waits for the
+   * heartbeat then due. A failed heartbeat is dropped; the next one follows.
+   */
+  viewChat(chatId: string): () => void {
+    let timer: ReturnType<typeof setTimeout>
+    const beat = () => {
+      this.#lastViewing = { chatId, at: Date.now() }
+      void this.#api.chats.viewing({ chatId }).catch(() => {})
+      timer = setTimeout(beat, viewingHeartbeatInterval)
+    }
+    const last = this.#lastViewing
+    timer = setTimeout(beat, last?.chatId === chatId ? Math.max(0, last.at + viewingHeartbeatInterval - Date.now()) : 0)
+    return () => clearTimeout(timer)
+  }
+
   setDraft(chatId: string, text: string) {
     this.#update(() => {
       const drafts = new Map(this.drafts)
@@ -556,6 +577,13 @@ export function useLiveEvents(listener: (event: LiveEvent) => void) {
   const latest = useRef(listener)
   latest.current = listener
   useEffect(() => store.listen((event) => latest.current(event)), [store])
+}
+
+/** Tells the instance the owner is viewing the chat, as `LiveStore.viewChat`, while `viewing` holds. */
+export function useViewingHeartbeat(chatId: string, viewing: boolean) {
+  const store = useContext(LiveContext)
+  if (!store) throw new Error('useViewingHeartbeat needs a LiveProvider')
+  useEffect(() => (viewing ? store.viewChat(chatId) : undefined), [store, chatId, viewing])
 }
 
 /** The live store, re-rendering on every change. */

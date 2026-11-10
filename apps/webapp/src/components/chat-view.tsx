@@ -1,8 +1,9 @@
 import { type BotInfo, type BotMessageInfo, type MessageInfo, type RoutineChangeCardInfo, maxAttachmentBytes, maxAttachments } from '@openbot/api-contract'
-import { useLive } from '@openbot/client'
+import { useLive, useViewingHeartbeat } from '@openbot/client'
 import { cn } from '@openbot/ui/lib/utils'
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
+import { useFocusedTab } from '../lib/focused-tab.ts'
 import { Attachments, FileIcon, formatSize } from './attachments.tsx'
 import { Markdown } from './markdown.tsx'
 import { PluginReconnectCard } from './plugin-reconnect-card.tsx'
@@ -72,6 +73,7 @@ export function ChatView({
   onOpenRoutine,
   focusMessage,
   onFocused,
+  covered = false,
 }: {
   chatId: string
   /** The sticky bar at the top of the transcript. */
@@ -96,6 +98,8 @@ export function ChatView({
   focusMessage?: string
   /** The view went to `focusMessage` (or it isn't in this chat). */
   onFocused?: () => void
+  /** Something covers the chat, e.g. the bot's screen fullscreen: the owner isn't viewing it. */
+  covered?: boolean
 }) {
   const live = useLive()
   const [loaded, setLoaded] = useState(false)
@@ -159,6 +163,10 @@ export function ChatView({
     document.addEventListener('visibilitychange', markRead)
     return () => document.removeEventListener('visibilitychange', markRead)
   }, [loaded, unread, newest, chatId, live])
+
+  // The owner is viewing this chat while it's visible in a focused tab: the instance doesn't push for it meanwhile.
+  const tabFocused = useFocusedTab()
+  useViewingHeartbeat(chatId, loaded && tabFocused && !covered)
 
   async function send(text: string, files: File[], key: string = crypto.randomUUID()) {
     following.current = true

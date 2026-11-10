@@ -1,4 +1,4 @@
-import { type ApiClient, type BotInfo, type ChatInfo, type LiveEvent, type MessageInfo, type SectionInfo, unassignedSectionId } from '@openbot/api-contract'
+import { type ApiClient, type BotInfo, type ChatInfo, type LiveEvent, type MessageInfo, type SectionInfo, unassignedSectionId, viewingHeartbeatInterval } from '@openbot/api-contract'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type KeyValueStorage, type LiveSnapshot, LiveStore, type SnapshotStore } from './live.tsx'
 
@@ -96,6 +96,9 @@ function fakeServer() {
     stamps: [] as ({ epoch: string; seq: number } | undefined)[],
     /** How many times the store read everything anew. */
     refetches: 0,
+    /** The chats each viewing heartbeat named, in order; a heartbeat fails while `unreachable`. */
+    viewing: [] as string[],
+    unreachable: false,
     drop: () => {},
   }
   const api = {
@@ -120,6 +123,10 @@ function fakeServer() {
     },
     chats: {
       list: async () => server.chats,
+      viewing: async ({ chatId }: { chatId: string }) => {
+        if (server.unreachable) throw new TypeError('Failed to fetch')
+        server.viewing.push(chatId)
+      },
       messages: async ({ chatId }: { chatId: string }) => {
         if (!server.chats.some((entry) => entry.id === chatId)) throw new Error('Chat not found')
         return { messages: [...(server.messages.get(chatId) ?? [])].reverse(), nextCursor: null }
@@ -306,5 +313,62 @@ describe('the snapshot', () => {
     void store.run(controller.signal)
     await vi.advanceTimersByTimeAsync(10)
     expect(store.bots).toBeUndefined()
+  })
+})
+
+describe('the viewing heartbeat', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('says the owner is viewing the chat at once, then every 30 s until stopped', async () => {
+    const { server, api } = fakeServer()
+    const store = new LiveStore({ api, storage: memoryStorage() })
+
+    const stop = store.viewChat('dm-rex')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(server.viewing).toEqual(['dm-rex'])
+    await vi.advanceTimersByTimeAsync(viewingHeartbeatInterval - 1)
+    expect(server.viewing).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1 + viewingHeartbeatInterval)
+    expect(server.viewing).toEqual(['dm-rex', 'dm-rex', 'dm-rex'])
+
+    stop()
+    await vi.advanceTimersByTimeAsync(5 * 60_000)
+    expect(server.viewing).toHaveLength(3)
+  })
+
+  it('keeps beating after a heartbeat fails, as the instance comes back', async () => {
+    const { server, api } = fakeServer()
+    const store = new LiveStore({ api, storage: memoryStorage() })
+    server.unreachable = true
+
+    const stop = store.viewChat('dm-rex')
+    await vi.advanceTimersByTimeAsync(0)
+    server.unreachable = false
+    await vi.advanceTimersByTimeAsync(viewingHeartbeatInterval)
+    expect(server.viewing).toEqual(['dm-rex'])
+    stop()
+  })
+
+  it('waits for the heartbeat due when the chat comes back in front soon after, as the owner switches windows', async () => {
+    const { server, api } = fakeServer()
+    const store = new LiveStore({ api, storage: memoryStorage() })
+
+    let stop = store.viewChat('dm-rex')
+    await vi.advanceTimersByTimeAsync(10_000)
+    stop()
+    stop = store.viewChat('dm-rex')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(server.viewing).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(viewingHeartbeatInterval - 10_000)
+    expect(server.viewing).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(viewingHeartbeatInterval)
+    expect(server.viewing).toHaveLength(3)
+    stop()
+
+    stop = store.viewChat('dm-ana')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(server.viewing.at(-1)).toBe('dm-ana')
+    stop()
   })
 })

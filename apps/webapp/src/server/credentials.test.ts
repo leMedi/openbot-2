@@ -175,6 +175,7 @@ describe('system credentials', () => {
       'chats.show': await server.client.chats.show({ chatIds: [bot.chatId] }),
       'chats.mute': await server.client.chats.mute({ chatIds: [bot.chatId], duration: '1h' }),
       'chats.unmute': await server.client.chats.unmute({ chatIds: [bot.chatId] }),
+      'chats.viewing': await server.client.chats.viewing({ chatId: bot.chatId }),
       'sections.create': section,
       'sections.list': await server.client.sections.list(),
       'sections.rename': await server.client.sections.rename({ sectionId: section.id, name: 'Clients' }),

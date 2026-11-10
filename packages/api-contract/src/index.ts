@@ -285,6 +285,12 @@ export const chat = z.object({
 })
 export type ChatInfo = z.infer<typeof chat>
 
+/**
+ * How often a client says the owner is viewing a chat (`chats.viewing`), while the chat is in front of them: open in
+ * the phone's foreground, or visible in a focused browser tab.
+ */
+export const viewingHeartbeatInterval = 30_000
+
 /** How long the owner can mute a chat for: 1 hour, 8 hours, 1 day, or until they unmute it. */
 export const muteDurations = { '1h': 60 * 60_000, '8h': 8 * 60 * 60_000, '1d': 24 * 60 * 60_000, forever: null } as const
 export type MuteDuration = keyof typeof muteDurations
@@ -929,6 +935,16 @@ export const contract = {
       .route({ method: 'POST', path: '/chats/unmute', summary: 'Unmute chats; returns every chat' })
       .input(z.object({ chatIds }))
       .output(z.array(chat)),
+    viewing: oc
+      .route({
+        method: 'POST',
+        path: '/chats/{chatId}/viewing',
+        summary:
+          "Say the owner is viewing a chat, about every 30 s while it's in front of them: the instance doesn't notify " +
+          "the owner of it until 45 s after the latest heartbeat",
+      })
+      .input(z.object({ chatId: z.string() }))
+      .output(z.void()),
     messages: oc
       .route({
         method: 'GET',

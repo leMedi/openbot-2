@@ -37,6 +37,7 @@ import {
 import type { Db } from '@openbot/db'
 import { installedSkillFile, installSkills, loadCatalog, type Plugin } from '@openbot/plugins'
 import type { ScreenTickets } from './screen-stream.ts'
+import { ViewedChats } from './viewed-chats.ts'
 import { toChatInfo, toMessageInfo, toRoutineInfo, toRoutineRunInfo } from './views.ts'
 
 /** What every procedure runs against; built once per server start, or per test by the harness. */
@@ -77,6 +78,8 @@ export type ServerContext = {
   extraction: MemoryExtraction
   /** Bots' routines, fired on the server's clock; `routines.close()` stops them. */
   routines: Routines
+  /** Which chats the owner is viewing, from the clients' heartbeats; the push sender skips those. */
+  viewedChats: ViewedChats
   /** The plugin catalog, read once on boot, by name. */
   plugins: Plugin[]
   /** The owner's plugin accounts, their sign-ins, grants and connections; `pluginAccounts.close()` closes those. */
@@ -400,6 +403,7 @@ export async function createServerContext({
     ownerTime,
     extraction,
     routines,
+    viewedChats: new ViewedChats(clock),
     plugins,
     pluginAccounts,
   }

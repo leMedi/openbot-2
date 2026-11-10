@@ -607,6 +607,11 @@ export const router = os.router({
 
     unmute: os.chats.unmute.handler(async ({ context, input }) => publishChats(context, await chatMustExist(unmuteChats(context.db, input.chatIds)))),
 
+    viewing: os.chats.viewing.handler(async ({ context, input }) => {
+      if (!(await getChat(context.db, input.chatId))) throw new ORPCError('NOT_FOUND', { message: 'No such chat' })
+      context.viewedChats.heartbeat(input.chatId)
+    }),
+
     messages: os.chats.messages.handler(async ({ context, input }) => {
       if (!(await getChat(context.db, input.chatId))) throw new ORPCError('NOT_FOUND', { message: 'No such chat' })
       const page = await listMessagesPage(context.db, input.chatId, input)

@@ -173,6 +173,8 @@ async function open(
     extraction: context.extraction,
     /** Bots' routines; `routines.idle()` waits for the changes and fires asked so far. */
     routines: context.routines,
+    /** Which chats the owner is viewing, from the clients' heartbeats, as the push sender asks. */
+    viewedChats: context.viewedChats,
     /** The fakes, to keep across a restart. */
     kept: { computer, botComputer, clock } satisfies KeptFakes,
     /** The bots' home, a temporary folder: `shared/`, `bots/<id>/`. */
