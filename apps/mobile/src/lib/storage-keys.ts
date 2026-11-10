@@ -13,6 +13,13 @@ export const foldsKey = 'openbot.chats.folds'
 export const snapshotKey = 'openbot.snapshot'
 /** Set once the Screen's "Turn sideways" hint was shown: a tip about the phone, kept as the phone's own. */
 export const turnHintKey = 'openbot.screen.turnHintShown'
+/**
+ * The voice model's download while it's under way, with whether it may use cellular data, so it carries on after a
+ * restart. The model itself is a file in the app's documents; both belong to the phone, not to an instance.
+ */
+export const dictationDownloadKey = 'openbot.dictation.download'
+/** Android: the id of the voice model's download in the system's DownloadManager, which outlives the app. */
+export const systemDownloadKey = 'openbot.dictation.systemDownload'
 
 /** What belongs to the phone rather than to an instance, kept when it disconnects or moves to another. */
-export const phoneKeys: readonly string[] = [localNetworkAskedKey, turnHintKey]
+export const phoneKeys: readonly string[] = [localNetworkAskedKey, turnHintKey, dictationDownloadKey, systemDownloadKey]

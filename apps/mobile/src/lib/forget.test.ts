@@ -21,9 +21,13 @@ describe("forgetting an instance's data on this phone", () => {
       'openbot.draft.chat-2': 'Another',
       'openbot.chats.folds': '{"research":true}',
       'openbot.localNetworkAsked': 'yes',
+      'openbot.dictation.download': '{"cellular":false}',
     })
     forgetInstanceData(storage)
-    expect([...storage.entries]).toEqual([['openbot.localNetworkAsked', 'yes']])
+    expect([...storage.entries]).toEqual([
+      ['openbot.localNetworkAsked', 'yes'],
+      ['openbot.dictation.download', '{"cellular":false}'],
+    ])
   })
 
   it('removes what it can when storage fails on a key', () => {

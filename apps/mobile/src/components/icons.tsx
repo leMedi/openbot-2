@@ -201,3 +201,11 @@ export const TuckIcon = ({ size = 16, color, out }: IconProps & { out: boolean }
     <Path d={out ? 'M10 4 6 8l4 4' : 'M6 4l4 4-4 4'} />
   </Icon>
 )
+
+/** The composer's mic: Dictation. */
+export const MicIcon = ({ size = 18, color }: IconProps) => (
+  <Icon size={size} color={color}>
+    <Path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
+    <Path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
+  </Icon>
+)

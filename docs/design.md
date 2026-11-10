@@ -25,7 +25,7 @@ This document records the decisions agreed on 2026-10-25 and 2026-10-26. The res
 | Orchestrator | Port + `AllowAllOrchestrator` + audit log | `LlmOrchestrator` (shadow by default), rules UI | |
 | Security | | **Protect secrets from bots with root** (secrets broker) | Optional auth |
 | Evals | Fake world + first suites | More suites, CI pass rates | |
-| Mobile | | | Expo app, on-device Whisper STT, Expo Push |
+| Mobile | | | Expo app, on-device dictation (Parakeet via `whisper.rn`), Expo Push |
 | Marketing site | | Astro site at `OPENBOT_SITE_URL` | |
 
 Not planned: bots creating bots, bot-written or user-written skills (all skills come from plugins), cross-user shared rooms, Slack/Discord channels, running commands on the user's own machine, an egress tunnel, teach-by-demonstration, projects, image generation, in-app evals, the org chart.
@@ -446,7 +446,7 @@ As built (#21):
 
 ## 9. Mobile (P2)
 
-Expo app over the same oRPC API and SSE stream: bots, groups, chat, cards and approvals, a view-only computer preview, and Expo Push notifications. Dictation uses on-device Whisper (`whisper.rn`, model downloaded on first use); the webapp's mic uses whisper WASM. The phone must reach the instance's private network.
+Expo app over the same oRPC API and SSE stream: bots, groups, chat, cards and approvals, a view-only computer preview, and Expo Push notifications. Dictation runs on the phone with Parakeet TDT 0.6B v3 through `whisper.rn`, the model downloaded on first use (#89, #92); the audio never leaves the phone. The phone must reach the instance's private network.
 
 ---
 

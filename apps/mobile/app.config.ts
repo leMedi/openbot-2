@@ -22,12 +22,14 @@ export default ({ config }: ConfigContext): ExpoConfig =>
         'expo-sqlite',
         'expo-image',
         'expo-sharing',
-        // The chat's + → Photo Library / Take Photo. The microphone's prompt is left to Dictation (#115).
+        // The chat's + → Photo Library / Take Photo, and the microphone's prompt, which is Dictation's (the picker's plugin
+        // writes it, and adds Android's RECORD_AUDIO).
         [
           'expo-image-picker',
           {
             photosPermission: 'OpenBot lets you send photos from your library to your bots.',
             cameraPermission: 'OpenBot lets you take a photo to send to your bots.',
+            microphonePermission: 'OpenBot uses the microphone for dictation. What you say is transcribed on this phone and never leaves it.',
           },
         ],
       ],

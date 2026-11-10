@@ -1,14 +1,17 @@
 import { maxAttachments } from '@openbot/api-contract'
 import { attachmentKind, useLive } from '@openbot/client'
 import { Image } from 'expo-image'
-import { useState } from 'react'
-import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { useEffect, useRef, useState } from 'react'
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, type TextInputInstance, View } from 'react-native'
+import { insertDictation, type Selection } from '../lib/dictation/text.ts'
+import { useDictation } from '../lib/dictation/use-dictation.ts'
 import { errorMessage } from '../lib/errors.ts'
 import { chooseFiles, pickFromLibrary, takePhoto } from '../lib/files.ts'
 import { useColors } from '../lib/theme.ts'
 import type { PickedFile } from '../lib/upload.ts'
 import { ActionSheet, type SheetContent } from './action-sheet.tsx'
 import { FileChip } from './attachments.tsx'
+import { DictationToastView, ListeningBar, MicButton, ModelSheet, TranscribingBar } from './dictation.tsx'
 import { CloseIcon, PlusIcon, SendIcon } from './icons.tsx'
 
 /** A picked photo in the composer or going out: its thumbnail, a × while in the composer, and its upload's progress. */
@@ -47,7 +50,7 @@ export function PickedFiles({ files, onRemove, progress, dimmed }: { files: read
 }
 
 /**
- * Writes to the chat: + (Photo Library, Take Photo, Choose File), the field, Send. The chat's unsent text is the live
+ * Writes to the chat: + (Photo Library, Take Photo, Choose File), the field, the mic (Dictation), Send. The chat's unsent text is the live
  * store's draft, kept on the phone, so leaving the chat or restarting the app doesn't lose it. In a DM, a message sent
  * while the bot works supersedes its run, as on the web. Offline, the owner can keep writing but not send.
  */
@@ -82,6 +85,33 @@ export function Composer({
   const [sheet, setSheet] = useState<SheetContent>()
   const room = maxAttachments - files.length
 
+  // Dictation: what was said goes in at the cursor and the keyboard comes up to edit it; it's never sent by itself.
+  const field = useRef<TextInputInstance>(null)
+  const cursor = useRef<Selection>({ start: text.length, end: text.length })
+  const [placed, setPlaced] = useState<Selection>()
+  const [modelSheet, setModelSheet] = useState(false)
+  // The field is back once dictation is over: the keyboard comes up on it to edit what was said.
+  const focusField = useRef(false)
+  const dictation = useDictation({
+    onText: (spoken) => {
+      // The draft as it is now: a transcription can land after leaving the chat.
+      const current = draft ? draft.text : (live.drafts.get(chatId) ?? '')
+      const { text: next, cursor: at } = insertDictation(current, cursor.current, spoken)
+      setText(next)
+      cursor.current = { start: at, end: at }
+      setPlaced({ start: at, end: at })
+      focusField.current = true
+    },
+    onNeedModel: () => setModelSheet(true),
+  })
+  useEffect(() => {
+    if (dictation.phase.kind !== 'idle' || !focusField.current) return
+    focusField.current = false
+    // Once the field is laid out: Android doesn't raise the keyboard for a field focused as it mounts.
+    const timer = setTimeout(() => field.current?.focus(), 150)
+    return () => clearTimeout(timer)
+  }, [dictation.phase.kind])
+
   const pick = (work: () => Promise<PickedFile[] | 'denied'>) => async () => {
     try {
       const picked = await work()
@@ -106,6 +136,7 @@ export function Composer({
 
   return (
     <View style={styles.composer}>
+      {dictation.toast && <DictationToastView toast={dictation.toast} onClose={dictation.dismissToast} />}
       {notice && <Text style={[styles.notice, { color: colors.mutedForeground }]}>{notice}</Text>}
       <View style={[styles.box, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
         {files.length > 0 && (
@@ -113,6 +144,11 @@ export function Composer({
             <PickedFiles files={files} onRemove={onRemove} />
           </ScrollView>
         )}
+        {dictation.phase.kind === 'listening' ? (
+          <ListeningBar levels={dictation.levels} elapsedMs={dictation.elapsedMs} onCancel={dictation.cancel} onDone={() => void dictation.finish()} />
+        ) : dictation.phase.kind === 'transcribing' ? (
+          <TranscribingBar />
+        ) : (
         <View style={styles.row}>
           {onAttach && (
           <Pressable
@@ -141,8 +177,15 @@ export function Composer({
             multiline
             value={text}
             onChangeText={setText}
+            ref={field}
+            selection={placed}
+            onSelectionChange={({ nativeEvent }) => {
+              cursor.current = nativeEvent.selection
+              if (placed) setPlaced(undefined)
+            }}
             style={[styles.field, { color: colors.foreground }]}
           />
+          <MicButton onPress={() => void dictation.start()} />
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Send"
@@ -154,8 +197,10 @@ export function Composer({
             <SendIcon color={colors.primaryForeground} />
           </Pressable>
         </View>
+        )}
       </View>
       <ActionSheet sheet={sheet} onClose={() => setSheet(undefined)} />
+      <ModelSheet visible={modelSheet} onClose={() => setModelSheet(false)} />
     </View>
   )
 }

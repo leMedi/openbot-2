@@ -11,6 +11,7 @@ import { instanceApi } from '../lib/api.ts'
 import { useAppActive } from '../lib/app-state.ts'
 import type { CheckResult } from '../lib/connect/check.ts'
 import { checkFromPhone } from '../lib/connect/phone.ts'
+import { modelDownload } from '../lib/dictation/model.ts'
 import { useNetworkChanges } from '../lib/network.ts'
 import { phoneSnapshot } from '../lib/snapshot.ts'
 import { InstanceContext, type InstanceInfo } from '../lib/instance-context.ts'
@@ -21,6 +22,8 @@ import { kvStorage } from '../lib/storage.ts'
 import { useColors } from '../lib/theme.ts'
 
 export default function RootLayout() {
+  // A voice model download under way when the app last ran carries on (the model belongs to the phone, not to an instance).
+  useEffect(() => modelDownload.resume(), [])
   const dark = useColorScheme() === 'dark'
   const colors = useColors()
   const base = dark ? DarkTheme : DefaultTheme

@@ -4,19 +4,22 @@ import { router, Stack } from 'expo-router'
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native'
 import { Group, GroupedScroll, Row } from '../../components/grouped.tsx'
 import { shownAddress } from '../../lib/connect/address.ts'
+import { modelStatus } from '../../lib/dictation/model-download.ts'
+import { useModelState } from '../../lib/dictation/model.ts'
 import { useInstance } from '../../lib/instance-context.ts'
 import { openOnWeb } from '../../lib/open-on-web.ts'
 import { useColors } from '../../lib/theme.ts'
 
 /**
  * The Settings sheet (spec: Phone screen map, Connect flow): the instance (its address, Edit address, Disconnect),
- * then General, Models, Plugins and Shared memory pushed in the sheet, This phone, and Providers, which open the
+ * then General, Models, Plugins and Shared memory pushed in the sheet, This phone (Dictation), and Providers, which open the
  * instance in the browser, as signing in to a provider stays on the web.
  */
 export default function Settings() {
   const { url, disconnect } = useInstance()
   const live = useLive()
   const colors = useColors()
+  const model = useModelState()
 
   const confirmDisconnect = () =>
     Alert.alert(
@@ -64,10 +67,10 @@ export default function Settings() {
           <Row label="Plugins" onPress={() => router.push('/settings/plugins')} />
           <Row label="Shared memory" onPress={() => router.push('/settings/shared-memory')} />
         </Group>
-        {/* Filled by Notifications on the phone (#116) and Dictation on the phone (#115). */}
+        {/* Notifications is filled by Notifications on the phone (#116). */}
         <Group label="This phone">
           <Row label="Notifications" value="Coming soon" disabled />
-          <Row label="Dictation" value="Coming soon" disabled />
+          <Row label="Dictation" value={modelStatus(model)} onPress={() => router.push('/settings/dictation')} />
         </Group>
         <Group label="On the web" note="Signing in to a provider happens in the browser.">
           <Row label="Providers" tone="link" external onPress={() => openOnWeb(url, '/settings/providers')} />

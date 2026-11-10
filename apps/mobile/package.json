@@ -14,6 +14,7 @@
     "@openbot/api-contract": "workspace:*",
     "@openbot/client": "workspace:*",
     "@openbot/ui": "workspace:*",
+    "buffer": "^6.0.3",
     "expo": "~58.0.23",
     "expo-clipboard": "~58.0.4",
     "expo-constants": "~58.0.15",
@@ -39,7 +40,8 @@
     "react-native-web": "~0.21.4",
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",
-    "unified": "^11.0.5"
+    "unified": "^11.0.5",
+    "whisper.rn": "0.8.0-rc.2"
   },
   "devDependencies": {
     "@babel/plugin-transform-parameters": "~7.29.7",
