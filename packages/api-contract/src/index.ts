@@ -42,10 +42,15 @@ export const bot = z.object({
 })
 export type BotInfo = z.infer<typeof bot>
 
+/** The longest bot name, title and instructions. */
+export const maxBotNameLength = 80
+export const maxBotTitleLength = 120
+export const maxBotInstructionsLength = 20_000
+
 export const newBot = z.object({
-  name: z.string().trim().min(1).max(80),
-  title: z.string().trim().max(120).nullable(),
-  instructions: z.string().max(20_000),
+  name: z.string().trim().min(1).max(maxBotNameLength),
+  title: z.string().trim().max(maxBotTitleLength).nullable(),
+  instructions: z.string().max(maxBotInstructionsLength),
   /** Critter when left out. */
   avatarStyle: z.enum(avatarStyles).optional(),
   avatarShape: z.enum(avatarShapes),
@@ -359,8 +364,10 @@ export const maxGroupMembers = 6
 /** Member bot ids; the server says when there are too few or too many. */
 const groupMembers = z.array(z.string()).max(100)
 
+/** The longest group chat name. */
+export const maxGroupTitleLength = 120
 /** A group chat's name as the owner sets it; blank names it after its members again. */
-const groupTitle = z.string().trim().max(120).nullable()
+const groupTitle = z.string().trim().max(maxGroupTitleLength).nullable()
 
 export const onboarding = z.object({
   /** The owner gave their name. */

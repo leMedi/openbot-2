@@ -1,5 +1,5 @@
 import { type BotInfo, maxGroupMembers, minGroupMembers } from '@openbot/api-contract'
-import { useLive } from '@openbot/client'
+import { groupCandidates, useLive } from '@openbot/client'
 import { cn } from '@openbot/ui/lib/utils'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useRef, useState } from 'react'
@@ -103,9 +103,7 @@ function ToField({ bots, members, onChange }: { bots: BotInfo[]; members: BotInf
   const [highlight, setHighlight] = useState(0)
   const input = useRef<HTMLInputElement>(null)
   const full = members.length >= maxGroupMembers
-  const matches = full
-    ? []
-    : bots.filter((bot) => !members.some((member) => member.id === bot.id) && bot.name.toLowerCase().includes(query.trim().toLowerCase().replace(/^@/, '')))
+  const matches = groupCandidates(bots, members, query)
   const open = query.trim().length > 0 && matches.length > 0
 
   function add(bot: BotInfo | undefined) {

@@ -24,7 +24,7 @@ function draw(node: AvatarNode, key: number): ReactNode {
 }
 
 /** A bot's avatar, as the web draws it, with the green working dot in the corner. */
-export function BotAvatar({ bot, size = 44, working = false, waiting = false }: { bot: BotInfo; size?: number; working?: boolean; waiting?: boolean }) {
+export function BotAvatar({ bot, size = 44, working = false, waiting = false }: { bot: Pick<BotInfo, 'avatarStyle' | 'avatarShape' | 'avatarColor'>; size?: number; working?: boolean; waiting?: boolean }) {
   // An id unique in the app, for the gradient or clip path the drawing defines; react's ids have colons, which url(#…) refuses.
   const id = `avatar${useId().replace(/[^a-zA-Z0-9]/g, '')}`
   const state = waiting ? 'waiting' : working ? 'working' : 'idle'

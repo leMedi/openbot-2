@@ -1,6 +1,6 @@
 import type { PluginInfo } from '@openbot/api-contract'
 import { describe, expect, it } from 'vitest'
-import { pluginSections } from './plugins.ts'
+import { accessPlugins, pluginSections } from './plugins.ts'
 
 function plugin(name: string, displayName: string, changes: Partial<PluginInfo> = {}): PluginInfo {
   return {
@@ -44,5 +44,22 @@ describe('the plugin catalog as Settings → Plugins lists it', () => {
     expect(names(pluginSections(catalog, 'TICKETS'))).toEqual([['Popular', ['linear']]])
     expect(names(pluginSections(catalog, 'pages data'))).toEqual([['Popular', ['notion']]])
     expect(names(pluginSections(catalog, 'pages tickets'))).toEqual([])
+  })
+})
+
+describe("the plugins a bot's Access lists", () => {
+  const account = { slug: 'acme_account1', displayName: 'Work', connectedAt: 0, needsReconnect: false, grantedTo: [] }
+  const plugins = [
+    plugin('acme', 'Acme', { status: 'connected', accounts: [account] }),
+    plugin('box', 'Box'),
+    plugin('zapier', 'Zapier'),
+    plugin('writing', 'Writing', { servers: [], skills: [{ name: 'style', description: 'House style' }] }),
+    plugin('empty', 'Empty', { servers: [], skills: [] }),
+  ]
+
+  it('lists plugins with a connected account and those of skills only, and counts those left to connect', () => {
+    const access = accessPlugins(plugins)
+    expect(access.grantable.map((each) => each.name)).toEqual(['acme', 'writing'])
+    expect(access.unconnected).toBe(2)
   })
 })

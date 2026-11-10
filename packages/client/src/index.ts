@@ -1,4 +1,7 @@
+export * from './audit.ts'
+export * from './bots.ts'
 export * from './chat.ts'
+export * from './deletion.ts'
 export * from './devices.ts'
 export * from './facts.ts'
 export * from './groups.ts'

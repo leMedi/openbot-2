@@ -104,8 +104,8 @@ function Root() {
  * the phone, so the chats and their loaded messages show, read-only, while the instance can't be reached (spec:
  * Offline). The instance's API version is checked again each time the stream connects and the app comes to the
  * foreground, as it may have been updated meanwhile, and with every diagnosis the banner runs. A different instance
- * answering at the address isn't looked for: that's Settings → Instance's Edit address. Settings is a sheet with its
- * own stack.
+ * answering at the address isn't looked for: that's Settings → Instance's Edit address. Settings, New bot and New
+ * group chat are sheets with their own stacks.
  */
 function Instance({ saved, moveTo, disconnect }: { saved: SavedInstance } & Pick<InstanceInfo, 'moveTo' | 'disconnect'>) {
   const { url, instanceId } = saved
@@ -137,6 +137,8 @@ function Instance({ saved, moveTo, disconnect }: { saved: SavedInstance } & Pick
       <LiveProvider store={store} active={active}>
         <Stack>
           <Stack.Screen name="settings" options={{ presentation: 'modal', headerShown: false }} />
+          <Stack.Screen name="new-bot" options={{ presentation: 'modal', headerShown: false }} />
+          <Stack.Screen name="new-group" options={{ presentation: 'modal', headerShown: false }} />
         </Stack>
       </LiveProvider>
     </InstanceContext>

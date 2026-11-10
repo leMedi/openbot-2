@@ -1,4 +1,5 @@
 import type { BotInfo, ChatInfo, RoutineInfo } from '@openbot/api-contract'
+import { deleteWarnings } from '@openbot/client'
 import { type ReactNode, useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
 
@@ -67,8 +68,7 @@ function ConfirmDelete({
 export function ConfirmDeleteBot({ bot, onCancel, onDeleted }: { bot: BotInfo; onCancel: () => void; onDeleted: () => void }) {
   return (
     <ConfirmDelete title={`Delete ${bot.name}?`} remove={() => api().bots.delete({ botId: bot.id })} onCancel={onCancel} onDeleted={onDeleted}>
-      This permanently deletes {bot.name}, its DM and history, and removes it from group chats. Its messages in other chats stay,
-      marked as deleted. This can't be undone.
+      {deleteWarnings.bot(bot.name)}
     </ConfirmDelete>
   )
 }
@@ -77,8 +77,7 @@ export function ConfirmDeleteBot({ bot, onCancel, onDeleted }: { bot: BotInfo; o
 export function ConfirmDeleteGroup({ chat, onCancel, onDeleted }: { chat: ChatInfo; onCancel: () => void; onDeleted: () => void }) {
   return (
     <ConfirmDelete title={`Delete ${chat.name}?`} remove={() => api().groups.delete({ chatId: chat.id })} onCancel={onCancel} onDeleted={onDeleted}>
-      This permanently deletes the group chat, its messages and the files sent in it, and stops its members answering. The
-      members stay, and remember what they said in it. This can't be undone.
+      {deleteWarnings.group}
     </ConfirmDelete>
   )
 }
@@ -92,7 +91,7 @@ export function ConfirmDeleteRoutine({ routine, onCancel, onDeleted }: { routine
       onCancel={onCancel}
       onDeleted={onDeleted}
     >
-      This permanently deletes the routine and its run history. Messages it sent stay in the chat. This can't be undone.
+      {deleteWarnings.routine}
     </ConfirmDelete>
   )
 }
@@ -122,9 +121,7 @@ export function ConfirmDeleteChats({
       onCancel={onCancel}
       onDeleted={onDeleted}
     >
-      {bots > 0 && `This permanently deletes ${bots === 1 ? 'a bot' : `${bots} bots`} with ${bots === 1 ? 'its DM' : 'their DMs'} and history. `}
-      {bots < chats.length && `Group chats lose their messages and files; their members stay. `}
-      This can't be undone.
+      {deleteWarnings.chats(chats.length, bots)}
     </ConfirmDelete>
   )
 }

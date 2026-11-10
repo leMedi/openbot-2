@@ -1,6 +1,6 @@
 import type { BotInfo, BotMessageInfo } from '@openbot/api-contract'
 import { addFiles, chatName, membersOf, type Outgoing, transcript, type TranscriptRow, useLive, useViewingHeartbeat } from '@openbot/client'
-import { router, Stack, useIsFocused, useLocalSearchParams } from 'expo-router'
+import { Stack, useIsFocused, useLocalSearchParams } from 'expo-router'
 import { useHeaderHeight } from 'expo-router/react-navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AccessibilityInfo, ActivityIndicator, Animated, Easing, FlatList, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
@@ -17,6 +17,7 @@ import { hasBlocks, parseMarkdown } from '../../lib/markdown.ts'
 import { errorMessage } from '../../lib/errors.ts'
 import { useInstance } from '../../lib/instance-context.ts'
 import { openOnWeb } from '../../lib/open-on-web.ts'
+import { openBot, openMembers, openRoutine } from '../../lib/routes.ts'
 import { useColors } from '../../lib/theme.ts'
 import { type Sending, updateSends, useSends } from '../../lib/sends.ts'
 import { type PickedFile, sendWithFiles } from '../../lib/upload.ts'
@@ -38,7 +39,8 @@ const pendingFiles = new Map<string, PickedFile[]>()
 
 /**
  * A chat, DM or group, pushed from the Chats list or a search hit (at `message`), as the web's (spec: Phone screen map):
- * the header with the avatar, name and what the bot is doing, and the Screen button in a DM; the transcript, live, with
+ * the header with the avatar, name and what the bot is doing (a tap opens the bot's info, or a group's members), and
+ * the Screen button in a DM; the transcript, live, with
  * cards answered inline and older pages loading as the owner scrolls up; the composer, with files from the photo
  * library, the camera or Files, uploaded with progress. While the chat is in front, it's marked read as messages arrive
  * and the instance is told the owner is viewing it, so it doesn't push for it.
@@ -198,7 +200,6 @@ export default function Chat() {
     return () => clearTimeout(timer)
   }, [highlighted])
 
-  const openRoutine = (botId: string, routineId: string) => router.push({ pathname: '/routine/[routineId]', params: { routineId, botId } })
   // The phone's Screen comes with #114; until then it's the bot's page on the web, where the Screen is.
   const openScreen = (botId: string) => openOnWeb(url, `/bots/${encodeURIComponent(botId)}`)
 
@@ -249,7 +250,13 @@ export default function Chat() {
           // has it) and the transcript is padded below it the same way, keyboard included.
           headerTransparent: true,
           headerTitle: () => (
-            <View style={styles.title} accessible accessibilityRole="header" accessibilityLabel={`${name}, ${subtitle}`}>
+            <Pressable
+              style={({ pressed }) => [styles.title, pressed && { opacity: 0.6 }]}
+              accessibilityRole="button"
+              accessibilityLabel={`${name}, ${subtitle}`}
+              accessibilityHint={bot ? `Opens ${bot.name}'s info` : 'Opens the members'}
+              onPress={() => (bot ? openBot(bot.id) : openMembers(chat.id))}
+            >
               {bot ? <BotAvatar bot={bot} size={30} working={bot.working} /> : <GroupAvatar members={members} size={30} working={!!typing} />}
               <View style={styles.titleText}>
                 <Text numberOfLines={1} style={[styles.name, { color: colors.foreground }]}>
@@ -261,7 +268,7 @@ export default function Chat() {
                   </Text>
                 )}
               </View>
-            </View>
+            </Pressable>
           ),
           headerRight: () =>
             bot ? (

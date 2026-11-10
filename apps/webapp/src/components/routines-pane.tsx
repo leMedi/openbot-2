@@ -3,13 +3,19 @@ import {
   applyRoutineEvent,
   applyRunEvent,
   clockTime,
+  defaultSchedule,
   describeSchedule,
   type EveryUnit,
+  everyUnitLabels,
+  formatInstant,
+  localDate,
   quarterHours,
+  runOutcomes,
   scheduleAliases,
   type ScheduleForm,
   scheduleForm,
   type ScheduleKind,
+  scheduleKindLabels,
   scheduleText,
   sortRoutines,
   switchKind,
@@ -22,9 +28,6 @@ import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
 import { inputClass } from './bot-fields.tsx'
 import { ConfirmDeleteRoutine } from './confirm-delete.tsx'
-
-/** A new routine runs every day at 9:00 AM until the owner picks another schedule. */
-const defaultSchedule = '0 9 * * *'
 
 /** A routine to open in the pane, e.g. from a timeline row's clock chip; a new request each time, even for the same one. */
 export type RoutineToOpen = { routineId: string; requestedAt: number }
@@ -417,24 +420,6 @@ function TextField({
   )
 }
 
-const kindLabels: Record<ScheduleKind, string> = {
-  daily: 'Every day',
-  weekdays: 'On weekdays',
-  weekly: 'Every week',
-  monthly: 'Every month',
-  alias: 'Preset',
-  every: 'Every so often',
-  once: 'Once',
-  cron: 'Custom cron',
-}
-
-const unitLabels: Record<EveryUnit, string> = { m: 'minutes', h: 'hours', d: 'days' }
-
-/** `instant`'s date in `timeZone`, `YYYY-MM-DD`. */
-function localDate(instant: number, timeZone: string | undefined): string {
-  return new Date(instant).toLocaleDateString('en-CA', { timeZone })
-}
-
 /**
  * "When to run": what kind of schedule (a quarter-hour time every day, on weekdays, weekly or monthly; a preset alias;
  * every so often; once; or custom cron) and its details, with the schedule in words below. Pickers save at once, typed
@@ -528,7 +513,7 @@ function ScheduleField({
             onBlur={blur}
             className={cn(inputClass, 'w-20')}
           />
-          {select('Unit', form.unit, Object.entries(unitLabels), (unit) => commit({ ...form, unit: unit as EveryUnit }))}
+          {select('Unit', form.unit, Object.entries(everyUnitLabels), (unit) => commit({ ...form, unit: unit as EveryUnit }))}
         </>
       )
       break
@@ -564,7 +549,7 @@ function ScheduleField({
       <legend className="mb-1 font-medium">When to run</legend>
       <div className="flex flex-col gap-2 rounded-md bg-secondary p-3">
         <div className="flex flex-wrap gap-2">
-          {select('Repeat', form.kind, Object.entries(kindLabels), (kind) =>
+          {select('Repeat', form.kind, Object.entries(scheduleKindLabels), (kind) =>
             commit(switchKind(form, kind as ScheduleKind, localDate(Date.now() + 24 * 60 * 60 * 1000, timeZone))),
           )}
           {details}
@@ -581,17 +566,7 @@ function ScheduleField({
   )
 }
 
-/** `instant` as a date and time in `timeZone`, e.g. "Thu, Oct 29, 9:00 AM". */
-function formatInstant(instant: number, timeZone: string | undefined): string {
-  return new Date(instant).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone })
-}
-
-const runOutcomes: Record<Exclude<RoutineRunInfo['status'], 'running'>, { mark: string; label: string; className: string }> = {
-  ran: { mark: '✓', label: 'Ran', className: 'text-green-foreground' },
-  failed: { mark: '✗', label: 'Failed', className: 'text-destructive-foreground' },
-  skipped_overlap: { mark: 'Skipped', label: 'Skipped: the previous run was still going', className: 'text-xs text-muted-foreground' },
-  missed: { mark: 'Missed', label: 'Missed while the server was down', className: 'text-xs text-muted-foreground' },
-}
+const outcomeClasses = { ok: 'text-green-foreground', error: 'text-destructive-foreground', muted: 'text-xs text-muted-foreground' } as const
 
 /** The routine's runs, newest first, kept up to date live: when each was due, and how it went. */
 function RunHistory({ routine, timeZone }: { routine: RoutineInfo; timeZone: string | undefined }) {
@@ -634,7 +609,7 @@ function RunHistory({ routine, timeZone }: { routine: RoutineInfo; timeZone: str
                 {run.status === 'running' ? (
                   <Spinner label="Running" />
                 ) : (
-                  <span role="img" aria-label={runOutcomes[run.status].label} title={runOutcomes[run.status].label} className={cn('font-medium', runOutcomes[run.status].className)}>
+                  <span role="img" aria-label={runOutcomes[run.status].label} title={runOutcomes[run.status].label} className={cn('font-medium', outcomeClasses[runOutcomes[run.status].tone])}>
                     {runOutcomes[run.status].mark}
                   </span>
                 )}

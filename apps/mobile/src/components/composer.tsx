@@ -60,6 +60,7 @@ export function Composer({
   onAttach,
   onRemove,
   onSend,
+  draft,
 }: {
   chatId: string
   label: string
@@ -67,13 +68,17 @@ export function Composer({
   notice: string | undefined
   /** Whether the instance can be reached; there is no queue of messages to send later. */
   canSend: boolean
-  onAttach: (files: PickedFile[]) => void
+  /** Without it there is no +: the new group chat's first message takes no files. */
+  onAttach?: (files: PickedFile[]) => void
   onRemove: (file: PickedFile) => void
   onSend: (text: string) => void
+  /** The text held elsewhere instead of the chat's draft, for a chat that doesn't exist yet. */
+  draft?: { text: string; onText: (text: string) => void }
 }) {
   const live = useLive()
   const colors = useColors()
-  const text = live.drafts.get(chatId) ?? ''
+  const text = draft ? draft.text : (live.drafts.get(chatId) ?? '')
+  const setText = (next: string) => (draft ? draft.onText(next) : live.setDraft(chatId, next))
   const [sheet, setSheet] = useState<SheetContent>()
   const room = maxAttachments - files.length
 
@@ -85,17 +90,17 @@ export function Composer({
           { text: 'Cancel', style: 'cancel' },
           { text: 'Open Settings', onPress: () => void Linking.openSettings() },
         ])
-      } else if (picked.length) onAttach(picked)
+      } else if (picked.length) onAttach?.(picked)
     } catch (caught) {
       Alert.alert("Couldn't add that", errorMessage(caught))
     }
   }
 
   const send = () => {
-    const draft = text.trim()
-    if ((!draft && !files.length) || !canSend) return
-    live.setDraft(chatId, '')
-    onSend(draft)
+    const trimmed = text.trim()
+    if ((!trimmed && !files.length) || !canSend) return
+    setText('')
+    onSend(trimmed)
   }
   const sendable = canSend && (!!text.trim() || files.length > 0)
 
@@ -109,6 +114,7 @@ export function Composer({
           </ScrollView>
         )}
         <View style={styles.row}>
+          {onAttach && (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Attach"
@@ -127,13 +133,14 @@ export function Composer({
           >
             <PlusIcon size={18} color={colors.foreground} />
           </Pressable>
+          )}
           <TextInput
             accessibilityLabel={label}
             placeholder={label}
             placeholderTextColor={colors.faint}
             multiline
             value={text}
-            onChangeText={(next) => live.setDraft(chatId, next)}
+            onChangeText={setText}
             style={[styles.field, { color: colors.foreground }]}
           />
           <Pressable

@@ -1,5 +1,5 @@
-import { type ChatInfo, isMuted, maxSectionNameLength, type RoutineInfo, type SectionInfo, unassignedSectionId } from '@openbot/api-contract'
-import { hiddenFoldKey, muteChoices, nextMuteEnd, type SearchTab, type SidebarBlock, sidebarLayout, type SidebarRow, useLive, useNow } from '@openbot/client'
+import { type ChatInfo, isMuted, maxBotNameLength, maxGroupTitleLength, maxSectionNameLength, type RoutineInfo, type SectionInfo, unassignedSectionId } from '@openbot/api-contract'
+import { deleteWarnings, hiddenFoldKey, muteChoices, nextMuteEnd, type SearchTab, type SidebarBlock, sidebarLayout, type SidebarRow, useLive, useNow } from '@openbot/client'
 import * as Haptics from 'expo-haptics'
 import { router, Stack } from 'expo-router'
 import { type ReactNode, useState } from 'react'
@@ -14,9 +14,9 @@ import { Prompt, type PromptRequest } from '../components/prompt.tsx'
 import { SearchField } from '../components/search-field.tsx'
 import { SearchResults } from '../components/search-results.tsx'
 import { setFolded, useFolds } from '../lib/folds.ts'
-import { openOnWeb } from '../lib/open-on-web.ts'
 import { errorMessage } from '../lib/errors.ts'
 import { useInstance } from '../lib/instance-context.ts'
+import { openRoutine } from '../lib/routes.ts'
 import { useColors } from '../lib/theme.ts'
 
 /** A section's name as its header shows it. */
@@ -31,7 +31,7 @@ const sectionLabel = (section: SectionInfo) => section.name ?? 'Unassigned'
  */
 export default function Chats() {
   const live = useLive()
-  const { url, api } = useInstance()
+  const { api } = useInstance()
   const colors = useColors()
   const insets = useSafeAreaInsets()
   const folds = useFolds()
@@ -60,10 +60,7 @@ export default function Chats() {
 
   const openChat = (chat: Pick<ChatInfo, 'id'>, message?: string) =>
     router.push({ pathname: '/chat/[chatId]', params: { chatId: chat.id, ...(message && { message }) } })
-  const openRoutine = (routine: RoutineInfo) =>
-    router.push({ pathname: '/routine/[routineId]', params: { routineId: routine.id, botId: routine.botId } })
-  /** The new-bot and new-group sheets come with their own work; until then they open on the web. */
-  const onWeb = (path: string) => openOnWeb(url, path)
+  const openRoutineHit = (routine: RoutineInfo) => openRoutine(routine.botId, routine.id)
 
   function stopEditing() {
     setEditing(false)
@@ -109,7 +106,7 @@ export default function Chats() {
       title: bot ? `Rename ${bot.name}` : 'Rename group chat',
       initial: bot?.name ?? chat?.title ?? '',
       placeholder: bot ? 'Name' : (chat?.name ?? 'Name'),
-      maxLength: bot ? 80 : 120,
+      maxLength: bot ? maxBotNameLength : maxGroupTitleLength,
       // A group without a title is named after its members; a bot needs a name.
       allowBlank: !bot,
       confirm: 'Save',
@@ -127,17 +124,7 @@ export default function Chats() {
     const single = chosen.length === 1 ? chosen[0]! : undefined
     const bots = chosen.filter((row) => row.bot).length
     const title = single ? `Delete ${rowName(single)}?` : `Delete ${chosen.length} chats?`
-    const message = single?.bot
-      ? `This permanently deletes ${single.bot.name}, its DM and history, and removes it from group chats. Its messages in other chats stay, marked as deleted. This can't be undone.`
-      : single
-        ? "This permanently deletes the group chat, its messages and the files sent in it, and stops its members answering. The members stay, and remember what they said in it. This can't be undone."
-        : [
-            bots > 0 && `This permanently deletes ${bots === 1 ? 'a bot' : `${bots} bots`} with ${bots === 1 ? 'its DM' : 'their DMs'} and history.`,
-            bots < chosen.length && 'Group chats lose their messages and files; their members stay.',
-            "This can't be undone.",
-          ]
-            .filter(Boolean)
-            .join(' ')
+    const message = single?.bot ? deleteWarnings.bot(single.bot.name) : single ? deleteWarnings.group : deleteWarnings.chats(chosen.length, bots)
     Alert.alert(title, message, [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -239,8 +226,8 @@ export default function Chats() {
   }
 
   const newMenu: SheetItem[] = [
-    { label: 'New bot', run: () => onWeb('/') },
-    { label: 'New group chat', run: () => onWeb('/groups/new') },
+    { label: 'New bot', run: () => router.push('/new-bot') },
+    { label: 'New group chat', run: () => router.push('/new-group') },
     { label: 'New section', run: () => newSection() },
   ]
 
@@ -354,7 +341,7 @@ export default function Chats() {
       >
         {!editing && <SearchField query={query} searching={searchShown} onQuery={setQuery} onSearching={setSearching} />}
         {searchShown ? (
-          <SearchResults query={query} tab={tab} onTab={setTab} onOpenChat={openChat} onOpenRoutine={openRoutine} />
+          <SearchResults query={query} tab={tab} onTab={setTab} onOpenChat={openChat} onOpenRoutine={openRoutineHit} />
         ) : (
           <>
             <ConnectionBanner />

@@ -10,6 +10,8 @@ export type Loaded<T> = {
   error: string | undefined
   /** Replaces what was loaded, e.g. with what a change returned. */
   setData: (data: T) => void
+  /** Changes what was loaded from what it is now, e.g. by a live event; nothing while it's still loading. */
+  update: (change: (data: T) => T) => void
   reload: () => void
 }
 
@@ -24,7 +26,8 @@ export function useLoadOnFocus<T>(load: () => Promise<T>): Loaded<T> {
   const latest = useRef(0)
   const reload = useCallback(() => {
     const mine = ++latest.current
-    load().then(
+    // A load that throws at once fails like one that rejects.
+    Promise.resolve().then(load).then(
       (next) => {
         if (mine !== latest.current) return
         setData(next)
@@ -50,5 +53,9 @@ export function useLoadOnFocus<T>(load: () => Promise<T>): Loaded<T> {
     latest.current++
     setData(next)
   }, [])
-  return { data, error, setData: replace, reload }
+  // Not dropping a load on its way, unlike setData: live events arrive all the time, and the load brings what they did.
+  const update = useCallback((change: (data: T) => T) => {
+    setData((current) => (current === undefined ? current : change(current)))
+  }, [])
+  return { data, error, setData: replace, update, reload }
 }

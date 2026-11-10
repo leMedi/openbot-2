@@ -183,3 +183,18 @@ export function switchKind(form: ScheduleForm, kind: ScheduleKind, date: string)
       return { kind, expression: scheduleText(form) }
   }
 }
+
+/** What each kind of schedule is called in a routine's "When to run". */
+export const scheduleKindLabels: Record<ScheduleKind, string> = {
+  daily: 'Every day',
+  weekdays: 'On weekdays',
+  weekly: 'Every week',
+  monthly: 'Every month',
+  alias: 'Preset',
+  every: 'Every so often',
+  once: 'Once',
+  cron: 'Custom cron',
+}
+
+/** The units of an "every so often" schedule. */
+export const everyUnitLabels: Record<EveryUnit, string> = { m: 'minutes', h: 'hours', d: 'days' }

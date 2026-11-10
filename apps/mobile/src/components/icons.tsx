@@ -134,3 +134,26 @@ export const ScreenIcon = ({ size = 22, color }: IconProps) => (
     <Path d="M3.5 5h17v11h-17zM9 20h6M12 16v4" />
   </Icon>
 )
+
+/** The bot info screen's Memory button. */
+export const MemoryIcon = ({ size = 22, color }: IconProps) => (
+  <Icon size={size} color={color}>
+    <Path d="M12 5a3 3 0 00-5.9.8A3 3 0 004 11a3 3 0 001 5 3 3 0 005 2.5V5zM12 5a3 3 0 015.9.8A3 3 0 0120 11a3 3 0 01-1 5 3 3 0 01-5 2.5" />
+  </Icon>
+)
+
+/** The bot info screen's Access button: a key. */
+export const KeyIcon = ({ size = 22, color }: IconProps) => (
+  <Icon size={size} color={color}>
+    <Circle cx="8" cy="15" r="4" />
+    <Path d="M11 12l9-9M17 6l3 3" />
+  </Icon>
+)
+
+/** A paused routine. */
+export const PauseIcon = ({ size = 16, color }: IconProps) => (
+  <Icon size={size} color={color} box={16} stroke={1.4}>
+    <Circle cx="8" cy="8" r="6.25" />
+    <Path d="M6.5 5.75v4.5M9.5 5.75v4.5" />
+  </Icon>
+)

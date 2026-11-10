@@ -1,4 +1,5 @@
 import type { BotInfo, PluginAccountInfo, PluginInfo } from '@openbot/api-contract'
+import { accessPlugins } from '@openbot/client'
 import { Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
@@ -36,8 +37,9 @@ export function AccessPane({ bot }: { bot: BotInfo }) {
     )
   }
 
-  const grantable = plugins?.filter((plugin) => plugin.accounts.length > 0 || (!plugin.servers.length && plugin.skills.length > 0))
-  const unconnected = plugins?.filter((plugin) => plugin.servers.length > 0 && !plugin.accounts.length).length ?? 0
+  const access = plugins && accessPlugins(plugins)
+  const grantable = access?.grantable
+  const unconnected = access?.unconnected ?? 0
   return (
     <aside aria-label={`${bot.name}'s access`} className="flex w-[360px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-border-subtle p-5">
       <header className="flex flex-col gap-1">

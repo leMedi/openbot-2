@@ -1,6 +1,6 @@
 import type { RoutineInfo, RoutineRunInfo } from '@openbot/api-contract'
 import { describe, expect, it } from 'vitest'
-import { applyRoutineEvent, applyRunEvent, sortRoutines } from './routines.ts'
+import { applyRoutineEvent, applyRunEvent, formatInstant, localDate, sortRoutines } from './routines.ts'
 
 const routine = (id: string, changes: Partial<RoutineInfo> = {}): RoutineInfo => ({
   id,
@@ -85,5 +85,20 @@ describe('the run history', () => {
     const runs = [run(1)]
     expect(applyRunEvent(runs, 'r1', { type: 'routineRun.updated', botId: 'bot-1', run: run(5, { routineId: 'r2' }) })).toBe(runs)
     expect(applyRunEvent(undefined, 'r1', { type: 'routineRun.updated', botId: 'bot-1', run: run(5) })).toBeUndefined()
+  })
+})
+
+describe('instants as routines show them', () => {
+  // 2026-11-16 01:30 UTC: 10:30 in Tokyo, 01:30 in UTC; the 15th still in Los Angeles.
+  const instant = Date.UTC(2026, 10, 16, 1, 30)
+
+  it("shows a date and time in the owner's time zone, whatever the device's", () => {
+    expect(formatInstant(instant, 'UTC')).toBe('Mon, Nov 16, 1:30 AM')
+    expect(formatInstant(instant, 'Asia/Tokyo')).toBe('Mon, Nov 16, 10:30 AM')
+  })
+
+  it("gives the owner's local date", () => {
+    expect(localDate(instant, 'Asia/Tokyo')).toBe('2026-11-16')
+    expect(localDate(instant, 'America/Los_Angeles')).toBe('2026-11-15')
   })
 })

@@ -176,7 +176,7 @@ export function SegmentedRow<T extends string | number>({
 }
 
 /** A row holding a text field, with an optional label before it. */
-export function FieldRow({ label, multiline, ...props }: { label?: string } & TextInputProps) {
+export function FieldRow({ label, multiline, style, ...props }: { label?: string } & TextInputProps) {
   const colors = useColors()
   return (
     <View style={[styles.row, multiline && styles.multilineRow]}>
@@ -185,7 +185,7 @@ export function FieldRow({ label, multiline, ...props }: { label?: string } & Te
         accessibilityLabel={label}
         placeholderTextColor={colors.faint}
         multiline={multiline}
-        style={[styles.rowLabel, styles.field, multiline && styles.multiline, { color: colors.foreground }]}
+        style={[styles.rowLabel, styles.field, multiline && styles.multiline, { color: colors.foreground }, style]}
         {...props}
       />
     </View>

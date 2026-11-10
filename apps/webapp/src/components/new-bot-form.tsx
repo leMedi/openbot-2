@@ -1,4 +1,5 @@
-import { avatarColors, avatarShapes, type BotInfo, type NewBot } from '@openbot/api-contract'
+import type { BotInfo, NewBot } from '@openbot/api-contract'
+import { randomAvatar } from '@openbot/client'
 import { cn } from '@openbot/ui/lib/utils'
 import { useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
@@ -19,9 +20,10 @@ export function NewBotForm({
   const [name, setName] = useState('')
   const [title, setTitle] = useState('')
   const [instructions, setInstructions] = useState('')
-  const [style, setStyle] = useState<BotInfo['avatarStyle']>('critter')
-  const [shape, setShape] = useState<NewBot['avatarShape']>(() => avatarShapes[Math.floor(Math.random() * avatarShapes.length)]!)
-  const [color, setColor] = useState<NewBot['avatarColor']>(() => avatarColors[Math.floor(Math.random() * avatarColors.length)]!)
+  const [initial] = useState(randomAvatar)
+  const [style, setStyle] = useState<BotInfo['avatarStyle']>(initial.avatarStyle)
+  const [shape, setShape] = useState<NewBot['avatarShape']>(initial.avatarShape)
+  const [color, setColor] = useState<NewBot['avatarColor']>(initial.avatarColor)
   const [model, setModel] = useState(followDefault)
   const { models, defaultModel, error: modelsError } = useModels()
   const [submitError, setError] = useState<string>()

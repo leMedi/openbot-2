@@ -33,3 +33,14 @@ export const pluginStatusLabels: Record<PluginInfo['status'], string> = {
   connected: 'Connected',
   needs_reconnect: 'Needs reconnect',
 }
+
+/**
+ * What a bot's Access pane lists, in the web and on the phone: the plugins with a connected account and those of skills
+ * only, which the owner grants the bot, and how many plugins still have no account connected.
+ */
+export function accessPlugins(plugins: readonly PluginInfo[]): { grantable: PluginInfo[]; unconnected: number } {
+  return {
+    grantable: plugins.filter((plugin) => plugin.accounts.length > 0 || (!plugin.servers.length && plugin.skills.length > 0)),
+    unconnected: plugins.filter((plugin) => plugin.servers.length > 0 && !plugin.accounts.length).length,
+  }
+}

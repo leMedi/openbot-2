@@ -1,9 +1,10 @@
-import { type BotInfo, type PluginAccountInfo, type PluginInfo, pluginAccountNameMax } from '@openbot/api-contract'
+import { type PluginAccountInfo, type PluginInfo, pluginAccountNameMax } from '@openbot/api-contract'
 import { pluginStatusLabels, useLive } from '@openbot/client'
 import { Stack, useLocalSearchParams } from 'expo-router'
 import { useCallback, useState } from 'react'
 import { Alert, StyleSheet, Text, View } from 'react-native'
-import { Group, GroupedScroll, Loading, Note, Row, SwitchRow } from '../../../components/grouped.tsx'
+import { GrantSwitch } from '../../../components/grant-switch.tsx'
+import { Group, GroupedScroll, Loading, Note, Row } from '../../../components/grouped.tsx'
 import { PluginIcon } from '../../../components/plugin-icon.tsx'
 import { Prompt, type PromptRequest } from '../../../components/prompt.tsx'
 import { errorMessage } from '../../../lib/errors.ts'
@@ -154,24 +155,6 @@ function statusColor(status: PluginInfo['status'], colors: ReturnType<typeof use
   if (status === 'connected') return colors.greenForeground
   if (status === 'needs_reconnect') return colors.destructiveForeground
   return colors.mutedForeground
-}
-
-/** Whether `bot` is granted the account or the plugin, switched at once; the switch waits for the instance. */
-function GrantSwitch({ bot, on, change }: { bot: BotInfo; on: boolean; change: (grant: boolean) => Promise<void> }) {
-  const [saving, setSaving] = useState<boolean>()
-  return (
-    <SwitchRow
-      label={bot.name}
-      value={saving ?? on}
-      disabled={saving !== undefined}
-      onChange={(grant) => {
-        setSaving(grant)
-        change(grant)
-          .catch((caught) => Alert.alert(grant ? `Couldn't grant it to ${bot.name}` : `Couldn't take it back from ${bot.name}`, errorMessage(caught)))
-          .finally(() => setSaving(undefined))
-      }}
-    />
-  )
 }
 
 const styles = StyleSheet.create({

@@ -1,4 +1,5 @@
 import { avatarColors, avatarShapes, avatarStyles, type BotInfo, type ModelInfo, type ModelSettings } from '@openbot/api-contract'
+import { avatarStyleLabels } from '@openbot/client'
 import { avatarPalette } from '@openbot/ui/avatar'
 import { cn } from '@openbot/ui/lib/utils'
 import { useEffect, useState } from 'react'
@@ -34,8 +35,6 @@ export type AvatarChange =
   | { avatarShape: BotInfo['avatarShape'] }
   | { avatarColor: BotInfo['avatarColor'] }
 
-const styleLabels: Record<BotInfo['avatarStyle'], string> = { critter: 'Critter', bauhaus: 'Bauhaus' }
-
 /** The avatar preview with its style, shape and color pickers. */
 export function AvatarPicker({
   style,
@@ -66,7 +65,7 @@ export function AvatarPicker({
                 entry === style ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground',
               )}
             >
-              {styleLabels[entry]}
+              {avatarStyleLabels[entry]}
             </button>
           ))}
         </div>
