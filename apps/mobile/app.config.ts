@@ -2,8 +2,9 @@ import type { ConfigContext, ExpoConfig } from 'expo/config'
 import { withNotificationService } from './plugins/notification-service.ts'
 import { withPlainHttp } from './plugins/plain-http.ts'
 
-// A placeholder until Shipping the app (#94) picks the real one; dev builds only meanwhile.
-const bundleId = 'dev.openbot.app'
+// A placeholder until Shipping the app (#94) picks the real one; dev builds only meanwhile. Apple's bundle IDs are unique
+// across teams, so a build for a real iPhone signed by a team that can't have this one sets its own (APP_BUNDLE_ID).
+const bundleId = process.env.APP_BUNDLE_ID ?? 'dev.openbot.app'
 /** Shared by the app and its Notification Service Extension: the bots' avatars for iOS's notifications. */
 const appGroup = `group.${bundleId}`
 
@@ -14,6 +15,8 @@ const appGroup = `group.${bundleId}`
  */
 const easProjectId = process.env.EAS_PROJECT_ID
 const googleServicesFile = process.env.GOOGLE_SERVICES_FILE
+/** The Apple team that signs a build for a real iPhone (`expo run:ios --device`); the simulator needs none. */
+const appleTeamId = process.env.APPLE_TEAM_ID
 
 export default ({ config }: ConfigContext): ExpoConfig => {
   const app: ExpoConfig = {
@@ -25,7 +28,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // Every orientation the phone allows, so the Screen can turn; the app's stack keeps every other screen portrait.
     orientation: 'default',
     userInterfaceStyle: 'automatic',
-    ios: { bundleIdentifier: bundleId, supportsTablet: false },
+    ios: { bundleIdentifier: bundleId, supportsTablet: false, ...(appleTeamId && { appleTeamId }) },
     android: { package: bundleId, ...(googleServicesFile && { googleServicesFile }) },
     extra: {
       ...config.extra,
