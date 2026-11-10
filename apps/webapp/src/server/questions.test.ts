@@ -46,7 +46,7 @@ async function askedByRex(question: Record<string, unknown> = whichDatabase) {
   server.providers.script(callsTools(['askQuestion', question as never]))
   await server.client.chats.send({ chatId: bot.chatId, text: 'Set up storage for the app' })
   await untilIdle(server, bot)
-  const card = (await server.client.chats.messages({ chatId: bot.chatId })).at(-1)!
+  const card = (await server.messages(bot.chatId)).at(-1)!
   return { server, bot, card }
 }
 
@@ -58,7 +58,7 @@ describe('asking the owner a question', () => {
     await server.client.chats.send({ chatId: bot.chatId, text: 'Set up storage for the app' })
     await untilIdle(server, bot)
 
-    const card = (await server.client.chats.messages({ chatId: bot.chatId })).at(-1)
+    const card = (await server.messages(bot.chatId)).at(-1)
 
     expect(card).toMatchObject({
       author: 'bot',
@@ -92,7 +92,7 @@ describe('asking the owner a question', () => {
     await untilIdle(server, bot)
 
     // A round's tool calls run in parallel, as Grok's do, so the message and the card post in either order.
-    const [sent, ...posted] = await server.client.chats.messages({ chatId: bot.chatId })
+    const [sent, ...posted] = await server.messages(bot.chatId)
     expect(sent!.text).toBe('Set up storage for the app')
     expect(posted.map((message) => [message.text, message.card?.type ?? null])).toEqual(
       expect.arrayContaining([
@@ -117,7 +117,7 @@ describe('asking the owner a question', () => {
     await server.client.chats.send({ chatId: bot.chatId, text: 'Choose for me' })
     await untilIdle(server, bot)
 
-    const messages = await server.client.chats.messages({ chatId: bot.chatId })
+    const messages = await server.messages(bot.chatId)
     expect(messages.map((message) => [message.text, message.card])).toEqual([
       ['Choose for me', null],
       ['Never mind.', null],
@@ -134,7 +134,7 @@ describe('answering a question', () => {
     expect(answered.card).toMatchObject({ type: 'question', answer: { option: 0 } })
     await untilIdle(server, bot)
 
-    const messages = await server.client.chats.messages({ chatId: bot.chatId })
+    const messages = await server.messages(bot.chatId)
     expect(messages.at(-2)!.card).toMatchObject({ answer: { option: 0 } })
     expect(messages.at(-1)).toMatchObject({ author: 'bot', text: 'SQLite it is.' })
     const woken = JSON.stringify(server.providers.requests[1]!.messages)
@@ -152,7 +152,7 @@ describe('answering a question', () => {
     })
     await untilIdle(server, bot)
 
-    const messages = await server.client.chats.messages({ chatId: bot.chatId })
+    const messages = await server.messages(bot.chatId)
     expect(messages.find((message) => message.id === card.id)!.card).toMatchObject({ answer: { option: 1 } })
   })
 
@@ -164,7 +164,7 @@ describe('answering a question', () => {
     await server.client.chats.answer({ messageId: card.id, answer: { text: '  MySQL, we already run it  ' } })
     await untilIdle(server, bot)
 
-    const messages = await server.client.chats.messages({ chatId: bot.chatId })
+    const messages = await server.messages(bot.chatId)
     expect(messages.find((message) => message.id === card.id)!.card).toMatchObject({
       answer: { text: 'MySQL, we already run it' },
     })
@@ -180,7 +180,7 @@ describe('answering a question', () => {
     await expect(server.client.chats.answer({ messageId: card.id, answer: { option: 3 } })).rejects.toMatchObject({
       code: 'BAD_REQUEST',
     })
-    const [, question] = await server.client.chats.messages({ chatId: card.chatId })
+    const [, question] = await server.messages(card.chatId)
     expect(question!.card).toMatchObject({ answer: null })
   })
 
@@ -226,7 +226,7 @@ describe('dismissing a question', () => {
     await expect(server.client.chats.answer({ messageId: card.id, answer: { option: 0 } })).rejects.toMatchObject({
       code: 'CONFLICT',
     })
-    const messages = await server.client.chats.messages({ chatId: bot.chatId })
+    const messages = await server.messages(bot.chatId)
     expect(messages.find((message) => message.id === card.id)!.card).toMatchObject({ answer: null, dismissed: true })
     expect((await server.client.chats.list()).find((chat) => chat.id === bot.chatId)!.waitingFor).toBeNull()
     expect((await server.client.bots.list()).find((entry) => entry.id === bot.id)!.working).toBe(false)
@@ -251,14 +251,14 @@ describe('a question dismissed when the owner moves on', () => {
     )
     await server.client.chats.send({ chatId: bot.chatId, text: 'Set up storage for the app' })
     await untilIdle(server, bot)
-    const cards = (await server.client.chats.messages({ chatId: bot.chatId })).filter((message) => message.card)
+    const cards = (await server.messages(bot.chatId)).filter((message) => message.card)
     expect(cards.map((card) => card.card)).toMatchObject([{ dismissed: false }, { dismissed: false }])
 
     server.providers.script(callsTools(['sendMessage', { text: 'Postgres it is.' }]), endsSilently())
     await server.client.chats.send({ chatId: bot.chatId, text: 'We use Postgres everywhere' })
     await untilIdle(server, bot)
 
-    const messages = await server.client.chats.messages({ chatId: bot.chatId })
+    const messages = await server.messages(bot.chatId)
     for (const card of cards) {
       expect(messages.find((message) => message.id === card.id)!.card).toMatchObject({ answer: null, dismissed: true })
       await expect(server.client.chats.answer({ messageId: card.id, answer: { option: 0 } })).rejects.toMatchObject({ code: 'CONFLICT' })
@@ -282,7 +282,7 @@ describe('reminding the bot of unanswered questions', () => {
     )
     await server.client.chats.send({ chatId: bot.chatId, text: 'Set up storage and a server' })
     await untilIdle(server, bot)
-    const questions = (await server.client.chats.messages({ chatId: bot.chatId })).filter((message) => message.card)
+    const questions = (await server.messages(bot.chatId)).filter((message) => message.card)
     const port = questions.find((message) => message.text === 'Which port?')!
     await server.client.chats.dismiss({ messageId: port.id })
 

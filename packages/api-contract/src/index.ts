@@ -231,6 +231,19 @@ export const message = z.object({
 })
 export type MessageInfo = z.infer<typeof message>
 
+/** How many messages a page of `chats.messages` holds unless asked otherwise. */
+export const defaultMessagesPageSize = 50
+/** The most messages a page of `chats.messages` holds. */
+export const maxMessagesPageSize = 200
+
+/** A page of a chat's messages, newest first. */
+export const messagesPage = z.object({
+  messages: z.array(message),
+  /** Passed as `cursor` for the page before this one; null when this page holds the chat's first message. */
+  nextCursor: z.string().nullable(),
+})
+export type MessagesPage = z.infer<typeof messagesPage>
+
 /** How a message's author shows once its bot is deleted (ADR 0009). */
 export const deletedAuthorName = (name: string) => `${name} (deleted)`
 
@@ -855,9 +868,22 @@ export const contract = {
       .input(z.object({ chatIds }))
       .output(z.array(chat)),
     messages: oc
-      .route({ method: 'GET', path: '/chats/{chatId}/messages', summary: "A chat's messages, oldest first" })
-      .input(z.object({ chatId: z.string() }))
-      .output(z.array(message)),
+      .route({
+        method: 'GET',
+        path: '/chats/{chatId}/messages',
+        summary:
+          "A page of a chat's messages, newest first: the latest, or with `cursor` the ones before the page that returned it. " +
+          'Messages that arrive meanwhile never shift a page',
+      })
+      .input(
+        z.object({
+          chatId: z.string(),
+          /** A page's `nextCursor`, for the messages before it; none for the latest. */
+          cursor: z.string().optional(),
+          limit: z.coerce.number().int().min(1).max(maxMessagesPageSize).default(defaultMessagesPageSize),
+        }),
+      )
+      .output(messagesPage),
     send: oc
       .route({
         method: 'POST',

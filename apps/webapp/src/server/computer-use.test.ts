@@ -382,7 +382,7 @@ describe('computer-use sessions', () => {
 
     await shopForSocks(server, bot)
 
-    const messages = await server.client.chats.messages({ chatId: bot.chatId })
+    const messages = await server.messages(bot.chatId)
     expect(messages.map((message) => [message.author, message.text])).toEqual([
       ['owner', 'How much are socks at the shop?'],
       ['bot', 'Socks are $5'],

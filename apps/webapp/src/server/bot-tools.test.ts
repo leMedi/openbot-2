@@ -88,7 +88,7 @@ describe("a bot's own tools", () => {
     expect(search.calls).toEqual([{ query: 'trip' }])
     expect(server.providers.requests[3]!.tools).not.toContain(searchPages)
     expect(toolResults(server, 4).at(-1)).toMatchObject({ tool: searchPages, isError: true, text: expect.stringContaining('not available') })
-    expect((await server.client.chats.messages({ chatId: rex.chatId })).at(-1)?.text).toBe("I can't reach your notes any more.")
+    expect((await server.messages(rex.chatId)).at(-1)?.text).toBe("I can't reach your notes any more.")
   })
 
   it('are checked at each call, so one lost during a run fails with a clear answer', async () => {
@@ -130,6 +130,6 @@ describe("a bot's own tools", () => {
 
     await send(server, rex, 'Hello')
 
-    expect((await server.client.chats.messages({ chatId: rex.chatId })).at(-1)?.text).toBe('On it.')
+    expect((await server.messages(rex.chatId)).at(-1)?.text).toBe('On it.')
   })
 })

@@ -72,7 +72,7 @@ import {
   InvalidRoutineError,
   listSharedFacts,
   listBots,
-  listMessages,
+  listMessagesPage,
   postMessage,
   QuestionAnsweredError,
   QuestionNotFoundError,
@@ -575,7 +575,8 @@ export const router = os.router({
 
     messages: os.chats.messages.handler(async ({ context, input }) => {
       if (!(await getChat(context.db, input.chatId))) throw new ORPCError('NOT_FOUND', { message: 'No such chat' })
-      return (await listMessages(context.db, input.chatId)).map(toMessageInfo)
+      const page = await listMessagesPage(context.db, input.chatId, input)
+      return { messages: page.messages.map(toMessageInfo), nextCursor: page.nextCursor }
     }),
 
     send: os.chats.send.handler(async ({ context, input }) => {

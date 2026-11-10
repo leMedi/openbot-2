@@ -664,7 +664,7 @@ describe('extraction', () => {
     server.providers.memoryModel.script(says('NONE'))
     await chat(server, bot, 'Set up storage for the app.')
     await server.extraction.idle()
-    const card = (await server.client.chats.messages({ chatId: bot.chatId })).at(-1)!
+    const card = (await server.messages(bot.chatId)).at(-1)!
     server.providers.script(callsTools(['sendMessage', { text: 'Postgres it is.' }]), endsSilently())
     server.providers.memoryModel.script(says('new shared profile 4: The owner loves Postgres.'))
 

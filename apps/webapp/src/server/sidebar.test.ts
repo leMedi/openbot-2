@@ -91,7 +91,7 @@ describe('unread chats', () => {
   it('never moves read state back, so a tab that saw less leaves newer messages read', async () => {
     const { server, bot } = await startWithRex()
     await rexReplies(server, bot, 'Fix the build', 'Done.')
-    const seenByOldTab = (await server.client.chats.messages({ chatId: bot.chatId })).at(-1)!.id
+    const seenByOldTab = (await server.messages(bot.chatId)).at(-1)!.id
     await rexReplies(server, bot, 'And the tests?', 'Green too.')
 
     await server.client.chats.read({ chatId: bot.chatId, upTo: seenByOldTab })
@@ -116,7 +116,7 @@ describe('waiting for the owner', () => {
     await untilIdle(server, bot)
     expect(await chatOf(server, bot)).toMatchObject({ waitingFor: 'Which database?', unread: true })
 
-    const card = (await server.client.chats.messages({ chatId: bot.chatId })).at(-1)!
+    const card = (await server.messages(bot.chatId)).at(-1)!
     server.providers.script(endsSilently())
     await server.client.chats.answer({ messageId: card.id, answer: { option: 0 } })
     await untilIdle(server, bot)

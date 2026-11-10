@@ -253,7 +253,7 @@ async function connectAccount(server: TestServer, fake: FakeMcpServer, name: str
  * denies it. Does nothing when there is none: the bot didn't ask, which the scenario's checks catch.
  */
 async function decide(server: TestServer, bot: BotInfo, step: Extract<ScriptStep, { decide: string }>, plugin: FakePlugin) {
-  const card = (await server.client.chats.messages({ chatId: bot.chatId }))
+  const card = (await server.messages(bot.chatId))
     .reverse()
     .find((message) => message.card?.type === 'plugin_request' && message.card.plugin === step.plugin && message.card.decision === null)
   if (!card) return
@@ -385,10 +385,10 @@ const toChatMessage = (message: MessageInfo): ChatMessage => ({
 
 /** Fills `record` with every chat's messages, every bot's tool calls, memory at the end and every bot's routines. */
 async function collect(server: TestServer, scenario: Scenario, bots: Map<string, BotInfo>, groups: Map<string, string>, record: RunRecord) {
-  for (const [name, bot] of bots) record.chats[name] = (await server.client.chats.messages({ chatId: bot.chatId })).map(toChatMessage)
+  for (const [name, bot] of bots) record.chats[name] = (await server.messages(bot.chatId)).map(toChatMessage)
   for (const group of scenario.groups) {
     const chatId = groups.get(group.name)
-    record.chats[group.name] = chatId ? (await server.client.chats.messages({ chatId })).map(toChatMessage) : []
+    record.chats[group.name] = chatId ? (await server.messages(chatId)).map(toChatMessage) : []
   }
   for (const [name, bot] of bots) record.toolCalls.push(...(await server.runtime.toolCalls(bot.id)).map((call) => ({ bot: name, ...call })))
   const source = (fact: FactInfo) => (fact.source === 'owner' ? 'owner' : (fact.sourceBotName ?? 'a bot'))

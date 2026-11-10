@@ -67,7 +67,7 @@ describe('live sync', () => {
     await server.client.chats.send({ chatId: bot.chatId, text: 'Hi' })
     const [seenByFirst, seenBySecond] = await Promise.all([first.read(idle), second.read(idle)])
 
-    const messages = await server.client.chats.messages({ chatId: bot.chatId })
+    const messages = await server.messages(bot.chatId)
     expect(messageIds(seenByFirst)).toEqual(messages.map((message) => message.id))
     expect(messageIds(seenBySecond)).toEqual(messageIds(seenByFirst))
     expect(seenByFirst.map((event) => event.event.type)).toEqual([
@@ -96,7 +96,7 @@ describe('live sync', () => {
     expect(again.hello).toEqual({ ...last, event: { type: 'hello', resumed: true } })
     const missed = await again.read(idle)
     expect(missed.map((event) => event.seq)).toEqual([1, 2, 3, 4, 5, 6].map((step) => last.seq + step))
-    expect(messageIds(missed)).toEqual((await server.client.chats.messages({ chatId: bot.chatId })).map((message) => message.id))
+    expect(messageIds(missed)).toEqual((await server.messages(bot.chatId)).map((message) => message.id))
   })
 
   it('tells a tab reconnecting after a restart to refetch', async () => {

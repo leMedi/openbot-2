@@ -153,7 +153,7 @@ describe('a routine fires', () => {
     expect(read).toContain('[routine \\"Morning digest\\", set by you]')
     expect(read).toContain('Send me a digest.')
     expect(read).toContain('due at 2026-10-29 08:00 (Europe/Paris); this run is on time')
-    const messages = await server.client.chats.messages({ chatId: bot.chatId })
+    const messages = await server.messages(bot.chatId)
     const sent = messages.find((message) => message.text === 'Your digest.')!
     await expect.poll(() => history(server, bot, routine.id)).toEqual([
       {
@@ -178,7 +178,7 @@ describe('a routine fires', () => {
 
     await expect.poll(async () => (await history(server, bot, routine.id)).map((run) => [run.status, run.message])).toEqual([['ran', null]])
     expect(server.providers.requests).toHaveLength(1)
-    expect(await server.client.chats.messages({ chatId: bot.chatId })).toEqual([])
+    expect(await server.messages(bot.chatId)).toEqual([])
   })
 
   it("wakes the bot with its own note's cue for a routine it wrote, and the owner's once the owner edits it", async () => {
@@ -274,7 +274,7 @@ describe('a routine fires', () => {
     expect(audit).toEqual([
       expect.objectContaining({ kind: 'routine', surface: 'routine_change', tool: 'routine', input: expect.objectContaining({ routineId: routine.id, name: 'Check', status: 'failed', error: expect.stringContaining('The provider is down') }) }),
     ])
-    expect(await server.client.chats.messages({ chatId: bot.chatId })).toEqual([])
+    expect(await server.messages(bot.chatId)).toEqual([])
   })
 
   it('fires now on Test run, paused or not, without moving its next run', async () => {

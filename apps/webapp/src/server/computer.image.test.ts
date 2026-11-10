@@ -196,7 +196,7 @@ describe.skipIf(!inRuntimeImage)('bots on the real computer', () => {
     expect(sent.attachments.map((file) => file.path)).toEqual([join(uploads, 'notes.txt'), join(uploads, 'screen.png')])
     expect(JSON.stringify(server.providers.requests[0]!.messages.at(-1))).toContain(pixel.toString('base64'))
     expect(JSON.stringify(server.providers.requests[1]!.messages.at(-1))).toContain('openbot\\nopenbot')
-    const reply = (await server.client.chats.messages({ chatId: rex.chatId })).at(-1)!
+    const reply = (await server.messages(rex.chatId)).at(-1)!
     expect(reply.attachments).toMatchObject([{ name: 'big.bin', size: 5_000_000 }])
     const download = await server.client.chats.attachment({ messageId: reply.id, attachmentId: reply.attachments[0]!.id })
     expect(download.body.size).toBe(5_000_000)
@@ -380,7 +380,7 @@ describe.skipIf(!inRuntimeImage)('bots on the real computer', () => {
       )
       await server.client.chats.send({ chatId: rex.chatId, text: 'What did I order?' })
       await expect.poll(async () => (await server.client.bots.list()).find((entry) => entry.id === rex.id)?.working, { timeout: 60_000 }).toBe(false)
-      const card = (await server.client.chats.messages({ chatId: rex.chatId })).at(-1)!
+      const card = (await server.messages(rex.chatId)).at(-1)!
       expect(card.card).toEqual({ type: 'take_over', instruction: 'Sign in to the shop', outcome: null })
 
       // The owner takes over, then is done: Rex's next session runs on the screen as they left it.

@@ -46,7 +46,7 @@ async function untilIdle(server: TestServer, ...bots: BotInfo[]) {
 
 /** What the DM shows: who posted, the bot message's direction and peer, and the text. */
 const transcript = async (server: TestServer, bot: BotInfo) =>
-  (await server.client.chats.messages({ chatId: bot.chatId })).map((message) => [
+  (await server.messages(bot.chatId)).map((message) => [
     message.authorName,
     message.botMessage ? `${message.botMessage.direction === 'to' ? '→' : '←'} ${message.botMessage.name}` : null,
     message.text,
@@ -209,9 +209,9 @@ describe('a bot messaging another bot', () => {
       { name: 'screen.png', mimeType: 'image/png', path: screen },
       { name: 'chart.png', mimeType: 'image/png', path: chart },
     ]
-    const [incoming] = await server.client.chats.messages({ chatId: ana.chatId })
+    const [incoming] = await server.messages(ana.chatId)
     expect(incoming!.attachments).toMatchObject(files)
-    expect((await server.client.chats.messages({ chatId: rex.chatId }))[1]!.attachments).toMatchObject(files)
+    expect((await server.messages(rex.chatId))[1]!.attachments).toMatchObject(files)
     const download = await server.fetch(`/api/messages/${incoming!.id}/attachments/${incoming!.attachments[1]!.id}`)
     expect(Buffer.from(await download.arrayBuffer())).toEqual(pixel)
     const input = requestsOf(server, 'Ana')[0]!.messages.at(-1)!
@@ -420,7 +420,7 @@ describe('waking a busy bot', () => {
       script: (providers) => providers.scriptFor('Ana', callsTools(['sendMessage', { text: 'Report done.' }]), endsSilently(), endsSilently()),
     })
     await untilIdle(after, ana)
-    const [incoming] = (await after.client.chats.messages({ chatId: ana.chatId })).filter((message) => message.botMessage)
+    const [incoming] = (await after.messages(ana.chatId)).filter((message) => message.botMessage)
     // A replayed message_bot call wakes her with the same input again.
     await after.runtime.wake(ana.id, { lane: 'bot', text: 'Lunch?', id: incoming!.id })
     await untilIdle(after, ana)

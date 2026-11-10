@@ -133,7 +133,7 @@ async function requestedByRex(options: { accounts?: number } = {}) {
   const rex = await server.client.bots.create(newBot('Rex'))
   server.providers.script(callsTools(['request_plugin', tripNotes]))
   await send(server, rex, 'Find my trip notes')
-  const card = (await server.client.chats.messages({ chatId: rex.chatId })).at(-1)!
+  const card = (await server.messages(rex.chatId)).at(-1)!
   return { ...started, rex, card }
 }
 
@@ -148,7 +148,7 @@ const searchesNotes = (server: TestServer, tool = notesSearch) =>
 
 /** The card as it is now. */
 const cardNow = async (server: TestServer, card: MessageInfo) =>
-  (await server.client.chats.messages({ chatId: card.chatId })).find((message) => message.id === card.id)!
+  (await server.messages(card.chatId)).find((message) => message.id === card.id)!
 
 describe('request_plugin', () => {
   it("posts one card in the bot's DM, and asking ends the run", async () => {
@@ -172,7 +172,7 @@ describe('request_plugin', () => {
     await send(server, rex, 'Book a meeting')
 
     expect(toolResults(server, 1).at(-1)).toMatchObject({ tool: 'request_plugin', isError: true, text: expect.stringContaining('notes, style, tasks') })
-    expect((await server.client.chats.messages({ chatId: rex.chatId })).some((message) => message.card)).toBe(false)
+    expect((await server.messages(rex.chatId)).some((message) => message.card)).toBe(false)
   })
 
   it('connects a new account from the card when nothing is connected, grants it, and wakes the bot, which uses its tools', async () => {
@@ -253,7 +253,7 @@ describe('request_plugin', () => {
     const rex = await server.client.bots.create(newBot('Rex'))
     server.providers.script(callsTools(['request_plugin', { plugin: 'style', reason: 'To write in your house style' }]))
     await send(server, rex, 'Write the newsletter')
-    const card = (await server.client.chats.messages({ chatId: rex.chatId })).at(-1)!
+    const card = (await server.messages(rex.chatId)).at(-1)!
     server.providers.script(callsTools(['sendMessage', { text: 'Thanks' }]), endsSilently())
 
     const decided = await server.client.chats.decidePluginRequest({ messageId: card.id, decision: { outcome: 'granted', account: null } })

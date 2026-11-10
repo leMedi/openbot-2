@@ -35,7 +35,7 @@ async function untilIdle(server: TestServer, bot: BotInfo) {
 }
 
 const texts = async (server: TestServer, bot: BotInfo) =>
-  (await server.client.chats.messages({ chatId: bot.chatId })).map((message) => [message.author, message.text])
+  (await server.messages(bot.chatId)).map((message) => [message.author, message.text])
 
 describe('chatting in a DM', () => {
   it('replies in several messages through sendMessage, keeping its thinking and tool calls hidden', async () => {
@@ -51,7 +51,7 @@ describe('chatting in a DM', () => {
     expect((await server.client.bots.list())[0]!.working).toBe(true)
     await untilIdle(server, bot)
 
-    const messages = await server.client.chats.messages({ chatId: bot.chatId })
+    const messages = await server.messages(bot.chatId)
     expect(messages.map((message) => [message.author, message.authorName, message.text])).toEqual([
       ['owner', 'You', 'Can you fix the build?'],
       ['bot', 'Rex', 'On it!'],
@@ -166,7 +166,7 @@ describe('chatting in a DM', () => {
     expect(system).toContain('You are Rexy, Tester.')
     expect(system).toContain('Rexy writes tests first.')
     expect(system).not.toContain('Rex fixes builds')
-    expect((await server.client.chats.messages({ chatId: bot.chatId })).at(-1)).toMatchObject({ authorName: 'Rexy' })
+    expect((await server.messages(bot.chatId)).at(-1)).toMatchObject({ authorName: 'Rexy' })
   })
 
   it('gives bots no tool to delete a bot', async () => {
@@ -189,7 +189,7 @@ describe('chatting in a DM', () => {
     await expect(server.client.chats.send({ chatId: bot.chatId, text: 'Hello?' })).rejects.toMatchObject({
       code: 'PRECONDITION_FAILED',
     })
-    expect(await server.client.chats.messages({ chatId: bot.chatId })).toEqual([])
+    expect(await server.messages(bot.chatId)).toEqual([])
   })
 
   it('keeps one history per bot across messages', async () => {

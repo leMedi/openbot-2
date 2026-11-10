@@ -13,6 +13,9 @@ import { TakeOverCard } from './take-over-card.tsx'
 /** How close to the end still counts as reading the latest messages. */
 const followThresholdPx = 80
 
+/** How close to the top loads older messages, so they're there before the owner reaches it. */
+const loadOlderThresholdPx = 600
+
 /** How long a message the palette opened stays highlighted. */
 const highlightMs = 2000
 
@@ -102,8 +105,8 @@ export function ChatView({
   /** Whether the view follows new messages; false once the owner scrolls up to read. */
   const following = useRef(true)
   const [unseen, setUnseen] = useState(false)
-  /** Messages already there when the chat loaded; they don't animate. */
-  const history = useRef<Set<string>>(undefined)
+  /** The newest message when the chat loaded (null for none): it and older ones, loaded later as the owner scrolls up, don't animate. */
+  const loadedUpTo = useRef<string | null>(undefined)
   const [files, setFilesState] = useState<File[]>(() => pendingFiles.get(chatId) ?? [])
   const [notice, setNotice] = useState<string>()
   const [dragging, setDragging] = useState(false)
@@ -131,7 +134,13 @@ export function ChatView({
   }, [chatId, live])
 
   const messages = live.messages.get(chatId) ?? []
-  if (loaded && !history.current) history.current = new Set(messages.map((message) => message.id))
+  if (loaded && loadedUpTo.current === undefined) loadedUpTo.current = messages.at(-1)?.id ?? null
+  const hasOlder = live.hasOlder(chatId)
+  const loadingOlder = live.loadingOlder(chatId)
+
+  function loadOlder() {
+    live.loadOlder(chatId).catch((caught) => setError(errorMessage(caught)))
+  }
 
   // The owner is reading this chat: what arrives while it's open, and in view, is read too.
   const newest = messages.at(-1)?.id
@@ -171,7 +180,7 @@ export function ChatView({
       mine: message.author === 'owner',
       text: message.text,
       // The owner's own messages already animated in as outgoing ones.
-      enter: !!history.current && !history.current.has(message.id) && message.author !== 'owner',
+      enter: loadedUpTo.current !== undefined && (loadedUpTo.current === null || message.id > loadedUpTo.current) && message.author !== 'owner',
       message,
     })),
     ...outgoing
@@ -189,16 +198,40 @@ export function ChatView({
       .map((entry) => ({ key: entry.key, author: 'owner', authorName: 'You', mine: true, text: entry.text, enter: true, outgoing: entry })),
   ]
 
-  // Follow new messages only while the owner is at the end; otherwise offer to jump there.
-  const rowCount = useRef(rows.length)
+  // Older messages loaded above keep what the owner is reading in place.
+  const oldest = messages[0]?.id
+  const shownOldest = useRef(oldest)
+  const lastScroll = useRef({ height: 0, top: 0 })
   useLayoutEffect(() => {
     const element = scroller.current
-    const grew = rows.length > rowCount.current
-    rowCount.current = rows.length
+    if (!element) return
+    if (oldest && shownOldest.current && oldest < shownOldest.current) {
+      // At the end (the messages didn't fill the view), it stays there.
+      element.scrollTop = following.current ? element.scrollHeight : lastScroll.current.top + element.scrollHeight - lastScroll.current.height
+    }
+    shownOldest.current = oldest
+    lastScroll.current = { height: element.scrollHeight, top: element.scrollTop }
+  })
+
+  // Follow new messages only while the owner is at the end; otherwise offer to jump there.
+  const newestRow = rows.at(-1)?.key
+  const shownNewest = useRef({ key: newestRow, count: rows.length })
+  useLayoutEffect(() => {
+    const element = scroller.current
+    // Not an outgoing message swapped for the server's copy.
+    const arrived = newestRow !== shownNewest.current.key && rows.length > shownNewest.current.count
+    shownNewest.current = { key: newestRow, count: rows.length }
     if (!element) return
     if (following.current) element.scrollTop = element.scrollHeight
-    else if (grew) setUnseen(true)
-  }, [rows.length, typing])
+    else if (arrived) setUnseen(true)
+  }, [newestRow, typing])
+
+  // While the messages don't fill the view, nothing scrolls to load more: load the next older page now.
+  useEffect(() => {
+    const element = scroller.current
+    if (!loaded || !hasOlder || loadingOlder || error || !element) return
+    if (element.scrollHeight - element.clientHeight < loadOlderThresholdPx) loadOlder()
+  })
 
   // The composer growing shrinks the transcript; keep the end in view.
   useEffect(() => {
@@ -215,8 +248,17 @@ export function ChatView({
   const [highlighted, setHighlighted] = useState<string>()
   const focused = useRef(onFocused)
   focused.current = onFocused
+  /** The focused message is older than those loaded: load back to it first. */
+  const seekingFocus = !!focusMessage && !messages.some((message) => message.id === focusMessage) && hasOlder
+  useEffect(() => {
+    if (!loaded || !seekingFocus) return
+    live.loadUntil(chatId, focusMessage!).catch((caught) => {
+      setError(errorMessage(caught))
+      focused.current?.()
+    })
+  }, [loaded, seekingFocus, chatId, focusMessage, live])
   useLayoutEffect(() => {
-    if (!loaded || !focusMessage) return
+    if (!loaded || !focusMessage || seekingFocus) return
     const element = scroller.current?.querySelector(`[data-message-id="${CSS.escape(focusMessage)}"]`)
     if (element) {
       following.current = false
@@ -224,7 +266,7 @@ export function ChatView({
       setHighlighted(focusMessage)
     }
     focused.current?.()
-  }, [loaded, focusMessage])
+  }, [loaded, focusMessage, seekingFocus])
   useEffect(() => {
     if (!highlighted) return
     const timer = setTimeout(() => setHighlighted(undefined), highlightMs)
@@ -272,8 +314,10 @@ export function ChatView({
             const element = event.currentTarget
             following.current = element.scrollHeight - element.scrollTop - element.clientHeight < followThresholdPx
             if (following.current) setUnseen(false)
+            lastScroll.current = { height: element.scrollHeight, top: element.scrollTop }
+            if (element.scrollTop < loadOlderThresholdPx && hasOlder && !loadingOlder && !error) loadOlder()
           }}
-          className="chat-scroll relative flex-1 overflow-y-auto overscroll-contain"
+          className="chat-scroll relative flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
         >
           {header}
           <MessageList
@@ -282,6 +326,8 @@ export function ChatView({
             typing={typing}
             showAuthors={showAuthors}
             loading={!loaded && !error}
+            hasOlder={hasOlder}
+            loadingOlder={loadingOlder}
             highlighted={highlighted}
             onResend={(entry) => void send(entry.text, entry.files, entry.key)}
             onDiscard={(entry) => setOutgoing((list) => list.filter((other) => other.key !== entry.key))}
@@ -330,6 +376,8 @@ function MessageList({
   typing,
   showAuthors,
   loading,
+  hasOlder,
+  loadingOlder,
   highlighted,
   onResend,
   onDiscard,
@@ -342,6 +390,10 @@ function MessageList({
   typing: BotInfo | undefined
   showAuthors: boolean
   loading: boolean
+  /** There are messages older than the first one shown. */
+  hasOlder: boolean
+  /** Older messages are loading above the first one shown. */
+  loadingOlder: boolean
   /** The message the palette opened, highlighted a moment. */
   highlighted: string | undefined
   onResend: (entry: Outgoing) => void
@@ -463,6 +515,8 @@ function MessageList({
   return (
     <div className="px-[max(30px,calc((100%-690px)/2))] pt-2 pb-7">
       {loading && <p className="text-center text-muted-foreground">Loading…</p>}
+      {/* Holds its line while older messages remain, so showing it doesn't move what the owner is reading. */}
+      {!loading && hasOlder && <p className={cn('text-center text-muted-foreground', !loadingOlder && 'invisible')}>Loading…</p>}
       {!loading && rows.length === 0 && <p className="text-center text-muted-foreground">{emptyText}</p>}
       {rows.map((row, index) => (
         <div

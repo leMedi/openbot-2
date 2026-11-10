@@ -149,6 +149,6 @@ describe('bots on the computer', () => {
       code: 'PRECONDITION_FAILED',
       message: expect.stringMatching(/only in OpenBot's runtime image.*no openbot-missing user/s),
     })
-    expect(await server.client.chats.messages({ chatId: bot.chatId })).toEqual([])
+    expect(await server.messages(bot.chatId)).toEqual([])
   })
 })

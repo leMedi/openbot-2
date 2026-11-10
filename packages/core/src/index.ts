@@ -32,7 +32,7 @@ export {
   getChatSummary,
   getMessage,
   listChatSummaries,
-  listMessages,
+  listMessagesPage,
   markChatRead,
   maxBotMessageLength,
   postMessage,

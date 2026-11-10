@@ -63,7 +63,7 @@ async function say(server: TestServer, chatId: string, text: string) {
 
 /** Who posted what in the chat. */
 const transcript = async (server: TestServer, chatId: string) =>
-  (await server.client.chats.messages({ chatId })).map((message) => `${message.authorName}: ${message.text}`)
+  (await server.messages(chatId)).map((message) => `${message.authorName}: ${message.text}`)
 
 /** The bots whose model was asked, in order: one entry per member turn's first request, given the scripts above. */
 const speakers = (server: TestServer) =>
@@ -409,7 +409,7 @@ describe('deleting a group chat', () => {
     await server.client.groups.delete({ chatId: chat.id })
 
     expect((await server.client.chats.list()).map((entry) => entry.id)).not.toContain(chat.id)
-    await expect(server.client.chats.messages({ chatId: chat.id })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(server.messages(chat.id)).rejects.toMatchObject({ code: 'NOT_FOUND' })
     expect((await server.db.select().from(messages)).filter((message) => message.chatId === chat.id)).toEqual([])
     expect(existsSync(join(server.dataDir, 'attachments', chat.id))).toBe(false)
     expect(existsSync(join(server.home, 'shared', 'groups', chat.id))).toBe(false)
@@ -647,7 +647,7 @@ describe('a bot posting to a group chat', () => {
     await server.rounds.idle(chat.id)
     await expect.poll(async () => (await server.client.bots.list()).some((bot) => bot.working)).toBe(false)
 
-    const [, posted] = await server.client.chats.messages({ chatId: chat.id })
+    const [, posted] = await server.messages(chat.id)
     expect(posted).toMatchObject({ text: 'The new logo', attachments: [] })
     expect(JSON.stringify(requestsOf(server, 'Rex').at(-2)!.messages.at(-1))).toContain(
       'Note: the image was NOT delivered: group posts are text only; send images to a teammate directly.',

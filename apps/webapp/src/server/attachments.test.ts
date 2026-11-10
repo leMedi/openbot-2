@@ -60,7 +60,7 @@ describe('attachments from the owner', () => {
     ])
     expect(await readFile(join(uploads, 'notes.txt'), 'utf8')).toBe('Ship on Friday\n')
     expect(await readFile(join(uploads, 'screen.png'))).toEqual(pixel)
-    expect((await server.client.chats.messages({ chatId: bot.chatId }))[0]!.attachments).toEqual(sent.attachments)
+    expect((await server.messages(bot.chatId))[0]!.attachments).toEqual(sent.attachments)
   })
 
   it('never overwrite an earlier upload of the same name', async () => {
@@ -94,7 +94,7 @@ describe('attachments from the owner', () => {
     await expect(server.client.chats.send({ chatId: bot.chatId, text: '  ' })).rejects.toMatchObject({ code: 'BAD_REQUEST' })
     const seven = Array.from({ length: 7 }, (_, index) => textFile(`${index}.txt`, 'x'))
     await expect(server.client.chats.send({ chatId: bot.chatId, text: 'hi', files: seven })).rejects.toMatchObject({ code: 'BAD_REQUEST' })
-    expect(await server.client.chats.messages({ chatId: bot.chatId })).toEqual([])
+    expect(await server.messages(bot.chatId)).toEqual([])
   })
 
   it('have the same limits in the API as on the server', () => {
@@ -166,7 +166,7 @@ describe('attachments from a bot', () => {
     server.providers.script(...turns, endsSilently())
     await server.client.chats.send({ chatId: bot.chatId, text: 'Send me the report' })
     await untilIdle(server, bot)
-    return (await server.client.chats.messages({ chatId: bot.chatId })).filter((message) => message.author === 'bot')
+    return (await server.messages(bot.chatId)).filter((message) => message.author === 'bot')
   }
 
   it('attach a file from the computer that the owner can download, as it was when sent', async () => {

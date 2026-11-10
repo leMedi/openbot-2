@@ -1,5 +1,5 @@
 import { type Chat, type Db, type Message, type NewChat, type NewMessage, bots, chats, messages } from '@openbot/db'
-import { asc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, lt, sql } from 'drizzle-orm'
 import { groupName } from './groups.ts'
 import { oweReply, replied } from './owed-replies.ts'
 import { isRoutineChangeCard } from './routines.ts'
@@ -17,9 +17,24 @@ export async function getMessage(db: Db, id: string): Promise<Message | undefine
   return message
 }
 
-/** A chat's messages, oldest first. */
-export async function listMessages(db: Db, chatId: string): Promise<Message[]> {
-  return db.select().from(messages).where(eq(messages.chatId, chatId)).orderBy(asc(messages.id))
+/**
+ * A page of a chat's messages, newest first: the latest `limit`, or those before `cursor`. The cursor is the page's
+ * oldest message id (ids are time-ordered), so messages that arrive later never shift a page. `nextCursor` is null once
+ * the page reaches the chat's first message.
+ */
+export async function listMessagesPage(
+  db: Db,
+  chatId: string,
+  { cursor, limit }: { cursor?: string; limit: number },
+): Promise<{ messages: Message[]; nextCursor: string | null }> {
+  const rows = await db
+    .select()
+    .from(messages)
+    .where(and(eq(messages.chatId, chatId), cursor === undefined ? undefined : lt(messages.id, cursor)))
+    .orderBy(desc(messages.id))
+    .limit(limit + 1)
+  const page = rows.slice(0, limit)
+  return { messages: page, nextCursor: rows.length > limit ? page.at(-1)!.id : null }
 }
 
 /**

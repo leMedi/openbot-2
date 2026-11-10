@@ -111,7 +111,7 @@ describe('the orchestrator', () => {
     await untilIdle(server, bot)
 
     expect(read.calls).toEqual([{ path: 'notes.md' }])
-    expect((await server.client.chats.messages({ chatId: bot.chatId })).map((message) => message.text)).toContain('Read it')
+    expect((await server.messages(bot.chatId)).map((message) => message.text)).toContain('Read it')
     expect(await server.client.bots.audit({ botId: bot.id })).toEqual([])
   })
 

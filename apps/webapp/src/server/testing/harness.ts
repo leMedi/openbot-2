@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { botUser, type BotRuntimeOptions, type BotTool, type ModelProvider, openBotComputer, type Watchdog } from '@openbot/agent'
 import { createFakeModel, createFakeProviders, fakeBotComputer, type FakeBotComputer, type FakeProviders, type FakeShellScript } from '@openbot/agent/testing'
+import { maxMessagesPageSize, type MessageInfo } from '@openbot/api-contract'
 import { connectBrowser, connectDesktop, connectScreens, defaultDaemonSocket } from '@openbot/computer'
 import { type Orchestrator, type Screens, type ScreenStatus } from '@openbot/core'
 import { createFakeClock, createFakeComputer, type FakeClock, type FakeComputer, type FakeComputerScript } from '@openbot/core/testing'
@@ -176,6 +177,17 @@ async function open(
     kept: { computer, botComputer, clock } satisfies KeptFakes,
     /** The bots' home, a temporary folder: `shared/`, `bots/<id>/`. */
     home,
+    /** Every message of a chat, oldest first, read page by page as the apps read them. */
+    async messages(chatId: string) {
+      const all: MessageInfo[] = []
+      let cursor: string | undefined
+      do {
+        const page = await client.chats.messages({ chatId, cursor, limit: maxMessagesPageSize })
+        all.push(...page.messages)
+        cursor = page.nextCursor ?? undefined
+      } while (cursor)
+      return all.reverse()
+    },
     /** An HTTP request against the API, e.g. `fetch('/api/health')`. */
     fetch: (path: string, init?: RequestInit) => handleApiRequest(new Request(new URL(path, 'http://openbot.test'), init), context),
     /**

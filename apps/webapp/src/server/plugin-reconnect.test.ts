@@ -108,7 +108,7 @@ describe('an expired plugin sign-in', () => {
     expect(toolResults(server).at(-1)!.text).toContain('Notes (Work)')
     expect((await server.client.plugins.get({ name: 'notes' })).accounts).toMatchObject([{ slug: 'account1', needsReconnect: true, grantedTo: [rex.id, ada.id] }])
 
-    const cards = async (bot: BotInfo) => (await server.client.chats.messages({ chatId: bot.chatId })).filter((message) => message.card?.type === 'plugin_reconnect')
+    const cards = async (bot: BotInfo) => (await server.messages(bot.chatId)).filter((message) => message.card?.type === 'plugin_reconnect')
     expect(await cards(rex)).toMatchObject([
       { author: 'bot', authorName: 'Rex', card: { type: 'plugin_reconnect', plugin: 'notes', displayName: 'Notes', account: { slug: 'account1', displayName: 'Work' }, outcome: null } },
     ])
@@ -139,7 +139,7 @@ describe('an expired plugin sign-in', () => {
       accounts: [{ slug: 'account1', displayName: 'Work', needsReconnect: false, grantedTo: [rex.id, ada.id] }],
     })
     for (const bot of [rex, ada]) {
-      const cards = (await server.client.chats.messages({ chatId: bot.chatId })).filter((message) => message.card?.type === 'plugin_reconnect')
+      const cards = (await server.messages(bot.chatId)).filter((message) => message.card?.type === 'plugin_reconnect')
       expect(cards.map((message) => message.card)).toMatchObject([{ outcome: 'reconnected' }])
       expect((await server.client.chats.list()).find((entry) => entry.id === bot.chatId)!.waitingFor).toBeNull()
     }
@@ -162,7 +162,7 @@ describe('an expired plugin sign-in', () => {
 
     await server.client.plugins.disconnectAccount({ name: 'notes', account: 'account1' })
 
-    const cards = (await server.client.chats.messages({ chatId: rex.chatId })).filter((message) => message.card?.type === 'plugin_reconnect')
+    const cards = (await server.messages(rex.chatId)).filter((message) => message.card?.type === 'plugin_reconnect')
     expect(cards.map((message) => message.card)).toMatchObject([{ outcome: 'disconnected' }])
     expect((await server.client.chats.list()).find((entry) => entry.id === rex.chatId)!.waitingFor).toBeNull()
   })
@@ -204,7 +204,7 @@ describe('an expired plugin sign-in', () => {
     await send(server, rex, 'And my roadmap')
 
     expect((await server.client.plugins.get({ name: 'notes' })).accounts).toMatchObject([{ slug: 'account1', needsReconnect: false }])
-    expect((await server.client.chats.messages({ chatId: rex.chatId })).filter((message) => message.card?.type === 'plugin_reconnect')).toEqual([])
+    expect((await server.messages(rex.chatId)).filter((message) => message.card?.type === 'plugin_reconnect')).toEqual([])
     expect(toolResults(server).at(-1)).toEqual({ tool: notesSearch, isError: false, text: 'Found 2 pages about roadmap.' })
   })
 
@@ -221,7 +221,7 @@ describe('an expired plugin sign-in', () => {
     // Granting it again posts no second card.
     await server.client.plugins.grant({ name: 'notes', account: 'account1', botId: ada.id })
 
-    const cards = (await server.client.chats.messages({ chatId: ada.chatId })).filter((message) => message.card?.type === 'plugin_reconnect')
+    const cards = (await server.messages(ada.chatId)).filter((message) => message.card?.type === 'plugin_reconnect')
     expect(cards).toMatchObject([{ authorName: 'Ada', card: { account: { slug: 'account1' }, outcome: null } }])
   })
 })

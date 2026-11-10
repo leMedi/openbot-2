@@ -42,7 +42,7 @@ async function stuckAtSignIn() {
   )
   await server.client.chats.send({ chatId: bot.chatId, text: 'What did I order last?' })
   await untilIdle(server, bot)
-  const card = (await server.client.chats.messages({ chatId: bot.chatId })).at(-1)!
+  const card = (await server.messages(bot.chatId)).at(-1)!
   return { server, bot, card }
 }
 
@@ -86,7 +86,7 @@ describe('a computer-use session stuck on what only the owner can do', () => {
     expect(woken).toContain('The owner handed your screen back after what you asked them to do (\\"Sign in to shop.test with your account\\")')
     expect(woken).toContain('starting with a screenshot to see the current state of the screen')
     expect(woken).toContain(orders.goal)
-    const messages = await server.client.chats.messages({ chatId: bot.chatId })
+    const messages = await server.messages(bot.chatId)
     expect(messages.at(-1)).toMatchObject({ author: 'bot', text: 'Your last order was wool socks' })
     expect((await server.client.chats.list()).find((entry) => entry.id === bot.chatId)!.waitingFor).toBeNull()
   })
@@ -102,7 +102,7 @@ describe('a computer-use session stuck on what only the owner can do', () => {
     expect(woken).toContain("The owner skipped what you asked them to do on your screen")
     expect(woken).toContain("don't immediately ask for the same step again")
     expect(woken).toContain('send the owner a brief message saying what is blocked, then stop and wait for their reply')
-    expect((await server.client.chats.messages({ chatId: bot.chatId })).at(-2)!.card).toMatchObject({ outcome: 'skipped' })
+    expect((await server.messages(bot.chatId)).at(-2)!.card).toMatchObject({ outcome: 'skipped' })
   })
 
   it('is handed back once', async () => {
@@ -119,7 +119,7 @@ describe('a computer-use session stuck on what only the owner can do', () => {
     server.providers.script(callsTools(['sendMessage', { text: 'Hi' }]), endsSilently())
     await server.client.chats.send({ chatId: bot.chatId, text: 'Hi' })
     await untilIdle(server, bot)
-    const [mine] = await server.client.chats.messages({ chatId: bot.chatId })
+    const [mine] = await server.messages(bot.chatId)
 
     await expect(server.client.chats.handBack({ messageId: mine!.id, outcome: 'done' })).rejects.toMatchObject({ code: 'NOT_FOUND' })
   })

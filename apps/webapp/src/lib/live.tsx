@@ -1,4 +1,15 @@
-import { type BotInfo, type ChatInfo, deletedAuthorName, type LiveEvent, type MessageInfo, type SectionInfo, type StampedEvent, unassignedSectionId } from '@openbot/api-contract'
+import {
+  type BotInfo,
+  type ChatInfo,
+  deletedAuthorName,
+  type LiveEvent,
+  maxMessagesPageSize,
+  type MessageInfo,
+  type MessagesPage,
+  type SectionInfo,
+  type StampedEvent,
+  unassignedSectionId,
+} from '@openbot/api-contract'
 import { type ReactNode, createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { api } from './api.ts'
 
@@ -39,6 +50,24 @@ function mergeMessages(messages: readonly MessageInfo[], incoming: readonly Mess
 }
 
 /**
+ * Merges the latest page of a chat's messages into those loaded. When the page doesn't reach back to them (more arrived
+ * meanwhile than a page holds), the older ones are dropped, as they no longer join up; `older` is then the page's cursor.
+ */
+function mergeLatest(
+  messages: readonly MessageInfo[],
+  older: string | null | undefined,
+  page: MessagesPage,
+): { messages: MessageInfo[]; older: string | null } {
+  const latest = [...page.messages].reverse()
+  const oldest = latest[0]?.id
+  if (page.nextCursor === null || oldest === undefined) return { messages: mergeMessages(messages, latest), older: null }
+  const before = messages.filter((message) => message.id < oldest)
+  const joins = !before.length || messages.some((message) => message.id === oldest)
+  if (!joins) return { messages: mergeMessages(messages.filter((message) => message.id >= oldest), latest), older: page.nextCursor }
+  return { messages: mergeMessages(messages, latest), older: before.length && older !== undefined ? older : page.nextCursor }
+}
+
+/**
  * Bots, every chat's sidebar state, and the messages of opened chats, kept in sync with the server over the live event stream. A reconnect
  * resumes from the last stamp seen; when the server can't resume (a restart, or too long away), everything is refetched.
  */
@@ -46,7 +75,12 @@ export class LiveStore {
   bots: BotInfo[] | undefined
   /** Every chat's sidebar state (pinned, unread, waiting), by chat id. */
   chats: ReadonlyMap<string, ChatInfo> = new Map()
+  /** The loaded messages of opened chats, oldest first: the latest page, and older ones as the owner scrolls back. */
   messages: ReadonlyMap<string, MessageInfo[]> = new Map()
+  /** Per opened chat, the cursor of the page before its oldest loaded message; null once its first message is loaded. */
+  #older = new Map<string, string | null>()
+  /** Older pages loading, per chat, so scrolling asks for each one once. */
+  #loadingOlder = new Map<string, Promise<void>>()
   /** The sidebar's sections, top first, Unassigned among them. */
   sections: readonly SectionInfo[] = [{ id: unassignedSectionId, name: null }]
   /** What the owner has typed but not sent, per chat; kept in this browser's storage, or while the app is open if it's blocked. */
@@ -94,12 +128,53 @@ export class LiveStore {
     }
   }
 
-  /** Loads a chat's messages, merging them with any that arrived live meanwhile. */
+  /** Loads a chat's latest messages, merging them with any that arrived live meanwhile. */
   async openChat(chatId: string) {
     // Registered first, so messages that arrive live while loading are kept.
     if (!this.messages.has(chatId)) this.#update(() => this.#setMessages(chatId, []))
-    const loaded = await api().chats.messages({ chatId })
-    this.#update(() => this.#setMessages(chatId, mergeMessages(this.messages.get(chatId) ?? [], loaded)))
+    const page = await api().chats.messages({ chatId })
+    this.#update(() => this.#mergeLatest(chatId, page))
+  }
+
+  /** Whether an opened chat has messages older than those loaded. */
+  hasOlder(chatId: string): boolean {
+    return typeof this.#older.get(chatId) === 'string'
+  }
+
+  /** Whether older messages of a chat are loading. */
+  loadingOlder(chatId: string): boolean {
+    return this.#loadingOlder.has(chatId)
+  }
+
+  /** Loads the page of an opened chat's messages before its oldest loaded one, if there is one. */
+  loadOlder(chatId: string, limit?: number): Promise<void> {
+    const cursor = this.#older.get(chatId)
+    if (typeof cursor !== 'string') return Promise.resolve()
+    const loading = this.#loadingOlder.get(chatId)
+    if (loading) return loading
+    const load = (async () => {
+      let page: MessagesPage | undefined
+      try {
+        page = await api().chats.messages({ chatId, cursor, limit })
+      } finally {
+        this.#update(() => {
+          this.#loadingOlder.delete(chatId)
+          // Unless the chat was refetched or forgotten meanwhile, when this page may no longer join up.
+          if (!page || this.#older.get(chatId) !== cursor) return
+          this.#older.set(chatId, page.nextCursor)
+          this.#setMessages(chatId, mergeMessages(this.messages.get(chatId) ?? [], page.messages))
+        })
+      }
+    })()
+    this.#update(() => this.#loadingOlder.set(chatId, load))
+    return load
+  }
+
+  /** Loads an opened chat's older messages until `messageId` is among them, e.g. a search hit; or until none are left. */
+  async loadUntil(chatId: string, messageId: string) {
+    while (this.hasOlder(chatId) && !this.messages.get(chatId)?.some((message) => message.id === messageId)) {
+      await this.loadOlder(chatId, maxMessagesPageSize)
+    }
   }
 
   /** Adds or replaces a message the server returned, e.g. the owner's own, which also arrives live. */
@@ -253,6 +328,7 @@ export class LiveStore {
       this.chats = chats
       const messages = new Map(this.messages)
       messages.delete(chatId)
+      this.#older.delete(chatId)
       for (const [id, list] of messages) {
         if (!list.some((message) => message.botId === botId)) continue
         messages.set(
@@ -273,6 +349,7 @@ export class LiveStore {
       this.chats = chats
       const messages = new Map(this.messages)
       messages.delete(chatId)
+      this.#older.delete(chatId)
       this.messages = messages
     })
     this.setDraft(chatId, '')
@@ -304,7 +381,7 @@ export class LiveStore {
           this.bots = this.bots?.map((bot) => (bot.id === event.botId ? { ...bot, working: event.working, error: event.error } : bot))
         })
       case 'message.created':
-        // Chats not opened yet load everything when they are.
+        // Chats not opened yet load their latest messages when they are.
         if (this.messages.has(event.message.chatId)) this.addMessage(event.message)
         return
       case 'message.updated':
@@ -324,16 +401,21 @@ export class LiveStore {
       api().bots.list(),
       api().chats.list(),
       api().sections.list(),
+      // Each opened chat's latest page: older pages loaded before are kept when it joins up with them.
       Promise.all([...this.messages.keys()].map(async (chatId) => [chatId, await api().chats.messages({ chatId })] as const)),
     ])
     this.#update(() => {
       this.bots = bots
       this.chats = new Map(summaries.map((chat) => [chat.id, chat]))
       this.sections = sections
-      for (const [chatId, loaded] of chats) {
-        this.#setMessages(chatId, mergeMessages(this.messages.get(chatId) ?? [], loaded))
-      }
+      for (const [chatId, page] of chats) this.#mergeLatest(chatId, page)
     })
+  }
+
+  #mergeLatest(chatId: string, page: MessagesPage) {
+    const merged = mergeLatest(this.messages.get(chatId) ?? [], this.#older.get(chatId), page)
+    this.#older.set(chatId, merged.older)
+    this.#setMessages(chatId, merged.messages)
   }
 
   #setMessages(chatId: string, messages: MessageInfo[]) {

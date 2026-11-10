@@ -91,7 +91,7 @@ describe('bots', () => {
 
     expect(created).toEqual({ ...rex, avatarStyle: 'critter', id: expect.any(String), chatId: expect.any(String), working: false, error: null })
     expect(await server.client.bots.list()).toEqual([created])
-    expect(await server.client.chats.messages({ chatId: created.chatId })).toEqual([])
+    expect(await server.messages(created.chatId)).toEqual([])
   })
 
   it('rejects a name already in use, ignoring case', async () => {
@@ -220,7 +220,7 @@ describe('deleting a bot', () => {
     await server.client.bots.delete({ botId: rexBot.id })
 
     expect((await server.client.bots.list()).map((bot) => bot.name)).toEqual(['Ana'])
-    await expect(server.client.chats.messages({ chatId: rexBot.chatId })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(server.messages(rexBot.chatId)).rejects.toMatchObject({ code: 'NOT_FOUND' })
     const [{ members }] = (await server.db.$client.execute({ sql: 'select members from chats where id = ?', args: [group!.id] })).rows as unknown as [{ members: string }]
     expect(JSON.parse(members)).toEqual([ana.id])
     expect((await allRows(server)).filter((row) => row.includes(rexBot.id))).toEqual([])
@@ -239,7 +239,7 @@ describe('deleting a bot', () => {
 
     await server.client.bots.delete({ botId: rexBot.id })
 
-    expect((await server.client.chats.messages({ chatId: group!.id })).map((message) => [message.authorName, message.botId])).toEqual([
+    expect((await server.messages(group!.id)).map((message) => [message.authorName, message.botId])).toEqual([
       ['Rex (deleted)', null],
       ['Ana', ana.id],
     ])
@@ -261,7 +261,7 @@ describe('deleting a bot', () => {
     await server.client.chats.send({ chatId: again.chatId, text: 'What was the word?' })
     await untilIdle(server, again)
     expect(JSON.stringify(server.providers.requests.at(-1)!.messages)).not.toContain('banana')
-    expect((await server.client.chats.messages({ chatId: again.chatId })).map((message) => message.text)).toEqual(['What was the word?', 'Hi'])
+    expect((await server.messages(again.chatId)).map((message) => message.text)).toEqual(['What was the word?', 'Hi'])
   })
 
   it("doesn't delete a bot that doesn't exist", async () => {

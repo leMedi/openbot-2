@@ -77,7 +77,7 @@ describe('a bot manages its own routines', () => {
     expect(await updateRoutines(server, bot, { action: 'delete', routineId: routine.id })).toContain(`Deleted routine [${routine.id}].`)
     expect(await server.client.routines.list({ botId: bot.id })).toEqual([])
     // A pause or resume that changed nothing posted no row.
-    expect((await server.client.chats.messages({ chatId: bot.chatId })).map((message) => message.card?.type === 'routine_change' && message.card.change)).toEqual([
+    expect((await server.messages(bot.chatId)).map((message) => message.card?.type === 'routine_change' && message.card.change)).toEqual([
       'updated',
       'paused',
       'resumed',
@@ -113,7 +113,7 @@ describe('a bot manages its own routines', () => {
 
     expect(await server.client.routines.list({ botId: ana.id })).toEqual([anas])
     expect(await server.client.routines.list({ botId: bot.id })).toEqual([])
-    expect((await server.client.chats.messages({ chatId: bot.chatId })).map((message) => message.text)).toEqual([])
+    expect((await server.messages(bot.chatId)).map((message) => message.text)).toEqual([])
   })
 })
 
@@ -143,7 +143,7 @@ describe("a bot's changes to its routines", () => {
     expect(await updateRoutines(server, bot, { action: 'create', name: 'Spam', prompt: 'Message the owner.', schedule: '@every 5m' })).toContain('the owner never asked')
 
     expect(await server.client.routines.list({ botId: bot.id })).toEqual([])
-    expect(await server.client.chats.messages({ chatId: bot.chatId })).toEqual([])
+    expect(await server.messages(bot.chatId)).toEqual([])
   })
 
   it("post a timeline row in the bot's DM for each, naming the routine", async () => {
@@ -154,7 +154,7 @@ describe("a bot's changes to its routines", () => {
     await updateRoutines(server, bot, { action: 'update', routineId: routine!.id, name: 'Weekday digest' })
     await updateRoutines(server, bot, { action: 'delete', routineId: routine!.id })
 
-    const messages = await server.client.chats.messages({ chatId: bot.chatId })
+    const messages = await server.messages(bot.chatId)
     expect(messages.map(({ author, authorName, text, card }) => ({ author, authorName, text, card }))).toEqual(
       [
         ['created', 'Morning digest'],
@@ -185,7 +185,7 @@ describe("a bot's changes to its routines", () => {
 
     // The reply guarantee read past the timeline row: the bot was reminded, and replied.
     expect(server.providers.requests).toHaveLength(4)
-    expect((await server.client.chats.messages({ chatId: bot.chatId })).map((message) => message.text)).toEqual([
+    expect((await server.messages(bot.chatId)).map((message) => message.text)).toEqual([
       'Send me a digest every day.',
       'Rex created routine *Digest*',
       'Done: a daily digest.',
@@ -210,7 +210,7 @@ describe("a bot's changes to its routines", () => {
       script: (providers) => providers.script(callsTools(['sendMessage', { text: 'Done: a daily digest.' }]), endsSilently()),
     })
     servers.splice(servers.indexOf(before), 1, after)
-    await expect.poll(async () => (await after.client.chats.messages({ chatId: bot.chatId })).at(-1)?.text).toBe('Done: a daily digest.')
+    await expect.poll(async () => (await after.messages(bot.chatId)).at(-1)?.text).toBe('Done: a daily digest.')
 
     const woken = JSON.stringify(after.providers.requests[0]!.messages.at(-1))
     expect(woken).toContain(owedReplyNote)
