@@ -88,8 +88,8 @@
 }
 
 /*
- * Bot avatars (components/bot-avatar.tsx): blink at rest, move while working, flag a wait for the owner. Each part
- * turns about its own box. Avatars under 24px (`.avatar-still`) and reduced motion stay still.
+ * Bot avatars (components/bot-avatar.tsx; the motions are named in @openbot/ui/avatar): blink at rest, move while
+ * working, flag a wait for the owner. Each part turns about its own box. Avatars under 24px (`.avatar-still`) and reduced motion stay still.
  */
 @layer components {
   .avatar svg * {

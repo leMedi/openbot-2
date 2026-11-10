@@ -1,5 +1,6 @@
 /*
- * Grok Bot's design tokens (docs/grok-bot/05-ui.md §7) mapped onto shadcn's variables (§8.1).
+ * Grok Bot's design tokens (docs/grok-bot/05-ui.md §7) mapped onto shadcn's variables (§8.1). tokens.ts is the source of
+ * truth: change a colour, radius or type size there and here together (tokens.test.ts fails while they disagree).
  * Import after `tailwindcss`. Dark mode is the `.dark` class on an ancestor.
  */
 

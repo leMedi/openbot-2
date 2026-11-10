@@ -1,8 +1,9 @@
 import { avatarColors, avatarShapes, avatarStyles, type BotInfo, type ModelInfo, type ModelSettings } from '@openbot/api-contract'
+import { avatarPalette } from '@openbot/ui/avatar'
 import { cn } from '@openbot/ui/lib/utils'
 import { useEffect, useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
-import { avatarPalette, BotAvatar } from './bot-avatar.tsx'
+import { BotAvatar } from './bot-avatar.tsx'
 
 /** The model select's value for "follow the default model". */
 export const followDefault = ''
