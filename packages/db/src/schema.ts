@@ -162,6 +162,11 @@ export const chats = sqliteTable(
     sectionId: text('section_id').references(() => sections.id, { onDelete: 'set null' }),
     /** When the owner hid the chat (moved it to the sidebar's Hidden section); null when shown. */
     hiddenAt: integer('hidden_at', { mode: 'timestamp_ms' }),
+    /**
+     * When the owner's mute ends: the chat's bots' messages don't notify until then (its cards still do). Null: not
+     * muted; `mutedForever` in core: until the owner unmutes it. A time past is no mute.
+     */
+    mutedUntil: integer('muted_until', { mode: 'timestamp_ms' }),
     /** The newest message the owner has seen; a bot's message after it, other than one between bots, makes the chat unread. Null: none seen yet. */
     lastReadMessageId: text('last_read_message_id'),
     createdAt: createdAt(),

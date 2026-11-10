@@ -267,6 +267,12 @@ export const chat = z.object({
   sectionId: z.string(),
   /** The owner hid it: it sits in the sidebar's Hidden section, never pinned. */
   hidden: z.boolean(),
+  /**
+   * When the owner's mute ends: until then the chat's bots' messages don't notify, though its cards still do. `forever`
+   * until the owner unmutes it; null when not muted (a mute that has ended reads null). A hidden chat is always muted
+   * (`isMuted`), whatever this says.
+   */
+  mutedUntil: z.union([z.number(), z.literal('forever')]).nullable(),
   /** A bot posted since the owner last opened the chat. */
   unread: z.boolean(),
   /**
@@ -278,6 +284,18 @@ export const chat = z.object({
   lastMessage: message.pick({ author: true, authorName: true, text: true, attachments: true, botMessage: true, createdAt: true }).nullable(),
 })
 export type ChatInfo = z.infer<typeof chat>
+
+/** How long the owner can mute a chat for: 1 hour, 8 hours, 1 day, or until they unmute it. */
+export const muteDurations = { '1h': 60 * 60_000, '8h': 8 * 60 * 60_000, '1d': 24 * 60 * 60_000, forever: null } as const
+export type MuteDuration = keyof typeof muteDurations
+
+/**
+ * Whether the chat's bots' messages don't notify the owner at `now` (milliseconds since the epoch): muted until later,
+ * or hidden, which is always muted.
+ */
+export function isMuted(chat: Pick<ChatInfo, 'mutedUntil' | 'hidden'>, now: number): boolean {
+  return chat.hidden || chat.mutedUntil === 'forever' || (chat.mutedUntil !== null && chat.mutedUntil > now)
+}
 
 /** The sidebar's Unassigned section, where chats in no section of the owner's sit. */
 export const unassignedSectionId = 'unassigned'
@@ -895,6 +913,20 @@ export const contract = {
       .output(z.array(chat)),
     show: oc
       .route({ method: 'POST', path: '/chats/show', summary: 'Show hidden chats again, each back in its section; returns every chat' })
+      .input(z.object({ chatIds }))
+      .output(z.array(chat)),
+    mute: oc
+      .route({
+        method: 'POST',
+        path: '/chats/mute',
+        summary:
+          "Mute chats for 1 hour, 8 hours, 1 day or until unmuted, from now, replacing any mute they had: their bots' " +
+          "messages don't notify the owner's phones, though their cards still do; returns every chat",
+      })
+      .input(z.object({ chatIds, duration: z.enum(Object.keys(muteDurations) as [MuteDuration, ...MuteDuration[]]) }))
+      .output(z.array(chat)),
+    unmute: oc
+      .route({ method: 'POST', path: '/chats/unmute', summary: 'Unmute chats; returns every chat' })
       .input(z.object({ chatIds }))
       .output(z.array(chat)),
     messages: oc

@@ -130,3 +130,31 @@ export async function showChats(db: Db, chatIds: readonly string[]): Promise<str
     return shown.map((chat) => chat.id)
   })
 }
+
+/** A mute's end that never comes: the chat stays muted until the owner unmutes it. The latest time a `Date` can hold. */
+export const mutedForever = new Date(8.64e15)
+
+/**
+ * Mutes chats until `until` (`mutedForever` for until unmuted), replacing any mute they had: their bots' messages don't
+ * notify the owner until then, though their cards still do. Returns the ids of the chats muted.
+ */
+export async function muteChats(db: Db, chatIds: readonly string[], until: Date): Promise<string[]> {
+  return db.transaction(async (tx) => {
+    await assertChatsExist(tx, chatIds)
+    await tx.update(chats).set({ mutedUntil: until }).where(inArray(chats.id, [...chatIds]))
+    return [...chatIds]
+  })
+}
+
+/** Unmutes chats. Returns the ids of those that had a mute, ended or not. */
+export async function unmuteChats(db: Db, chatIds: readonly string[]): Promise<string[]> {
+  return db.transaction(async (tx) => {
+    await assertChatsExist(tx, chatIds)
+    const unmuted = await tx
+      .update(chats)
+      .set({ mutedUntil: null })
+      .where(sql`${inArray(chats.id, [...chatIds])} and ${isNotNull(chats.mutedUntil)}`)
+      .returning({ id: chats.id })
+    return unmuted.map((chat) => chat.id)
+  })
+}

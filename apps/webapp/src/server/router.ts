@@ -10,7 +10,7 @@ import {
   toolPrefix,
 } from '@openbot/agent'
 import type { Plugin } from '@openbot/plugins'
-import { apiVersion, contract, type MessageInfo, type PluginRequestChoice } from '@openbot/api-contract'
+import { apiVersion, contract, type MessageInfo, muteDurations, type PluginRequestChoice } from '@openbot/api-contract'
 import { ScreenDaemonError } from '@openbot/computer'
 import {
   answerQuestion,
@@ -35,6 +35,8 @@ import {
   createSection,
   deleteSection,
   hideChats,
+  muteChats,
+  mutedForever,
   InvalidSectionError,
   listSections,
   moveChats,
@@ -42,6 +44,7 @@ import {
   renameSection,
   reorderSections,
   showChats,
+  unmuteChats,
   searchFiles,
   searchMessages,
   createBot,
@@ -595,6 +598,14 @@ export const router = os.router({
     hide: os.chats.hide.handler(async ({ context, input }) => publishChats(context, await chatMustExist(hideChats(context.db, input.chatIds)))),
 
     show: os.chats.show.handler(async ({ context, input }) => publishChats(context, await chatMustExist(showChats(context.db, input.chatIds)))),
+
+    mute: os.chats.mute.handler(async ({ context, input }) => {
+      const length = muteDurations[input.duration]
+      const until = length === null ? mutedForever : new Date(context.clock.now() + length)
+      return publishChats(context, await chatMustExist(muteChats(context.db, input.chatIds, until)))
+    }),
+
+    unmute: os.chats.unmute.handler(async ({ context, input }) => publishChats(context, await chatMustExist(unmuteChats(context.db, input.chatIds)))),
 
     messages: os.chats.messages.handler(async ({ context, input }) => {
       if (!(await getChat(context.db, input.chatId))) throw new ORPCError('NOT_FOUND', { message: 'No such chat' })

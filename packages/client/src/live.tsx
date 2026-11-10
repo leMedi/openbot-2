@@ -8,6 +8,7 @@ import {
   maxMessagesPageSize,
   type MessageInfo,
   type MessagesPage,
+  type MuteDuration,
   type SectionInfo,
   type StampedEvent,
   unassignedSectionId,
@@ -43,7 +44,7 @@ export type LiveSnapshot = {
   messages: { chatId: string; messages: MessageInfo[]; older: string | null }[]
 }
 
-const snapshotVersion = 1
+const snapshotVersion = 2
 
 /** Where the snapshot is kept; the phone keeps it on disk, the web keeps none. */
 export type SnapshotStore = {
@@ -336,6 +337,16 @@ export class LiveStore {
   /** Shows hidden chats again, each back in its section. */
   async showChats(chatIds: string[]) {
     this.#setChats(await this.#api.chats.show({ chatIds }))
+  }
+
+  /** Mutes chats for `duration` from now: their bots' messages don't notify the owner's phones, though cards still do. */
+  async muteChats(chatIds: string[], duration: MuteDuration) {
+    this.#setChats(await this.#api.chats.mute({ chatIds, duration }))
+  }
+
+  /** Unmutes chats: their bots' messages notify again. */
+  async unmuteChats(chatIds: string[]) {
+    this.#setChats(await this.#api.chats.unmute({ chatIds }))
   }
 
   setDraft(chatId: string, text: string) {

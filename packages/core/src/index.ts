@@ -46,10 +46,13 @@ export {
   listSections,
   maxSectionNameLength,
   moveChats,
+  muteChats,
+  mutedForever,
   NoSuchSectionError,
   renameSection,
   reorderSections,
   showChats,
+  unmuteChats,
 } from './sections.ts'
 export {
   DeviceNotFoundError,

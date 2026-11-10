@@ -1,6 +1,6 @@
 import { type AuditEntryInfo, type BotInfo, type CardInfo, type ChatInfo, type DeviceInfo, type FactInfo, deletedAuthorName, type MessageInfo, type PluginAccountInfo, type PluginInfo, pluginIconPath, type RoutineInfo, type RoutineRunInfo, type SectionInfo, type MessageHit, type FileHit, unassignedSectionId } from '@openbot/api-contract'
 import type { BotStatus, PluginAccountSummary } from '@openbot/agent'
-import { type BotWithChat, type ChatSummary, type FileMatch, type MessageMatch, type RoutineState, factSourceName, handBackOutcomeOf, isPluginReconnectCard, isPluginRequestCard, isQuestionCard, pluginReconnectOutcomeOf, pluginRequestDecisionOf, isRoutineChangeCard, isTakeOverCard, questionAnswerOf, questionDismissedOf } from '@openbot/core'
+import { type BotWithChat, type ChatSummary, type FileMatch, type MessageMatch, type RoutineState, factSourceName, handBackOutcomeOf, isPluginReconnectCard, isPluginRequestCard, isQuestionCard, pluginReconnectOutcomeOf, pluginRequestDecisionOf, isRoutineChangeCard, isTakeOverCard, mutedForever, questionAnswerOf, questionDismissedOf } from '@openbot/core'
 import type { AuditEntry, Device, Fact, Message, RoutineRun, Section } from '@openbot/db'
 import type { Plugin } from '@openbot/plugins'
 
@@ -38,8 +38,11 @@ function toCardInfo(message: Message): CardInfo | null {
   return null
 }
 
-/** What the sidebar shows of a chat, with the member taking its turn in a group; its newest message is cut down to a preview. */
-export function toChatInfo(chat: ChatSummary, speaking: string | null): ChatInfo {
+/**
+ * What the sidebar shows of a chat at `now`, with the member taking its turn in a group; its newest message is cut down
+ * to a preview, and a mute that has ended reads as none.
+ */
+export function toChatInfo(chat: ChatSummary, speaking: string | null, now: number): ChatInfo {
   const last = chat.lastMessage && toMessageInfo(chat.lastMessage)
   return {
     id: chat.id,
@@ -52,6 +55,7 @@ export function toChatInfo(chat: ChatSummary, speaking: string | null): ChatInfo
     pinnedPosition: chat.pinnedPosition,
     sectionId: chat.sectionId ?? unassignedSectionId,
     hidden: chat.hiddenAt !== null,
+    mutedUntil: mutedUntilOf(chat.mutedUntil, now),
     unread: chat.unread,
     waitingFor: chat.waitingFor,
     lastMessage: last && {
@@ -63,6 +67,13 @@ export function toChatInfo(chat: ChatSummary, speaking: string | null): ChatInfo
       createdAt: last.createdAt,
     },
   }
+}
+
+/** When a mute ends, as the API shows it: `forever` for until unmuted, null for none or one that has ended. */
+function mutedUntilOf(mutedUntil: Date | null, now: number): ChatInfo['mutedUntil'] {
+  const until = mutedUntil?.getTime()
+  if (until === undefined || until <= now) return null
+  return until === mutedForever.getTime() ? 'forever' : until
 }
 
 /** Who posted a search hit's message, where and when. */

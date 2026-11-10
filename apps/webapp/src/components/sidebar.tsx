@@ -1,4 +1,4 @@
-import { type BotInfo, maxSectionNameLength, type SectionInfo, unassignedSectionId } from '@openbot/api-contract'
+import { type BotInfo, type ChatInfo, isMuted, maxSectionNameLength, type MuteDuration, type SectionInfo, unassignedSectionId } from '@openbot/api-contract'
 import {
   hiddenFoldKey,
   membersOf,
@@ -107,7 +107,7 @@ export function Sidebar() {
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
   /** Where a Shift-click range starts: the row clicked last. */
   const anchor = useRef<string>(undefined)
-  const now = useNow()
+  const now = useNow(nextMuteEnd(live.chats.values()))
   const visible = useTabVisible()
 
   const layout = sidebarLayout(live.bots ?? [], live.chats, live.sections, prefs.folds)
@@ -212,6 +212,11 @@ export function Sidebar() {
     ]
   }
 
+  /** How long chats can be muted for. */
+  function muteItems(chatIds: string[]): MenuItem[] {
+    return muteChoices.map(([duration, label]) => ({ label, run: () => attempt(live.muteChats(chatIds, duration)) }))
+  }
+
   /** A row's context menu, after Grok's: Pin, Move to, Mark as Read, Rename, Hide from sidebar, Delete. */
   function rowMenu(row: Row): MenuItem[] {
     const { bot, chat, pinned, chatId } = row
@@ -231,6 +236,8 @@ export function Sidebar() {
       ...(pinned || hidden ? [] : ownSections.length ? [{ label: 'Move to', items: moveItems([chatId]) }] : [{ label: 'Move to new section', run: () => newSection([chatId]) }]),
       ...(chat?.unread ? [{ label: 'Mark as Read', run: () => attempt(live.markRead(chatId, undefined)) }] : []),
       { label: 'Rename', run: () => setRenaming(chatId) },
+      // A hidden chat is always muted, so its own mute isn't offered until it's shown again.
+      ...(!chat || hidden ? [] : isMuted(chat, now) ? [{ label: 'Unmute', run: () => attempt(live.unmuteChats([chatId])) }] : [{ label: 'Mute', items: muteItems([chatId]) }]),
       hidden ? { label: 'Show in sidebar', run: () => attempt(live.showChats([chatId])) } : { label: 'Hide from sidebar', run: () => attempt(live.hideChats([chatId])) },
       ...(bot || chat ? [{ label: 'Delete', danger: true, run: () => setDeleting(row) }] : []),
     ]
@@ -795,14 +802,38 @@ function useTabVisible() {
   return visible
 }
 
-/** The current time, ticking each minute so relative times stay right. */
-function useNow() {
+/** The current time, ticking each minute so relative times stay right, and at `wakeAt` (a mute ending) too. */
+function useNow(wakeAt?: number) {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 60_000)
     return () => clearInterval(timer)
   }, [])
+  useEffect(() => {
+    if (wakeAt === undefined) return
+    // A timer can't wait longer than about 24.8 days; the minute tick catches anything later.
+    const wait = wakeAt - Date.now()
+    if (wait > 2 ** 31 - 1) return
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(wait, 0))
+    return () => clearTimeout(timer)
+  }, [wakeAt])
   return now
+}
+
+/** The mute durations the chat menu offers, in order. */
+const muteChoices: [MuteDuration, string][] = [
+  ['1h', 'For 1 hour'],
+  ['8h', 'For 8 hours'],
+  ['1d', 'For 1 day'],
+  ['forever', 'Until I unmute'],
+]
+
+/** When the next of these chats' mutes ends, or undefined when none will. */
+function nextMuteEnd(chats: Iterable<ChatInfo>): number | undefined {
+  const now = Date.now()
+  let next: number | undefined
+  for (const { mutedUntil } of chats) if (typeof mutedUntil === 'number' && mutedUntil > now && (next === undefined || mutedUntil < next)) next = mutedUntil
+  return next
 }
 
 /** One line of plain text from markdown, for previews. */
@@ -942,6 +973,8 @@ function ChatRow({
             {rowName(row)}
           </span>
           {pinned && <PinIcon />}
+          {/* Not on hidden rows: the Hidden section says they're muted. */}
+          {chat && !chat.hidden && isMuted(chat, now) && <MutedIcon mutedUntil={chat.mutedUntil} />}
         </span>
         <span className={cn('truncate text-xs', line.className)}>
           {line.label && <span className={line.labelClass}>{line.label}</span>}
@@ -963,6 +996,19 @@ function ChatRow({
         )}
       </span>
     </Link>
+  )
+}
+
+/** A bell struck through: the chat's bots' messages don't notify the owner's phones. */
+function MutedIcon({ mutedUntil }: { mutedUntil: ChatInfo['mutedUntil'] }) {
+  const label =
+    typeof mutedUntil === 'number' ? `Muted until ${new Date(mutedUntil).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : 'Muted'
+  return (
+    <svg viewBox="0 0 16 16" width="11" height="11" aria-label={label} role="img" className="shrink-0 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <title>{label}</title>
+      <path d="M3.5 11.5h9L11 9.5V7a3 3 0 0 0-6 0v2.5Z M6.75 13.5h2.5" />
+      <path d="M2 2 14 14" />
+    </svg>
   )
 }
 

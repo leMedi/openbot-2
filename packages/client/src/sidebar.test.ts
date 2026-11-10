@@ -13,6 +13,7 @@ const chat = (id: string, changes: Partial<ChatInfo> = {}): ChatInfo => ({
   pinnedPosition: null,
   sectionId: 'unassigned',
   hidden: false,
+  mutedUntil: null,
   unread: false,
   waitingFor: null,
   lastMessage: null,

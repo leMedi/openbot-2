@@ -59,6 +59,7 @@ const chat = (id: string, changes: Partial<ChatInfo> = {}): ChatInfo => ({
   pinnedPosition: null,
   sectionId: unassignedSectionId,
   hidden: false,
+  mutedUntil: null,
   unread: false,
   waitingFor: null,
   lastMessage: null,
@@ -256,7 +257,7 @@ describe('the snapshot', () => {
   it('shows what it kept while offline, then what the instance has once it connects', async () => {
     const { server, api } = fakeServer()
     const snapshot = memorySnapshot({
-      version: 1,
+      version: 2,
       bots: [bot('rex'), bot('gone')],
       chats: [chat('dm-rex', { botId: 'rex' }), chat('dm-gone', { botId: 'gone' })],
       sections: [{ id: unassignedSectionId, name: null }],

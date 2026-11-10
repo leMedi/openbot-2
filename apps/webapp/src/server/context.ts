@@ -92,16 +92,17 @@ export type OwnerTime = {
 }
 
 /** A chat as the sidebar shows it, with the member taking its turn in a group. */
-export const chatInfoOf = ({ rounds }: Pick<ServerContext, 'rounds'>, summary: ChatSummary): ChatInfo => toChatInfo(summary, rounds.speaking(summary.id))
+export const chatInfoOf = ({ rounds, clock }: Pick<ServerContext, 'rounds' | 'clock'>, summary: ChatSummary): ChatInfo =>
+  toChatInfo(summary, rounds.speaking(summary.id), clock.now())
 
 /** Tells every tab how a chat now looks in the sidebar, after a message, a read or a pin; returns that. */
 export async function publishChat(
-  { db, bus, rounds }: Pick<ServerContext, 'db' | 'bus' | 'rounds'>,
+  { db, bus, rounds, clock }: Pick<ServerContext, 'db' | 'bus' | 'rounds' | 'clock'>,
   chatId: string,
 ): Promise<ChatInfo | undefined> {
   const summary = await getChatSummary(db, chatId)
   if (!summary) return undefined
-  const chat = chatInfoOf({ rounds }, summary)
+  const chat = chatInfoOf({ rounds, clock }, summary)
   bus.publish({ type: 'chat.updated', chat })
   return chat
 }
@@ -208,7 +209,7 @@ export async function createServerContext({
     takeTurn: async (botId, input) => (await runtimeOpen).takeTurn(botId, input),
     onSpeaking: (chatId) => void publish(chatId).catch((error) => console.error("[groups] Couldn't show who is taking a turn:", error)),
   })
-  const publish = (chatId: string) => publishChat({ db, bus, rounds }, chatId)
+  const publish = (chatId: string) => publishChat({ db, bus, rounds, clock }, chatId)
   const memoryModelOptions = {
     db,
     clock,

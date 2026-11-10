@@ -173,6 +173,8 @@ describe('system credentials', () => {
       'chats.move': await server.client.chats.move({ chatIds: [bot.chatId], sectionId: 'unassigned' }),
       'chats.hide': await server.client.chats.hide({ chatIds: [bot.chatId] }),
       'chats.show': await server.client.chats.show({ chatIds: [bot.chatId] }),
+      'chats.mute': await server.client.chats.mute({ chatIds: [bot.chatId], duration: '1h' }),
+      'chats.unmute': await server.client.chats.unmute({ chatIds: [bot.chatId] }),
       'sections.create': section,
       'sections.list': await server.client.sections.list(),
       'sections.rename': await server.client.sections.rename({ sectionId: section.id, name: 'Clients' }),

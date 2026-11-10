@@ -155,6 +155,13 @@
       "when": 1794271246336,
       "tag": "0021_devices",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1794271764263,
+      "tag": "0022_muted_chats",
+      "breakpoints": true
     }
   ]
 }
