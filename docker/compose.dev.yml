@@ -37,6 +37,7 @@ services:
       - desktopd-node-modules:/opt/openbot/current/apps/desktopd/node_modules
       - agent-node-modules:/opt/openbot/current/packages/agent/node_modules
       - api-contract-node-modules:/opt/openbot/current/packages/api-contract/node_modules
+      - client-node-modules:/opt/openbot/current/packages/client/node_modules
       - computer-node-modules:/opt/openbot/current/packages/computer/node_modules
       - core-node-modules:/opt/openbot/current/packages/core/node_modules
       - db-node-modules:/opt/openbot/current/packages/db/node_modules
@@ -55,6 +56,7 @@ volumes:
   desktopd-node-modules:
   agent-node-modules:
   api-contract-node-modules:
+  client-node-modules:
   computer-node-modules:
   core-node-modules:
   db-node-modules:

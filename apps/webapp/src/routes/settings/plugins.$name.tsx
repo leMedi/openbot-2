@@ -1,11 +1,11 @@
 import { type PluginAccountInfo, type PluginInfo, pluginAccountNameMax } from '@openbot/api-contract'
+import { useLive } from '@openbot/client'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { useCallback, useEffect, useState } from 'react'
 import { Dialog } from '../../components/dialog.tsx'
 import { GrantSwitch, PluginIcon, PluginStatus, ReconnectWizard, SkillsGrantSwitch } from '../../components/plugins.tsx'
 import { SignInWizard } from '../../components/sign-in-wizard.tsx'
 import { api, errorMessage } from '../../lib/api.ts'
-import { useLive } from '../../lib/live.tsx'
 
 export const Route = createFileRoute('/settings/plugins/$name')({
   component: PluginDetail,

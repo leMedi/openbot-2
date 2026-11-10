@@ -1,10 +1,10 @@
 import { type BotInfo, maxGroupMembers, minGroupMembers } from '@openbot/api-contract'
+import { useLive } from '@openbot/client'
 import { cn } from '@openbot/ui/lib/utils'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useRef, useState } from 'react'
 import { BotAvatar, GroupAvatar } from '../../components/bot-avatar.tsx'
 import { api, errorMessage } from '../../lib/api.ts'
-import { useLive } from '../../lib/live.tsx'
 
 export const Route = createFileRoute('/_app/groups/new')({
   component: NewGroup,

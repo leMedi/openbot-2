@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { CommandPalette } from '../components/command-palette.tsx'
 import { Sidebar } from '../components/sidebar.tsx'
 import { api, errorMessage } from '../lib/api.ts'
-import { LiveProvider } from '../lib/live.tsx'
+import { WebLiveProvider } from '../lib/live.tsx'
 
 export const Route = createFileRoute('/_app')({
   component: AppShell,
@@ -27,7 +27,7 @@ function AppShell() {
   if (error) return <p className="p-6 text-destructive-foreground">{error}</p>
   if (!ready) return null
   return (
-    <LiveProvider>
+    <WebLiveProvider>
       <div className="safe-area flex h-dvh bg-background text-foreground">
         <Sidebar />
         <main className="flex min-w-0 flex-1 flex-col">
@@ -35,6 +35,6 @@ function AppShell() {
         </main>
       </div>
       <CommandPalette />
-    </LiveProvider>
+    </WebLiveProvider>
   )
 }

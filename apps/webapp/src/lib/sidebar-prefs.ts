@@ -1,5 +1,5 @@
+import { hiddenFoldKey } from '@openbot/client'
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { hiddenFoldKey } from './sidebar.ts'
 
 const foldsKey = 'openbot.sidebar.folds'
 const compactKey = 'openbot.sidebar.compact'

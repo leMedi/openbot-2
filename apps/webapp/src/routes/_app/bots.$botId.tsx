@@ -1,4 +1,5 @@
 import type { BotInfo } from '@openbot/api-contract'
+import { useLive } from '@openbot/client'
 import { cn } from '@openbot/ui/lib/utils'
 import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -10,7 +11,6 @@ import { ProfilePane } from '../../components/profile-pane.tsx'
 import { RoutinesPane, type RoutineToOpen } from '../../components/routines-pane.tsx'
 import { FullscreenScreen, ScreenPane } from '../../components/screen-pane.tsx'
 import { type ChatSearch, chatSearch } from '../../lib/chat-search.ts'
-import { useLive } from '../../lib/live.tsx'
 
 export const Route = createFileRoute('/_app/bots/$botId')({
   validateSearch: chatSearch,

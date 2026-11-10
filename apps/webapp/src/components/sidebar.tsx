@@ -1,4 +1,15 @@
 import { type BotInfo, maxSectionNameLength, type SectionInfo, unassignedSectionId } from '@openbot/api-contract'
+import {
+  hiddenFoldKey,
+  membersOf,
+  rangeBetween,
+  relativeTime,
+  selectableChatIds,
+  type SidebarBlock,
+  sidebarLayout,
+  type SidebarRow,
+  useLive,
+} from '@openbot/client'
 import { cn } from '@openbot/ui/lib/utils'
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
 import {
@@ -14,10 +25,6 @@ import {
 } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
 import { runCommand, useCommand } from '../lib/commands.ts'
-import { useLive } from '../lib/live.tsx'
-import { membersOf } from '../lib/groups.ts'
-import { relativeTime } from '../lib/palette.ts'
-import { hiddenFoldKey, rangeBetween, selectableChatIds, type SidebarBlock, type SidebarRow, sidebarLayout } from '../lib/sidebar.ts'
 import { useNarrowWindow, useSidebarPrefs } from '../lib/sidebar-prefs.ts'
 import { summarizeAttachments } from './attachments.tsx'
 import { BotAvatar, GroupAvatar } from './bot-avatar.tsx'

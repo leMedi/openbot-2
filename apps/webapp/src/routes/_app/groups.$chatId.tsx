@@ -1,4 +1,5 @@
 import { type BotInfo, type ChatInfo, maxGroupMembers, minGroupMembers } from '@openbot/api-contract'
+import { membersOf, useLive } from '@openbot/client'
 import { cn } from '@openbot/ui/lib/utils'
 import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
@@ -7,8 +8,6 @@ import { Field, inputClass } from '../../components/bot-fields.tsx'
 import { ChatView } from '../../components/chat-view.tsx'
 import { ConfirmDeleteGroup } from '../../components/confirm-delete.tsx'
 import { api, errorMessage } from '../../lib/api.ts'
-import { membersOf } from '../../lib/groups.ts'
-import { useLive } from '../../lib/live.tsx'
 import { type ChatSearch, chatSearch } from '../../lib/chat-search.ts'
 
 export const Route = createFileRoute('/_app/groups/$chatId')({

@@ -1,5 +1,5 @@
+import { useLive } from '@openbot/client'
 import { useNavigate } from '@tanstack/react-router'
-import { useLive } from '../lib/live.tsx'
 import { Dialog } from './dialog.tsx'
 import { NewBotForm } from './new-bot-form.tsx'
 

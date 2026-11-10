@@ -1,7 +1,7 @@
+import { useLive } from '@openbot/client'
 import { Navigate, createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { NewBotDialog } from '../../components/new-bot-dialog.tsx'
-import { useLive } from '../../lib/live.tsx'
 
 export const Route = createFileRoute('/_app/')({
   component: Home,

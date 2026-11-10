@@ -1,11 +1,7 @@
 import type { BotInfo, NewRoutine, RoutineChanges, RoutineInfo, RoutineRunInfo } from '@openbot/api-contract'
-import { cn } from '@openbot/ui/lib/utils'
-import { Link } from '@tanstack/react-router'
-import { type ReactNode, useEffect, useRef, useState } from 'react'
-import { api, errorMessage } from '../lib/api.ts'
-import { useLiveEvents } from '../lib/live.tsx'
-import { applyRoutineEvent, applyRunEvent, sortRoutines } from '../lib/routines.ts'
 import {
+  applyRoutineEvent,
+  applyRunEvent,
   clockTime,
   describeSchedule,
   type EveryUnit,
@@ -15,9 +11,15 @@ import {
   scheduleForm,
   type ScheduleKind,
   scheduleText,
+  sortRoutines,
   switchKind,
+  useLiveEvents,
   weekdayNames,
-} from '../lib/schedule.ts'
+} from '@openbot/client'
+import { cn } from '@openbot/ui/lib/utils'
+import { Link } from '@tanstack/react-router'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { api, errorMessage } from '../lib/api.ts'
 import { inputClass } from './bot-fields.tsx'
 import { ConfirmDeleteRoutine } from './confirm-delete.tsx'
 
