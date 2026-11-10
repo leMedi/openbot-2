@@ -76,6 +76,8 @@ const message = (id: string, chatId: string, text = id): MessageInfo => ({
   attachments: [],
   card: null,
   botMessage: null,
+  reactions: [],
+  replyTo: null,
   createdAt: 0,
 })
 
@@ -134,6 +136,18 @@ function fakeServer() {
         const marked = { ...server.chats.find((entry) => entry.id === chatId)!, unread: true }
         server.chats = server.chats.map((entry) => (entry.id === chatId ? marked : entry))
         return marked
+      },
+      react: async ({ messageId, emoji }: { messageId: string; emoji: string }) => {
+        if (server.unreachable) throw new TypeError('Failed to fetch')
+        for (const [chatId, list] of server.messages) {
+          const found = list.find((entry) => entry.id === messageId)
+          if (!found) continue
+          const has = found.reactions.some((entry) => entry.emoji === emoji && entry.by === 'owner')
+          const reacted = { ...found, reactions: has ? found.reactions.filter((entry) => entry.emoji !== emoji) : [...found.reactions, { emoji, by: 'owner' }] }
+          server.messages.set(chatId, list.map((entry) => (entry.id === messageId ? reacted : entry)))
+          return reacted
+        }
+        throw new Error('No such message')
       },
       viewing: async ({ chatId }: { chatId: string }) => {
         if (server.unreachable) throw new TypeError('Failed to fetch')
@@ -359,7 +373,7 @@ describe('the snapshot', () => {
   it('shows what it kept while offline, then what the instance has once it connects', async () => {
     const { server, api } = fakeServer()
     const snapshot = memorySnapshot({
-      version: 2,
+      version: 3,
       bots: [bot('rex'), bot('gone')],
       chats: [chat('dm-rex', { botId: 'rex' }), chat('dm-gone', { botId: 'gone' })],
       sections: [{ id: unassignedSectionId, name: null }],
@@ -493,5 +507,35 @@ describe('the viewing heartbeat', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(server.viewing.at(-1)).toBe('dm-ana')
     stop()
+  })
+})
+
+describe("the owner's reactions", () => {
+  async function openedChat() {
+    const { server, api } = fakeServer()
+    server.chats = [chat('dm-1')]
+    server.messages.set('dm-1', [message('a', 'dm-1')])
+    const store = new LiveStore({ api, storage: memoryStorage() })
+    await store.openChat('dm-1')
+    return { server, store }
+  }
+
+  it('show at once, then as the instance has them', async () => {
+    const { store } = await openedChat()
+    const saved = store.react('dm-1', 'a', '👍')
+    expect(store.messages.get('dm-1')![0]!.reactions).toEqual([{ emoji: '👍', by: 'owner' }])
+    await saved
+    expect(store.messages.get('dm-1')![0]!.reactions).toEqual([{ emoji: '👍', by: 'owner' }])
+    await store.react('dm-1', 'a', '👍')
+    expect(store.messages.get('dm-1')![0]!.reactions).toEqual([])
+  })
+
+  it('go back as they were when the save fails', async () => {
+    const { server, store } = await openedChat()
+    server.unreachable = true
+    const saved = store.react('dm-1', 'a', '🎉')
+    expect(store.messages.get('dm-1')![0]!.reactions).toHaveLength(1)
+    await expect(saved).rejects.toThrow('Failed to fetch')
+    expect(store.messages.get('dm-1')![0]!.reactions).toEqual([])
   })
 })

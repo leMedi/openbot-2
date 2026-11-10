@@ -1,4 +1,4 @@
-import { maxAttachmentBytes, maxAttachments, type MessageInfo, type QuestionCardInfo, type RoutineChangeCardInfo, type TakeOverCardInfo } from '@openbot/api-contract'
+import { maxAttachmentBytes, maxAttachments, type MessageInfo, type QuestionCardInfo, type ReplyToInfo, type RoutineChangeCardInfo, type TakeOverCardInfo } from '@openbot/api-contract'
 
 /** What the composer needs to know of a file it holds: a browser `File`, or a file picked on the phone. */
 export type ComposerFile = { name: string; size: number }
@@ -37,6 +37,8 @@ export type Outgoing<F extends ComposerFile = ComposerFile> = {
   key: string
   text: string
   files: F[]
+  /** What it replies to, shown on it until the server's copy is in. */
+  replyTo?: ReplyToInfo
   /** The chat's last message id when it was sent; the server's copy sorts after it. */
   after: string | undefined
   error?: string

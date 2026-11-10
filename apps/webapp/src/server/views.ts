@@ -1,6 +1,6 @@
-import { type AuditEntryInfo, type BotInfo, type CardInfo, type ChatInfo, type DeviceInfo, type FactInfo, deletedAuthorName, type MessageInfo, type PluginAccountInfo, type PluginInfo, pluginIconPath, type RoutineInfo, type RoutineRunInfo, type SectionInfo, type MessageHit, type FileHit, unassignedSectionId } from '@openbot/api-contract'
+import { type AuditEntryInfo, type BotInfo, type CardInfo, type ChatInfo, type DeviceInfo, type FactInfo, deletedAuthorName, maxReplyPreviewLength, type MessageInfo, type PluginAccountInfo, type PluginInfo, pluginIconPath, type RoutineInfo, type RoutineRunInfo, type SectionInfo, type MessageHit, type FileHit, unassignedSectionId } from '@openbot/api-contract'
 import type { BotStatus, PluginAccountSummary } from '@openbot/agent'
-import { type BotWithChat, type ChatSummary, type FileMatch, type MessageMatch, type RoutineState, factSourceName, handBackOutcomeOf, isPluginReconnectCard, isPluginRequestCard, isQuestionCard, pluginReconnectOutcomeOf, pluginRequestDecisionOf, isRoutineChangeCard, isTakeOverCard, mutedForever, questionAnswerOf, questionDismissedOf } from '@openbot/core'
+import { type BotWithChat, type ChatSummary, type FileMatch, type MessageMatch, type RoutineState, factSourceName, handBackOutcomeOf, isPluginReconnectCard, isPluginRequestCard, isQuestionCard, pluginReconnectOutcomeOf, pluginRequestDecisionOf, isRoutineChangeCard, isTakeOverCard, mutedForever, questionAnswerOf, questionDismissedOf, quoteOf } from '@openbot/core'
 import type { AuditEntry, Device, Fact, Message, RoutineRun, Section } from '@openbot/db'
 import type { Plugin } from '@openbot/plugins'
 
@@ -22,6 +22,14 @@ export function toMessageInfo(message: Message): MessageInfo {
       direction: message.direction,
       botId: message.peerBotId,
       name: message.peerBotId ? message.peerName! : deletedAuthorName(message.peerName!),
+    },
+    reactions: message.reactions,
+    replyTo: message.replyTo && {
+      id: message.replyTo.id,
+      author: message.replyTo.author,
+      botId: message.replyTo.botId,
+      authorName: message.replyTo.authorName,
+      text: quoteOf(message.replyTo.text, maxReplyPreviewLength),
     },
     createdAt: message.createdAt.getTime(),
   }

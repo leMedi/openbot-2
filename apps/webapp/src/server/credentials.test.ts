@@ -166,6 +166,7 @@ describe('system credentials', () => {
       'chats.setPinned': await server.client.chats.setPinned({ chatIds: [bot.chatId] }),
       'chats.messages': await server.client.chats.messages({ chatId: bot.chatId }),
       'chats.send': sent,
+      'chats.react': await server.client.chats.react({ messageId: sent.id, emoji: '👍' }),
       'chats.attachment': await (await server.client.chats.attachment({ messageId: sent.id, attachmentId: sent.attachments[0]!.id })).body.text(),
       'chats.answer': answered,
       'chats.dismiss': dismissedNow,

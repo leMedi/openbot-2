@@ -289,14 +289,14 @@ describe('reminding the bot of unanswered questions', () => {
     server.providers.script(callsTools(['sendMessage', { text: 'Sure.' }]), endsSilently())
     await server.client.chats.send({ chatId: bot.chatId, text: 'Add a README too' })
     await untilIdle(server, bot)
-    expect(inputOf(server, 1)).toMatch(/^Unanswered questions:\n- (Which database should I use\?|Which port\?)\n- .+\n\nAdd a README too$/)
+    expect(inputOf(server, 1)).toMatch(/^Unanswered questions:\n- (Which database should I use\?|Which port\?)\n- .+\n\n\[m[0-9a-f]{8}\]\nAdd a README too$/)
     expect(inputOf(server, 1)).toContain('- Which database should I use?')
     expect(inputOf(server, 1)).toContain('- Which port?')
 
     server.providers.script(callsTools(['sendMessage', { text: 'Done.' }]), endsSilently())
     await server.client.chats.send({ chatId: bot.chatId, text: 'Thanks' })
     await untilIdle(server, bot)
-    expect(inputOf(server, 3)).toBe('Thanks')
+    expect(inputOf(server, 3)).toMatch(/^\[m[0-9a-f]{8}\]\nThanks$/)
   })
 
   it("doesn't list a question the owner answers before the next run", async () => {

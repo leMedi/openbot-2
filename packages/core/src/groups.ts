@@ -2,6 +2,7 @@ import { type Chat, type Db, type Message, bots, chats, messages } from '@openbo
 import { and, asc, desc, eq, gt, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
 import { ChatNotFoundError } from './chats.ts'
 import { groupRoundRules } from './group-rules.ts'
+import { describeReply, messageAddress } from './reactions.ts'
 
 /** Members a group chat can't have: unknown bots, too few or too many. */
 export class GroupMembersError extends Error {}
@@ -187,9 +188,11 @@ export async function postedSince(db: Db, chatId: string, botId: string, after: 
 
 /** One message as a member's turn shows it: who posted it, its text and where its files are. */
 function describeGroupMessage(message: Message): string {
-  const author = message.author === 'owner' ? 'The owner' : message.authorName
+  // The owner's messages carry their address, which `react` takes, and what they reply to.
+  const author = message.author === 'owner' ? `The owner [${messageAddress(message.id)}]` : message.authorName
+  const reply = message.author === 'owner' && message.replyTo ? `${describeReply(message.replyTo)} ` : ''
   const files = message.attachments.map((file) => `- ${file.path} (${file.mimeType})`)
-  const text = message.text.trim() || '(files only)'
+  const text = reply + (message.text.trim() || '(files only)')
   return files.length ? `${author}: ${text}\n[attached, on the computer:\n${files.join('\n')}]` : `${author}: ${text}`
 }
 

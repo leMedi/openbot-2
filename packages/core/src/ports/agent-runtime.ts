@@ -8,6 +8,11 @@ export type Lane = (typeof lanes)[number]
 export type BotInput = {
   lane: Lane
   text: string
+  /**
+   * What the model reads before `text`, but never as its author's words, e.g. the address of the owner's message and
+   * what it replies to.
+   */
+  preface?: string
   /** Files that came with it, already on the computer; the bot is told where, and sees images. */
   attachments?: readonly Attachment[]
   /**

@@ -11,10 +11,12 @@ import {
   type MuteDuration,
   type SectionInfo,
   type StampedEvent,
+  toggledReactions,
   unassignedSectionId,
   viewingHeartbeatInterval,
 } from '@openbot/api-contract'
 import { type ReactNode, createContext, useContext, useEffect, useRef, useSyncExternalStore } from 'react'
+import { ownerReactor } from './reactions.ts'
 
 const reconnectDelayMs = 1000
 const draftKeyPrefix = 'openbot.draft.'
@@ -45,7 +47,7 @@ export type LiveSnapshot = {
   messages: { chatId: string; messages: MessageInfo[]; older: string | null }[]
 }
 
-const snapshotVersion = 2
+const snapshotVersion = 3
 
 /** Where the snapshot is kept; the phone keeps it on disk, the web keeps none. */
 export type SnapshotStore = {
@@ -265,6 +267,24 @@ export class LiveStore {
   /** Adds or replaces a message the server returned, e.g. the owner's own, which also arrives live. */
   addMessage(message: MessageInfo) {
     this.#update(() => this.#setMessages(message.chatId, mergeMessages(this.messages.get(message.chatId) ?? [], [message])))
+  }
+
+  /**
+   * Toggles the owner's reaction `emoji` on a loaded message: at once here, then on the server, whose copy then shows;
+   * a failed save takes it back here.
+   */
+  async react(chatId: string, messageId: string, emoji: string) {
+    const toggle = () => {
+      const message = this.messages.get(chatId)?.find((entry) => entry.id === messageId)
+      if (message) this.addMessage({ ...message, reactions: toggledReactions(message.reactions, emoji, ownerReactor) })
+    }
+    toggle()
+    try {
+      this.addMessage(await this.#api.chats.react({ messageId, emoji }))
+    } catch (error) {
+      toggle()
+      throw error
+    }
   }
 
   /** Shows a chat as the server returned it, e.g. after marking it read. */

@@ -33,6 +33,7 @@ import {
   Routines,
   getBot,
   getInstanceId,
+  toggleReaction,
 } from '@openbot/core'
 import type { Db } from '@openbot/db'
 import { installedSkillFile, installSkills, loadCatalog, type Plugin } from '@openbot/plugins'
@@ -367,6 +368,11 @@ export async function createServerContext({
         await publish(message.chatId)
       }
       return posted[1]!.message
+    },
+    async react(bot, message, emoji) {
+      const { message: reacted, added } = await toggleReaction(db, message.id, emoji, bot.id)
+      bus.publish({ type: 'message.updated', message: toMessageInfo(reacted) })
+      return { added }
     },
     askQuestion(bot, card, idempotencyKey) {
       // The prompt doubles as the message's text, e.g. for previews.

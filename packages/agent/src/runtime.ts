@@ -39,6 +39,9 @@ import {
 } from '@earendil-works/pi-durable/tools'
 import {
   type AgentRuntime,
+  findOwnerMessage,
+  isReactionInput,
+  messageAddress,
   type AttachmentFile,
   type Browser,
   type Desktop,
@@ -287,6 +290,11 @@ export type BotRuntimeOptions = {
     message: { text: string; attachments: AttachmentFile[] },
     idempotencyKey: string,
   ): Promise<Message>
+  /**
+   * Toggles bot `bot`'s reaction `emoji` on the owner's message, as `react` does; returns whether it was added. Throws
+   * for anything but one emoji.
+   */
+  react(bot: BotWithChat, message: Message, emoji: string): Promise<{ added: boolean }>
   /** Bots' routines, which each bot manages through `update_state`'s `routine` target (design §5.4): only its own. */
   routines: Pick<Routines, 'get' | 'create' | 'update' | 'pause' | 'resume' | 'delete'>
   /** Posts the timeline row of a bot's change to its own routine in its DM, as `askQuestion` posts a card. */
@@ -518,7 +526,7 @@ const lostTool = (name: string) => `${name} isn't available to you any more: the
 /** The extension holding the tools only bot `botId` has (see `BotRuntimeOptions.botTools`). */
 const ownToolsExtension = (botId: string) => `openbot-bot:${botId}`
 
-/** A sendMessage, askQuestion or request_plugin call that succeeded, or a use_computer call that posted a take-over card; a failed one reached nobody. */
+/** A sendMessage, react, askQuestion or request_plugin call that succeeded, or a use_computer call that posted a take-over card; a failed one reached nobody. */
 const reachedOwner = (entry: EntryRecord) =>
   entry.kind === 'pi.tool-result' &&
   entry.model?.some(
@@ -526,11 +534,14 @@ const reachedOwner = (entry: EntryRecord) =>
       message.role === 'toolResult' &&
       !message.isError &&
       (ownerTools.has(message.toolName) ||
+        // A reaction is a whole answer too (Grok's `reacted`).
+        message.toolName === 'react' ||
         (message.toolName === 'use_computer' && Boolean((message.details as UseComputerDetails | undefined)?.takeOver))),
   )
 
 /** A tool's result in a run, other than of one reaching the owner: work whose outcome they may be owed. */
-const isWork = (entry: EntryRecord) => entry.kind === 'pi.tool-result' && entry.model?.some((message) => message.role === 'toolResult' && !ownerTools.has(message.toolName))
+const isWork = (entry: EntryRecord) =>
+  entry.kind === 'pi.tool-result' && entry.model?.some((message) => message.role === 'toolResult' && !ownerTools.has(message.toolName) && message.toolName !== 'react')
 
 /** The tools a bot sends its own messages with: to the owner or a group, to teammates, and questions. */
 const sendingTools = new Set(['sendMessage', 'message_bot', 'askQuestion'])
@@ -559,7 +570,9 @@ const isOwnerDmInput = (input: BotInput) => input.lane === 'owner' && !input.gro
 
 /** Where an input other than the owner's DM message came from, as extraction's context labels it. */
 const describeInputSource = (input: BotInput) =>
-  input.groupChatId
+  isReactionInput(input.id)
+    ? "the owner's reaction to your message"
+    : input.groupChatId
     ? 'a group chat turn'
     : input.lane === 'owner'
       ? 'a card the owner answered, or a note from the server'
@@ -811,6 +824,49 @@ export class BotRuntime implements AgentRuntime {
           const round = (await api.snapshot(LiveDoc, api.conversationId, context))?.tools ?? []
           const asks = round.some((slot) => cardTools.has(slot.name))
           return { output: [{ type: 'text', text: 'Sent.' }], ...(asks && { control: { terminate: true } }) }
+        },
+      }),
+    }
+    // Grok's ReactToMessage: a tapback on one of the owner's messages, fire-and-forget.
+    const react: BotTool = {
+      surface: null,
+      tool: defineTool({
+        name: 'react',
+        description:
+          "React to one of the owner's messages with a single emoji, like a tapback; it shows as a small pill on their " +
+          'message. Use this VERY sparingly, only when a reaction is the genuinely natural, human response and a reply would ' +
+          'be overkill: they said something funny, shared good news, or a quick 👍 fits better than a sentence. It is NOT a ' +
+          'substitute for a real reply when they asked you for something, and never react just to seem friendly. Only the ' +
+          "owner's own messages, by the [m1a2b3c4]-style address at their start, never your own. It toggles: the same emoji " +
+          "on the same message again takes your reaction back. It doesn't end your turn. Mirror the owner: if they don't " +
+          'use emoji, basically never do this.',
+        parameters: Type.Object({
+          message: Type.String({ description: "The address of the owner's message, e.g. m1a2b3c4" }),
+          emoji: Type.String({ description: 'One common emoji, e.g. 👍, ❤️, 😂, 🎉' }),
+        }),
+        // Replaying a toggle would take the reaction back.
+        replay: 'unsafe',
+        execute: async (args, api) => {
+          const bot = await botOf(api.conversationId)
+          const chats = [bot.chatId, ...(await listGroups(options.db, bot.id)).map((group) => group.id)]
+          const message = await findOwnerMessage(options.db, chats, args.message)
+          if (!message) {
+            throw new Error(
+              `There is no message at ${args.message} you can react to: you react to only the owner's messages in your chats, ` +
+                'by the [m1a2b3c4]-style address at their start.',
+            )
+          }
+          const emoji = args.emoji.trim()
+          const { added } = await options.react(bot, message, emoji)
+          const address = messageAddress(message.id)
+          return {
+            output: [
+              {
+                type: 'text',
+                text: added ? `Reacted ${emoji} on ${address}. (Reactions toggle: react the same emoji again to take it back.)` : `Took back your ${emoji} on ${address}.`,
+              },
+            ],
+          }
         },
       }),
     }
@@ -1179,7 +1235,7 @@ export class BotRuntime implements AgentRuntime {
         },
       },
     })
-    const tools = [sendMessage, messageBot, askQuestion, searchPlugins, requestPlugin, updateState, ...computerTools(images), useComputer, ...(options.tools ?? [])].map(detachable)
+    const tools = [sendMessage, react, messageBot, askQuestion, searchPlugins, requestPlugin, updateState, ...computerTools(images), useComputer, ...(options.tools ?? [])].map(detachable)
     /** The audit entries of reviewed calls that are running, by conversation and call, and when each started. */
     const reviewed = new Map<string, { entryId: string; started: number }>()
     const toolSurfaces = new Map<string, ToolSurface>([
@@ -1554,7 +1610,8 @@ export class BotRuntime implements AgentRuntime {
         if (isReminder(entry, closingReminder)) closed = true
         if (entry.kind === inputKind) {
           const data = entry.data as InputRecord | undefined
-          if (data?.lane !== 'owner') return
+          // Nothing is owed after a reaction's wake, which asks for no reply.
+          if (data?.lane !== 'owner' || isReactionInput(data.id)) return
           // A group turn may pass, but text written and not sent, unless it reads as a pass, was likely meant for the
           // group, as was work it ended on silently (Grok's members do the work, then deliver it).
           if (data.groupChatId) {
@@ -1615,8 +1672,9 @@ export class BotRuntime implements AgentRuntime {
     return contents.flatMap((content) => (typeof content === 'string' ? [{ type: 'text' as const, text: content }] : content))
   }
 
-  /** What the model reads of an input: its text, where its files are, then its images. */
-  async #content(bot: BotWithChat, { lane, text, attachments = [] }: BotInput): Promise<string | (TextContent | ImageContent)[]> {
+  /** What the model reads of an input: its preface and text, where its files are, then its images. */
+  async #content(bot: BotWithChat, { lane, text: words, preface, attachments = [] }: BotInput): Promise<string | (TextContent | ImageContent)[]> {
+    const text = [preface, words].filter(Boolean).join('\n')
     if (!attachments.length) return text
     const by = lane === 'bot' ? 'The sender' : 'The owner'
     const parts: (TextContent | ImageContent)[] = [{ type: 'text', text: [text, describeAttachments(attachments, by)].filter(Boolean).join('\n\n') }]

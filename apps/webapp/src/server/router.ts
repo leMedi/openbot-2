@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
 import {
@@ -26,7 +27,16 @@ import {
   removeDevice,
   setDeviceSwitches,
   unregisterDevice,
+  describeOwnerPreface,
+  describeReaction,
   getGroup,
+  InvalidReactionError,
+  MessageNotFoundError,
+  othersIn,
+  ownerReactor,
+  reactionWakes,
+  replyQuoteOf,
+  toggleReaction,
   GroupMembersError,
   listGroups,
   listChatSummaries,
@@ -248,13 +258,50 @@ async function setTimeZone(context: ServerContext, write: () => Promise<TimeZone
   return { timeZone }
 }
 
+/** Why the bot's model can't run now, or undefined when it can. */
+async function whyCantRun(context: ServerContext, bot: BotWithChat): Promise<string | undefined> {
+  if (context.computer.unavailable) return context.computer.unavailable
+  const model = bot.model ?? (await readModelSettings(context.db)).defaultModel
+  if (!model) return 'Choose a default model first'
+  if (!(await context.providers.findModel(model))) return `${model} is not available; connect its provider or choose another model`
+}
+
 /** Throws unless the bot's model can run, so the owner's input is never left without a bot to answer it. */
 async function assertCanRun(context: ServerContext, bot: BotWithChat) {
-  if (context.computer.unavailable) throw new ORPCError('PRECONDITION_FAILED', { message: context.computer.unavailable })
-  const model = bot.model ?? (await readModelSettings(context.db)).defaultModel
-  if (!model) throw new ORPCError('PRECONDITION_FAILED', { message: 'Choose a default model first' })
-  if (!(await context.providers.findModel(model))) {
-    throw new ORPCError('PRECONDITION_FAILED', { message: `${model} is not available; connect its provider or choose another model` })
+  const why = await whyCantRun(context, bot)
+  if (why) throw new ORPCError('PRECONDITION_FAILED', { message: why })
+}
+
+/**
+ * The reply's quote of the chat's message `replyToId`, or undefined for none; NOT_FOUND when the chat has no such
+ * message.
+ */
+async function replyQuote(context: ServerContext, chatId: string, replyToId: string | undefined) {
+  if (replyToId === undefined) return undefined
+  const replied = await getMessage(context.db, replyToId)
+  if (replied?.chatId !== chatId) throw new ORPCError('NOT_FOUND', { message: 'No such message to reply to' })
+  return replyQuoteOf(replied)
+}
+
+/**
+ * Wakes the bot whose message the owner just reacted to with the reaction (Grok's hidden cue), asking for no reply: in
+ * its DM in its background lane, so it never interrupts the bot, or for a group's message as a turn in that group. A bot
+ * that can't run now isn't woken: the reaction stays all the same.
+ */
+async function wakeForReaction(context: ServerContext, message: Message, emoji: string) {
+  const botId = reactionWakes(message)
+  const bot = botId && (await getBot(context.db, botId))
+  if (!bot || (await whyCantRun(context, bot))) return
+  const cue = describeReaction(emoji, message)
+  const id = `reaction:${message.id}:${randomUUID()}`
+  try {
+    if (message.chatId === bot.chatId) return await context.runtime.wake(bot.id, { lane: 'background', text: cue, id })
+    const group = await getGroup(context.db, message.chatId)
+    if (!group?.members.includes(bot.id)) return
+    const tag = `[Group chat: "${group.name}" - with ${othersIn(group, bot.id)}]`
+    await context.runtime.wake(bot.id, { lane: 'owner', groupChatId: group.id, text: `${tag}\n${cue}`, id })
+  } catch (error) {
+    console.error(`[reactions] Couldn't wake ${bot.name} with a reaction:`, error)
   }
 }
 
@@ -317,9 +364,10 @@ async function publishGroupsOf(context: ServerContext, botId: string) {
  * Posts the owner's message in a group chat, with their files saved in the group's shared folder, and starts the members'
  * rounds answering it. Throws unless every member can run, so the message is never left without members to answer it.
  */
-async function sendToGroup(context: ServerContext, chatId: string, text: string, uploads: readonly File[] = []) {
+async function sendToGroup(context: ServerContext, chatId: string, text: string, uploads: readonly File[] = [], replyToId?: string) {
   const group = await getGroup(context.db, chatId)
   if (!group) throw new ORPCError('NOT_FOUND', { message: 'No such chat' })
+  const replyTo = await replyQuote(context, chatId, replyToId)
   if (!group.members.length) throw new ORPCError('PRECONDITION_FAILED', { message: 'Add members to this group chat first' })
   for (const member of group.members) {
     const bot = await getBot(context.db, member)
@@ -333,7 +381,7 @@ async function sendToGroup(context: ServerContext, chatId: string, text: string,
     files.push({ name: basename(path), mimeType: file.type || mimeTypeOf(file.name), path, bytes })
   }
   const attachments = await context.attachments.save(chatId, files)
-  const { message } = await postMessage(context.db, { chatId, author: 'owner', authorName: 'You', text, attachments }).catch(async (error) => {
+  const { message } = await postMessage(context.db, { chatId, author: 'owner', authorName: 'You', text, attachments, replyTo }).catch(async (error) => {
     // The files stay in the shared folder; only the copies of a message never posted go.
     await context.attachments.discard(chatId, attachments)
     throw error
@@ -626,10 +674,11 @@ export const router = os.router({
 
     send: os.chats.send.handler(async ({ context, input }) => {
       const chat = await getChat(context.db, input.chatId)
-      if (chat?.kind === 'group') return sendToGroup(context, chat.id, input.text, input.files)
+      if (chat?.kind === 'group') return sendToGroup(context, chat.id, input.text, input.files, input.replyToId)
       const bot = chat?.botId ? await getBot(context.db, chat.botId) : undefined
       if (!bot) throw new ORPCError('NOT_FOUND', { message: 'No such chat' })
       await assertCanRun(context, bot)
+      const replyTo = await replyQuote(context, chat!.id, input.replyToId)
       // Saved one at a time, so two files of one name get distinct names.
       const files: AttachmentFile[] = []
       for (const file of input.files) {
@@ -644,6 +693,7 @@ export const router = os.router({
         authorName: 'You',
         text: input.text,
         attachments,
+        replyTo,
       }).catch(async (error) => {
         // The uploads stay on the computer; only the copies of a message never posted go.
         await context.attachments.discard(chat!.id, attachments)
@@ -656,7 +706,19 @@ export const router = os.router({
         context.bus.publish({ type: 'message.updated', message: toMessageInfo(dismissed) })
       }
       await publishChat(context, chat!.id)
-      await context.runtime.wake(bot.id, { lane: 'owner', text: input.text, attachments, id: message.id })
+      await context.runtime.wake(bot.id, { lane: 'owner', text: input.text, preface: describeOwnerPreface(message), attachments, id: message.id })
+      return info
+    }),
+
+    react: os.chats.react.handler(async ({ context, input }) => {
+      const { message, added } = await answering(() => toggleReaction(context.db, input.messageId, input.emoji, ownerReactor), [
+        [MessageNotFoundError, 'NOT_FOUND'],
+        [InvalidReactionError, 'BAD_REQUEST'],
+      ])
+      const info = toMessageInfo(message)
+      context.bus.publish({ type: 'message.updated', message: info })
+      // Taking a reaction back, or reacting to their own message, wakes nobody.
+      if (added) await wakeForReaction(context, message, input.emoji.trim())
       return info
     }),
 

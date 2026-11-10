@@ -50,6 +50,8 @@ function message(fields: Partial<MessageInfo> & Pick<MessageInfo, 'author'>): Me
     attachments: [],
     card: null,
     botMessage: null,
+    reactions: [],
+    replyTo: null,
     createdAt: 0,
     ...fields,
   } as MessageInfo

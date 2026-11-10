@@ -16,7 +16,7 @@ function fakeStorage(entries: Record<string, string> = {}): KeyValueStorage & { 
 
 const instance = (instanceId: string) => JSON.stringify({ url: 'http://192.168.1.20:3000', instanceId, setUp: true })
 
-const snapshot = { version: 2, bots: [], chats: [], sections: [], messages: [] } as unknown as LiveSnapshot
+const snapshot = { version: 3, bots: [], chats: [], sections: [], messages: [] } as unknown as LiveSnapshot
 
 describe("the phone's snapshot", () => {
   it('is kept for the next start of the app on the same instance', () => {

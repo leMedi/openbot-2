@@ -236,3 +236,19 @@ export {
   type RoutinesOptions,
   type RoutineState,
 } from './routines.ts'
+export {
+  describeOwnerPreface,
+  describeReaction,
+  describeReply,
+  findOwnerMessage,
+  InvalidReactionError,
+  isReactionInput,
+  isSingleEmoji,
+  messageAddress,
+  MessageNotFoundError,
+  ownerReactor,
+  quoteOf,
+  reactionWakes,
+  replyQuoteOf,
+  toggleReaction,
+} from './reactions.ts'

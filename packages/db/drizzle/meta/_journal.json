@@ -162,6 +162,13 @@
       "when": 1794271764263,
       "tag": "0022_muted_chats",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1794345490929,
+      "tag": "0023_message_reactions_replies",
+      "breakpoints": true
     }
   ]
 }

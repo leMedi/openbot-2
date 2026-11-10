@@ -214,6 +214,37 @@ export const botMessage = z.object({
 })
 export type BotMessageInfo = z.infer<typeof botMessage>
 
+/** An emoji left on a message, by the owner (`owner`) or a bot (its id). */
+export const reaction = z.object({ emoji: z.string(), by: z.string() })
+export type ReactionInfo = z.infer<typeof reaction>
+
+/** The emoji the owner reacts with in one tap, Grok's quick set. */
+export const quickReactions = ['👍', '👎', '❤️', '😂', '🎉', '😮'] as const
+
+/**
+ * `reactions` with `emoji` by `by` toggled: added at the end when it isn't there, taken back when it is. Each reactor
+ * leaves an emoji once; several reactors, or several emoji, may share a message.
+ */
+export function toggledReactions(reactions: readonly ReactionInfo[], emoji: string, by: string): ReactionInfo[] {
+  const has = reactions.some((entry) => entry.emoji === emoji && entry.by === by)
+  return has ? reactions.filter((entry) => !(entry.emoji === emoji && entry.by === by)) : [...reactions, { emoji, by }]
+}
+
+/** The most characters of a replied-to message a reply's preview carries. */
+export const maxReplyPreviewLength = 280
+
+/** What a reply shows of the message it answers, as it was when the reply was sent. */
+export const replyTo = z.object({
+  id: z.string(),
+  author: z.enum(['owner', 'bot']),
+  /** The bot that posted it, when `author` is `bot`. */
+  botId: z.string().nullable(),
+  authorName: z.string(),
+  /** Its text, cut to `maxReplyPreviewLength`; its files' names for a message of files only. */
+  text: z.string(),
+})
+export type ReplyToInfo = z.infer<typeof replyTo>
+
 /** Something the owner or a bot posted in a chat. A bot's thinking and tool use are never messages. */
 export const message = z.object({
   id: z.string(),
@@ -231,6 +262,10 @@ export const message = z.object({
   card: card.nullable(),
   /** Set when one bot sent the message to another; it then shows in both bots' DMs. */
   botMessage: botMessage.nullable(),
+  /** Emoji left on it, in the order they were left. */
+  reactions: z.array(reaction),
+  /** The message it replies to; the owner's messages only. */
+  replyTo: replyTo.nullable(),
   /** Milliseconds since the epoch. */
   createdAt: z.number(),
 })
@@ -1013,9 +1048,21 @@ export const contract = {
             chatId: z.string(),
             text: z.string().trim().max(100_000).default(''),
             files: z.array(z.file().max(maxAttachmentBytes)).max(maxAttachments).default([]),
+            /** The chat's message this one replies to: the bot reads it quoted before the owner's text. */
+            replyToId: z.string().optional(),
           })
           .refine((input) => input.text || input.files.length, { message: 'Write a message or attach a file' }),
       )
+      .output(message),
+    react: oc
+      .route({
+        method: 'POST',
+        path: '/messages/{messageId}/reactions',
+        summary:
+          "Toggle the owner's reaction on a message: an emoji they haven't left is added, one they have is taken back. " +
+          "Adding one to a bot's message wakes that bot with it, without asking for a reply",
+      })
+      .input(z.object({ messageId: z.string(), emoji: z.string().trim().min(1).max(32) }))
       .output(message),
     attachment: oc
       .route({

@@ -151,12 +151,12 @@ describe('rounds', () => {
     expect(speakers(server)).toEqual(['Rex', 'Rex', 'Ana', 'Ana', 'Rex'])
     const [rexFirst, , rexSecond] = requestsOf(server, 'Rex')
     expect(lastMessage(rexFirst!)).toContain('[Group chat: \\"Rex, Ana\\" - with Ana]')
-    expect(lastMessage(rexFirst!)).toContain('The owner: Can we ship today?')
+    expect(lastMessage(rexFirst!)).toMatch(/The owner \[m[0-9a-f]{8}\]: Can we ship today\?/)
     // Its second turn shows only what came after its first.
     expect(lastMessage(rexSecond!)).toContain('Ana: Docs are ready.')
     expect(lastMessage(rexSecond!)).not.toContain('Can we ship today?')
     const [anaFirst] = requestsOf(server, 'Ana')
-    expect(lastMessage(anaFirst!)).toContain('The owner: Can we ship today?')
+    expect(lastMessage(anaFirst!)).toMatch(/The owner \[m[0-9a-f]{8}\]: Can we ship today\?/)
     expect(lastMessage(anaFirst!)).toContain('Rex: Build is green.')
     // A pass needs no reply: no reminder followed.
     expect(server.providers.pendingTurns).toBe(0)
@@ -314,7 +314,7 @@ describe('rounds', () => {
     expect(turn).toContain('(7 earlier messages not shown)')
     expect(turn).not.toContain('Note 7\\n')
     expect(turn).toContain('Ana: Note 8')
-    expect(turn).toContain('The owner: @Rex summarise')
+    expect(turn).toMatch(/The owner \[m[0-9a-f]{8}\]: @Rex summarise/)
   })
 
   it('shows who is taking a turn', async () => {
@@ -366,7 +366,7 @@ describe("the owner's files in a group chat", () => {
     expect(await readFile(join(folder, 'plan.md'), 'utf8')).toBe('# Ship Friday\n')
     for (const name of ['Rex', 'Ana']) {
       const turn = lastMessage(requestsOf(server, name)[1]!)
-      expect(turn).toContain('The owner: Plan attached')
+      expect(turn).toMatch(/The owner \[m[0-9a-f]{8}\]: Plan attached/)
       expect(turn).toContain(`${join(folder, 'plan.md')} (text/plain)`)
     }
     // The owner downloads the copy kept on the server, as in a DM.

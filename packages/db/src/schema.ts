@@ -190,6 +190,15 @@ export const messageAuthors = ['owner', 'bot'] as const
 export type MessageAuthor = (typeof messageAuthors)[number]
 
 /** A message between bots, as it appears in a bot's DM: `to` the peer (outgoing) or `from` the peer (incoming). */
+/** An emoji someone left on a message: `by` is `owner` or the id of the bot that reacted. */
+export type Reaction = { emoji: string; by: string }
+
+/**
+ * What a reply shows of the message it answers, as that message was when the reply was sent: its id, author and full
+ * text (or its files' names, for a message of files only).
+ */
+export type ReplyQuote = { id: string; author: MessageAuthor; botId: string | null; authorName: string; text: string }
+
 export const botMessageDirections = ['to', 'from'] as const
 export type BotMessageDirection = (typeof botMessageDirections)[number]
 
@@ -218,6 +227,13 @@ export const messages = sqliteTable(
     direction: text('direction', { enum: botMessageDirections }),
     peerBotId: text('peer_bot_id').references((): AnySQLiteColumn => bots.id, { onDelete: 'set null' }),
     peerName: text('peer_name'),
+    /** Emoji left on the message, in the order they were left; leaving one again takes it back. */
+    reactions: text('reactions', { mode: 'json' })
+      .$type<Reaction[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /** The message this one replies to, as it was then; the owner's messages only. */
+    replyTo: text('reply_to', { mode: 'json' }).$type<ReplyQuote>(),
     /** ID of the tool call that posted this message; makes replayed calls idempotent. */
     idempotencyKey: text('idempotency_key').unique(),
     createdAt: createdAt(),
