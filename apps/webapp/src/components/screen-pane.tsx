@@ -1,15 +1,12 @@
 import type { BotInfo, MessageInfo } from '@openbot/api-contract'
+import { useScreenConnection } from '@openbot/client/screen'
 import { cn } from '@openbot/ui/lib/utils'
-import { useEffect, useRef, useState } from 'react'
+import { useRef } from 'react'
 import { api } from '../lib/api.ts'
 import { useHandBack } from './take-over-card.tsx'
 
 // Every screen is 1280×800 (`screenSize` on the server).
 const aspect = '1280 / 800'
-/** Failed connections in a row before the owner is told the screen can't be reached. */
-const attemptsBeforeUnreachable = 3
-
-type ViewState = 'connecting' | 'starting' | 'connected' | 'unreachable'
 
 /**
  * A bot's screen beside its DM, like Grok's computer preview: live and view-only, with **⤢ Open** to take it fullscreen,
@@ -121,71 +118,11 @@ export function FullscreenScreen({ bot, takeOver, onClose }: { bot: BotInfo; tak
   )
 }
 
-/** The live screen: a ticket, then the stream over a WebSocket, reconnecting when it drops. */
+/** The live screen, reconnecting when it drops (see `useScreenConnection`). */
 function ScreenView({ bot, interactive = false, className, dark }: { bot: BotInfo; interactive?: boolean; className?: string; dark?: boolean }) {
   const target = useRef<HTMLDivElement>(null)
-  const rfb = useRef<import('@novnc/novnc').default>(undefined)
-  const [state, setState] = useState<ViewState>('connecting')
-  const [retry, setRetry] = useState(0)
-
-  useEffect(() => {
-    let cancelled = false
-    let failures = 0
-    let timer: ReturnType<typeof setTimeout> | undefined
-    setState('connecting')
-
-    const again = (delayMs: number) => {
-      if (!cancelled) timer = setTimeout(connect, delayMs)
-    }
-
-    async function connect() {
-      let url: string
-      try {
-        url = (await api().screens.ticket({ botId: bot.id })).url
-      } catch (error) {
-        if (cancelled) return
-        if ((error as { code?: string }).code === 'PRECONDITION_FAILED') {
-          setState('starting')
-          return again(1_500)
-        }
-        return fail()
-      }
-      const { default: RFB } = await import('@novnc/novnc')
-      if (cancelled || !target.current) return
-      const origin = new URL(window.location.href)
-      origin.protocol = origin.protocol === 'https:' ? 'wss:' : 'ws:'
-      const client = new RFB(target.current, new URL(url, origin).href, { shared: true })
-      client.scaleViewport = true
-      client.background = 'transparent'
-      client.viewOnly = !interactive
-      client.addEventListener('connect', () => {
-        failures = 0
-        setState('connected')
-        // Fullscreen takes the keyboard at once.
-        if (interactive) client.focus()
-      })
-      client.addEventListener('disconnect', () => {
-        if (rfb.current === client) rfb.current = undefined
-        fail()
-      })
-      rfb.current = client
-    }
-
-    function fail() {
-      if (cancelled) return
-      if (++failures >= attemptsBeforeUnreachable) return setState('unreachable')
-      setState('connecting')
-      again(1_000 * failures)
-    }
-
-    void connect()
-    return () => {
-      cancelled = true
-      clearTimeout(timer)
-      rfb.current?.disconnect()
-      rfb.current = undefined
-    }
-  }, [bot.id, interactive, retry])
+  const { status, retry } = useScreenConnection(target, { api: api(), botId: bot.id, interactive })
+  const state = status === 'reconnecting' ? 'connecting' : status
 
   return (
     <div
@@ -200,7 +137,7 @@ function ScreenView({ bot, interactive = false, className, dark }: { bot: BotInf
               <span>Can't reach {bot.name}'s screen</span>
               <button
                 type="button"
-                onClick={() => setRetry((count) => count + 1)}
+                onClick={retry}
                 className="rounded-full bg-secondary px-3 py-1 text-sm text-foreground hover:bg-secondary-hover"
               >
                 Retry

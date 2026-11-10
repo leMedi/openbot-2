@@ -15,7 +15,6 @@
     "seed": "pnpm with-env node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/seed.ts"
   },
   "dependencies": {
-    "@novnc/novnc": "^1.7.0",
     "@openbot/agent": "workspace:*",
     "@openbot/api-contract": "workspace:*",
     "@openbot/client": "workspace:*",

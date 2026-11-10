@@ -193,9 +193,6 @@ importers:
 
   apps/webapp:
     dependencies:
-      '@novnc/novnc':
-        specifier: ^1.7.0
-        version: 1.7.0
       '@openbot/agent':
         specifier: workspace:*
         version: link:../../packages/agent
@@ -389,6 +386,9 @@ importers:
 
   packages/client:
     dependencies:
+      '@novnc/novnc':
+        specifier: ^1.7.0
+        version: 1.7.0
       '@openbot/api-contract':
         specifier: workspace:*
         version: link:../api-contract

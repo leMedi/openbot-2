@@ -1,4 +1,4 @@
-// The parts of noVNC's client (https://github.com/novnc/noVNC/blob/master/docs/API.md) the Screen pane uses.
+// The parts of noVNC's client (https://github.com/novnc/noVNC/blob/master/docs/API.md) the Screen connection and the apps use.
 declare module '@novnc/novnc' {
   export default class RFB extends EventTarget {
     constructor(target: HTMLElement, url: string, options?: { shared?: boolean; wsProtocols?: string[] })
@@ -9,6 +9,8 @@ declare module '@novnc/novnc' {
     focusOnClick: boolean
     showDotCursor: boolean
     background: string
+    qualityLevel: number
+    compressionLevel: number
     focus(options?: FocusOptions): void
     blur(): void
     disconnect(): void
