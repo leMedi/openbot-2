@@ -140,6 +140,7 @@ function fakeServer() {
         server.viewing.push(chatId)
       },
       messages: async ({ chatId }: { chatId: string }) => {
+        if (server.unreachable) throw new TypeError('Failed to fetch')
         if (!server.chats.some((entry) => entry.id === chatId)) throw new Error('Chat not found')
         return { messages: [...(server.messages.get(chatId) ?? [])].reverse(), nextCursor: null }
       },
@@ -284,6 +285,41 @@ describe('the live stream', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(server.stamps).toHaveLength(3)
     expect(store.connected).toBe(true)
+  })
+  it('reopens the stream at once when the network changes, resuming from its stamp, even while connected', async () => {
+    const { server, api } = fakeServer()
+    server.connections = [[hello('e1', 1, false)], [hello('e1', 1, true)]]
+    const store = new LiveStore({ api, storage: memoryStorage() })
+    void store.run(controller.signal)
+    await vi.waitFor(() => expect(store.connected).toBe(true))
+
+    store.reconnect()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(server.stamps).toEqual([undefined, { epoch: 'e1', seq: 1 }])
+    expect(store.connected).toBe(true)
+    expect(server.refetches).toBe(1)
+  })
+
+  it("loads a chat opened while the instance couldn't be reached once the stream resumes", async () => {
+    const { server, api } = fakeServer()
+    server.chats = [chat('dm-rex')]
+    server.messages.set('dm-rex', [message('m1', 'dm-rex')])
+    server.connections = [[hello('e1', 1, false)]]
+    const store = new LiveStore({ api, storage: memoryStorage() })
+    void store.run(controller.signal)
+    await vi.waitFor(() => expect(store.connected).toBe(true))
+
+    server.unreachable = true
+    server.drop()
+    await vi.advanceTimersByTimeAsync(0)
+    await expect(store.openChat('dm-rex')).rejects.toThrow()
+    expect(store.messages.get('dm-rex')).toEqual([])
+
+    server.unreachable = false
+    server.connections = [[hello('e1', 1, true)]]
+    store.retryNow()
+    await vi.waitFor(() => expect(store.messages.get('dm-rex')?.map((entry) => entry.id)).toEqual(['m1']))
+    expect(server.refetches).toBe(1)
   })
 })
 

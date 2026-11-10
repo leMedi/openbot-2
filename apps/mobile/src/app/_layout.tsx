@@ -10,6 +10,8 @@ import { instanceApi } from '../lib/api.ts'
 import { useAppActive } from '../lib/app-state.ts'
 import type { CheckResult } from '../lib/connect/check.ts'
 import { checkFromPhone } from '../lib/connect/phone.ts'
+import { useNetworkChanges } from '../lib/network.ts'
+import { phoneSnapshot } from '../lib/snapshot.ts'
 import { InstanceContext, type InstanceInfo } from '../lib/instance-context.ts'
 import { reloadFolds } from '../lib/folds.ts'
 import { forgetInstanceData } from '../lib/forget.ts'
@@ -98,16 +100,24 @@ function Root() {
 }
 
 /**
- * The app on the instance at `url`: its live store, following the event stream while in front. The instance's API
- * version is checked again each time the stream connects and the app comes to the foreground, as it may have been
- * updated meanwhile, and with every diagnosis the banner runs. A different instance answering at the address isn't
- * looked for: that's Settings → Instance's Edit address. Settings is a sheet with its own stack.
+ * The app on the instance at `url`: its live store, following the event stream while in front, with its snapshot on
+ * the phone, so the chats and their loaded messages show, read-only, while the instance can't be reached (spec:
+ * Offline). The instance's API version is checked again each time the stream connects and the app comes to the
+ * foreground, as it may have been updated meanwhile, and with every diagnosis the banner runs. A different instance
+ * answering at the address isn't looked for: that's Settings → Instance's Edit address. Settings is a sheet with its
+ * own stack.
  */
 function Instance({ saved, moveTo, disconnect }: { saved: SavedInstance } & Pick<InstanceInfo, 'moveTo' | 'disconnect'>) {
   const { url, instanceId } = saved
   const [api] = useState(() => instanceApi(url))
-  const [store] = useState(() => new LiveStore({ api, storage: kvStorage }))
+  const [store] = useState(() => new LiveStore({ api, storage: kvStorage, snapshot: phoneSnapshot(kvStorage, instanceId) }))
   const active = useAppActive()
+  // Saved now as the app goes to the background, where it may be ended before the next save is due.
+  useEffect(() => {
+    if (!active) store.saveSnapshot()
+  }, [active, store])
+  // A stream on a network that's gone would only be noticed by the stall watchdog: it's reopened at once, resuming.
+  useNetworkChanges(() => store.reconnect())
   const [block, setBlock] = useState<VersionBlock>()
   const connected = useSyncExternalStore(store.subscribe, () => store.connected)
   const noteCheck = useCallback((result: CheckResult) => {

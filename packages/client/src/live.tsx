@@ -133,8 +133,8 @@ export class LiveStore {
   /** Settles once the snapshot is restored (or there is none). */
   readonly #restored: Promise<void>
   #saveTimer: ReturnType<typeof setTimeout> | undefined
-  /** Ends the current wait or unanswered attempt of `run`, for `retryNow`. */
-  #retry: (() => void) | undefined
+  /** Ends the current wait or attempt of `run`, for `retryNow` and `reconnect`: an open stream only when `force`d. */
+  #retry: ((force?: boolean) => void) | undefined
 
   constructor({ api, storage, snapshot }: LiveStoreOptions) {
     this.#api = api
@@ -170,8 +170,8 @@ export class LiveStore {
       const stop = () => attempt.abort()
       signal.addEventListener('abort', stop)
       let retrying = false
-      this.#retry = () => {
-        if (this.connected) return
+      this.#retry = (force = false) => {
+        if (this.connected && !force) return
         retrying = true
         attempt.abort()
       }
@@ -203,6 +203,14 @@ export class LiveStore {
    */
   retryNow() {
     this.#retry?.()
+  }
+
+  /**
+   * Reopens the stream at once, connected or not, as the phone does when its network changes: an open stream may be
+   * on a connection that's gone, which the stall watchdog would only notice later. It resumes from its last stamp.
+   */
+  reconnect() {
+    this.#retry?.(true)
   }
 
   /** Loads a chat's latest messages, merging them with any that arrived live meanwhile. */
@@ -482,6 +490,10 @@ export class LiveStore {
     switch (event.type) {
       case 'hello':
         this.#update(() => (this.connected = true))
+        // Chats opened while the instance couldn't be reached load now; a refetch already loaded them.
+        if (event.resumed) {
+          for (const chatId of this.messages.keys()) if (!this.#older.has(chatId)) void this.openChat(chatId).catch(() => {})
+        }
         return
       case 'bot.created':
         return this.addBot(event.bot)

@@ -9,7 +9,7 @@ import { Attachments } from '../../components/attachments.tsx'
 import { BotAvatar, GroupAvatar } from '../../components/avatar.tsx'
 import { PluginReconnectCard, PluginRequestCard, QuestionCard, RoutineChangeRow, TakeOverCard } from '../../components/cards.tsx'
 import { Composer, PickedFiles } from '../../components/composer.tsx'
-import { ConnectionBanner } from '../../components/connection-banner.tsx'
+import { ConnectionBanner, useUnreachable } from '../../components/connection-banner.tsx'
 import { ScreenIcon } from '../../components/icons.tsx'
 import { Markdown } from '../../components/markdown.tsx'
 import { useAppActive } from '../../lib/app-state.ts'
@@ -93,7 +93,8 @@ export default function Chat() {
       () => current && setLoaded(true),
       (caught) => {
         if (!current) return
-        setError(errorMessage(caught))
+        // Not while the instance can't be reached, which the banner says; the store loads it once it can be.
+        if (live.connected) setError(errorMessage(caught))
         // What the store already has (opened before, or arrived live) still shows.
         setLoaded(true)
       },
@@ -101,25 +102,48 @@ export default function Chat() {
     return () => void (current = false)
   }, [chatId, live])
 
+  // A load that failed as the connection went, before the stream noticed, is reloaded by the store once reconnected:
+  // its error goes then.
+  const [wasConnected, setWasConnected] = useState(live.connected)
+  if (wasConnected !== live.connected) {
+    setWasConnected(live.connected)
+    if (live.connected) setError(undefined)
+  }
+
   const messages = live.messages.get(chatId) ?? []
   const hasOlder = live.hasOlder(chatId)
   const loadingOlder = live.loadingOlder(chatId)
+  const unreachable = useUnreachable()
+  /** The owner reached the oldest loaded message offline, which the list doesn't tell again: loaded once reconnected. */
+  const olderWanted = useRef(false)
   const loadOlder = () => {
-    if (hasOlder && !loadingOlder) live.loadOlder(chatId).catch((caught) => setError(errorMessage(caught)))
+    if (!hasOlder || loadingOlder) return
+    // Offline, what the phone kept is all there is until the instance can be reached.
+    if (!live.connected) olderWanted.current = true
+    else live.loadOlder(chatId).catch((caught) => setError(errorMessage(caught)))
   }
+  useEffect(() => {
+    if (!live.connected || !olderWanted.current) return
+    olderWanted.current = false
+    live.loadOlder(chatId).catch((caught) => setError(errorMessage(caught)))
+  }, [live, live.connected, chatId])
 
   // In front of the owner: what arrives is read, and the instance doesn't push for this chat meanwhile.
   const inFront = loaded && active && focused
+  // What the phone kept shows at once, the latest page merging in once loaded; offline, it's all there is.
+  const shown = loaded || messages.length > 0
   const newest = messages.at(-1)?.id
   const unread = chat?.unread ?? false
   /** The newest message a read was tried for; a failed one isn't retried until another message arrives. */
   const triedRead = useRef<string>(undefined)
   useEffect(() => {
-    if (!inFront || !unread || triedRead.current === newest) return
+    // Once the instance is reached again, as a read marked offline would be undone by its state then.
+    if (!inFront || !unread || !live.connected || triedRead.current === newest) return
     triedRead.current = newest
     live.markRead(chatId, newest).catch(() => {})
-  }, [inFront, unread, newest, chatId, live])
-  useViewingHeartbeat(chatId, inFront)
+  }, [inFront, unread, newest, chatId, live, live.connected])
+  // Not while the instance can't be reached: it would only fail.
+  useViewingHeartbeat(chatId, inFront && live.connected)
 
   async function send(text: string, sending: PickedFile[], key = newSendKey()) {
     following.current = true
@@ -211,7 +235,7 @@ export default function Chat() {
           {card.type === 'plugin_reconnect' && <PluginReconnectCard card={card} botName={row.authorName} />}
         </View>
       )
-    } else content = <MessageBubble row={row} showAuthor={!!group} onResend={(entry) => void send(entry.text, entry.files, entry.key)} onDiscard={(entry) => updateSends(chatId, (entries) => entries.filter((other) => other.key !== entry.key))} />
+    } else content = <MessageBubble row={row} showAuthor={!!group} onResend={live.connected ? (entry) => void send(entry.text, entry.files, entry.key) : undefined} onDiscard={(entry) => updateSends(chatId, (entries) => entries.filter((other) => other.key !== entry.key))} />
     return <View style={[styles.rowWrap, row.continuesNext ? styles.close : styles.apart, highlight]}>{content}</View>
   }
 
@@ -250,7 +274,9 @@ export default function Chat() {
       <KeyboardAvoidingView behavior="padding" style={[styles.screen, { paddingTop: headerHeight, backgroundColor: colors.background }]}>
         <ConnectionBanner />
         <View style={styles.screen}>
-          {!loaded ? (
+          {!messages.length && chat.lastMessage && unreachable ? (
+            <Text style={[styles.empty, { color: colors.mutedForeground }]}>{"This chat's messages aren't on this phone yet. They show once OpenBot can be reached."}</Text>
+          ) : !shown || (!messages.length && chat.lastMessage && !live.connected) ? (
             <ActivityIndicator style={styles.loading} color={colors.mutedForeground} />
           ) : rows.length === 0 && !typing ? (
             <Text style={[styles.empty, { color: colors.mutedForeground }]}>
@@ -341,7 +367,8 @@ function MessageBubble({
 }: {
   row: Row
   showAuthor: boolean
-  onResend: (entry: Outgoing<PickedFile>) => void
+  /** Undefined while the instance can't be reached, as there's no queue to send later. */
+  onResend: ((entry: Outgoing<PickedFile>) => void) | undefined
   onDiscard: (entry: Outgoing<PickedFile>) => void
 }) {
   const colors = useColors()
@@ -375,9 +402,11 @@ function MessageBubble({
       {failed && row.outgoing && (
         <View accessibilityRole="alert" style={styles.failed}>
           <Text style={[styles.failedText, { color: colors.destructiveForeground }]}>Failed to send</Text>
-          <Text accessibilityRole="button" onPress={() => onResend(row.outgoing!)} style={[styles.failedText, styles.failedAction, { color: colors.destructiveForeground }]}>
-            Resend
-          </Text>
+          {onResend && (
+            <Text accessibilityRole="button" onPress={() => onResend(row.outgoing!)} style={[styles.failedText, styles.failedAction, { color: colors.destructiveForeground }]}>
+              Resend
+            </Text>
+          )}
           <Text accessibilityRole="button" onPress={() => onDiscard(row.outgoing!)} style={[styles.failedText, styles.failedAction, { color: colors.destructiveForeground }]}>
             Delete
           </Text>

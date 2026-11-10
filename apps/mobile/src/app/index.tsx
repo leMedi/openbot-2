@@ -7,7 +7,7 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ActionSheet, type SheetContent, type SheetItem } from '../components/action-sheet.tsx'
 import { ChatRow, rowName } from '../components/chat-row.tsx'
-import { ConnectionBanner } from '../components/connection-banner.tsx'
+import { ConnectionBanner, useUnreachable } from '../components/connection-banner.tsx'
 import { ChevronIcon, GearIcon, PlusIcon } from '../components/icons.tsx'
 import { PinnedReorder } from '../components/pinned-reorder.tsx'
 import { Prompt, type PromptRequest } from '../components/prompt.tsx'
@@ -35,6 +35,7 @@ export default function Chats() {
   const colors = useColors()
   const insets = useSafeAreaInsets()
   const folds = useFolds()
+  const unreachable = useUnreachable()
   const now = useNow(nextMuteEnd(live.chats.values()))
   const [editing, setEditing] = useState(false)
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
@@ -52,7 +53,9 @@ export default function Chats() {
   const selection = rows.filter((row) => picked.has(row.chatId))
   const pinnedIds = live.pinnedChatIds
 
-  const fail = (caught: unknown) => Alert.alert("Couldn't do that", errorMessage(caught))
+  // Offline, the list is read-only: what was tried says why it failed in words.
+  const fail = (caught: unknown) =>
+    Alert.alert("Couldn't do that", live.connected ? errorMessage(caught) : "OpenBot can't be reached right now. Try again once it can.")
   const attempt = (work: Promise<unknown>) => void work.catch(fail)
 
   const openChat = (chat: Pick<ChatInfo, 'id'>, message?: string) =>
@@ -355,7 +358,9 @@ export default function Chats() {
         ) : (
           <>
             <ConnectionBanner />
-            {!live.bots ? (
+            {!live.bots && unreachable ? (
+              <Text style={[styles.empty, { color: colors.mutedForeground }]}>{'Your chats show once OpenBot can be reached.'}</Text>
+            ) : !live.bots ? (
               <ActivityIndicator style={styles.loading} color={colors.mutedForeground} />
             ) : layout.blocks.length ? (
               layout.blocks.map(blockElement)

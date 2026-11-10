@@ -12,14 +12,19 @@ import { Body, Button, OpenSettings, Title } from './ui.tsx'
 /** How long the live stream may be down before the banner shows, so a quick reconnect doesn't flash it. */
 const bannerDelayMs = 3_000
 
+/** Whether the instance has been out of reach as long as the banner waits before showing, as it shows then. */
+export function useUnreachable(): boolean {
+  const live = useLive()
+  return useDownFor(!live.connected, bannerDelayMs)
+}
+
 /**
  * "Can't reach OpenBot · Retrying" while the live stream is down (spec: Connect flow): after setup the app never goes
  * back to Connect. Tapping it shows the diagnosis, as Connect would word it, and Try now.
  */
 export function ConnectionBanner() {
-  const live = useLive()
   const colors = useColors()
-  const down = useDownFor(!live.connected, bannerDelayMs)
+  const down = useUnreachable()
   const [open, setOpen] = useState(false)
   const close = useCallback(() => setOpen(false), [])
   if (!down && !open) return null

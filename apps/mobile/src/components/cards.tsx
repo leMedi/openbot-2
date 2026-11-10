@@ -23,7 +23,8 @@ import { PluginIcon } from './plugin-icon.tsx'
 
 /**
  * Sends a card's answer (an answer, a dismissal, a hand-back, a decision) once at a time, putting the server's message
- * as it is now in the transcript, and keeps the error to show.
+ * as it is now in the transcript, and keeps the error to show. `blocked` while one is sending or the instance can't be
+ * reached.
  */
 function useCardAction() {
   const live = useLive()
@@ -41,7 +42,8 @@ function useCardAction() {
       setSending(undefined)
     }
   }
-  return { sending, error, run }
+  // Offline, cards are read-only, as the rest of the chat (spec: Offline).
+  return { sending, error, run, blocked: !!sending || !live.connected }
 }
 
 /** A card's frame: a bubble as wide as the transcript allows, outlined while it waits for the owner. */
@@ -134,7 +136,7 @@ function ErrorLine({ error }: { error: string | undefined }) {
 export function QuestionCard({ message, card }: { message: MessageInfo; card: QuestionCardInfo }) {
   const { api } = useInstance()
   const colors = useColors()
-  const { sending, error, run } = useCardAction()
+  const { sending, error, run, blocked } = useCardAction()
   const [text, setText] = useState('')
   const answer = (chosen: QuestionAnswer, which: string) => void run(which, () => api.chats.answer({ messageId: message.id, answer: chosen }))
 
@@ -167,9 +169,9 @@ export function QuestionCard({ message, card }: { message: MessageInfo; card: Qu
           accessibilityRole="button"
           accessibilityLabel="Dismiss question"
           hitSlop={10}
-          disabled={!!sending}
+          disabled={blocked}
           onPress={() => void run('dismiss', () => api.chats.dismiss({ messageId: message.id }))}
-          style={({ pressed }) => [styles.dismiss, { opacity: sending ? 0.5 : pressed ? 0.6 : 1 }]}
+          style={({ pressed }) => [styles.dismiss, { opacity: blocked ? 0.5 : pressed ? 0.6 : 1 }]}
         >
           <CloseIcon color={colors.mutedForeground} />
         </Pressable>
@@ -188,9 +190,9 @@ export function QuestionCard({ message, card }: { message: MessageInfo; card: Qu
               key={index}
               accessibilityRole="button"
               accessibilityLabel={`${optionLetter(index)}. ${option.label}${option.description ? `. ${option.description}` : ''}`}
-              disabled={!!sending}
+              disabled={blocked}
               onPress={() => answer({ option: index }, `option${index}`)}
-              style={({ pressed }) => [styles.option, { backgroundColor: tone.background, opacity: sending && sending !== `option${index}` ? 0.6 : pressed ? 0.75 : 1 }]}
+              style={({ pressed }) => [styles.option, { backgroundColor: tone.background, opacity: blocked && sending !== `option${index}` ? 0.6 : pressed ? 0.75 : 1 }]}
             >
               <View style={[styles.letter, { borderColor: `${tone.color}40` }]}>
                 {sending === `option${index}` ? (
@@ -218,7 +220,7 @@ export function QuestionCard({ message, card }: { message: MessageInfo; card: Qu
             onChangeText={setText}
             style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
           />
-          {!!text.trim() && <CardButton label="Submit" kind="primary" busy={sending === 'text'} disabled={!!sending} onPress={() => answer({ text: text.trim() }, 'text')} />}
+          {!!text.trim() && <CardButton label="Submit" kind="primary" busy={sending === 'text'} disabled={blocked} onPress={() => answer({ text: text.trim() }, 'text')} />}
         </View>
       )}
       <ErrorLine error={error} />
@@ -240,7 +242,7 @@ const takeOverStatus = {
 export function TakeOverCard({ message, card, botName, onScreen }: { message: MessageInfo; card: TakeOverCardInfo; botName: string; onScreen?: () => void }) {
   const { api } = useInstance()
   const colors = useColors()
-  const { sending, error, run } = useCardAction()
+  const { sending, error, run, blocked } = useCardAction()
   const handBack = (outcome: HandBackOutcome) => void run(outcome, () => api.chats.handBack({ messageId: message.id, outcome }))
   const status = takeOverStatus[card.outcome ?? 'waiting']
   return (
@@ -254,8 +256,8 @@ export function TakeOverCard({ message, card, botName, onScreen }: { message: Me
       ) : (
         <View style={styles.buttons}>
           {onScreen && <CardButton label="✋ Take over" kind="primary" onPress={onScreen} />}
-          <CardButton label="I'm done" busy={sending === 'done'} disabled={!!sending} onPress={() => handBack('done')} />
-          <CardButton label="Skip" kind="plain" busy={sending === 'skipped'} disabled={!!sending} onPress={() => handBack('skipped')} />
+          <CardButton label="I'm done" busy={sending === 'done'} disabled={blocked} onPress={() => handBack('done')} />
+          <CardButton label="Skip" kind="plain" busy={sending === 'skipped'} disabled={blocked} onPress={() => handBack('skipped')} />
         </View>
       )}
       <ErrorLine error={error} />
@@ -275,7 +277,7 @@ const another = 'another'
 export function PluginRequestCard({ message, card, botName }: { message: MessageInfo; card: PluginRequestCardInfo; botName: string }) {
   const { api, url } = useInstance()
   const colors = useColors()
-  const { sending, error, run } = useCardAction()
+  const { sending, error, run, blocked } = useCardAction()
   const waiting = !card.decision
   // Loaded again on returning from the browser, where an account may have been connected.
   const plugin = useLoadOnFocus(useCallback(() => (waiting ? api.plugins.get({ name: card.plugin }) : Promise.resolve(undefined)), [api, card.plugin, waiting]))
@@ -304,8 +306,8 @@ export function PluginRequestCard({ message, card, botName }: { message: Message
             <Pressable
               key={option.value}
               accessibilityRole="radio"
-              accessibilityState={{ checked: choice === option.value, disabled: !!sending }}
-              disabled={!!sending}
+              accessibilityState={{ checked: choice === option.value, disabled: blocked }}
+              disabled={blocked}
               onPress={() => setPicked(option.value)}
               style={styles.radio}
             >
@@ -325,10 +327,10 @@ export function PluginRequestCard({ message, card, botName }: { message: Message
             label={connecting ? 'Connect ↗' : 'Allow'}
             kind="primary"
             busy={sending === 'allow'}
-            disabled={!!sending || !plugin.data}
+            disabled={blocked || !plugin.data}
             onPress={() => (connecting ? connect() : decide({ outcome: 'granted', account: card.skillsOnly ? null : choice }, 'allow'))}
           />
-          <CardButton label="Deny" kind="plain" busy={sending === 'deny'} disabled={!!sending} onPress={() => decide({ outcome: 'denied' }, 'deny')} />
+          <CardButton label="Deny" kind="plain" busy={sending === 'deny'} disabled={blocked} onPress={() => decide({ outcome: 'denied' }, 'deny')} />
         </View>
       )}
       <ErrorLine error={error ?? (waiting ? plugin.error : undefined)} />
