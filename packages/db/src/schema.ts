@@ -453,6 +453,28 @@ export const pluginGrants = sqliteTable(
   (table) => [uniqueIndex('plugin_grants_idx').on(table.botId, table.plugin, table.account)],
 )
 
+export const devicePlatforms = ['ios', 'android'] as const
+export type DevicePlatform = (typeof devicePlatforms)[number]
+
+/**
+ * The owner's phones registered for push notifications, one row per Expo push token: registering a token again updates
+ * its row. Each phone has its own switches for what notifies it.
+ */
+export const devices = sqliteTable('devices', {
+  id: id(),
+  /** The phone's Expo push token, `ExponentPushToken[…]`; what the push sender sends to. */
+  expoPushToken: text('expo_push_token').notNull().unique(),
+  /** The phone's name, as the phone gives it, shown in Settings → General → Phones. */
+  name: text('name').notNull(),
+  platform: text('platform', { enum: devicePlatforms }).notNull(),
+  /** Messages: a bot posting in a chat notifies this phone. */
+  notifyMessages: integer('notify_messages', { mode: 'boolean' }).notNull().default(true),
+  /** When a bot needs you: a card starting to wait notifies this phone. */
+  notifyNeedsYou: integer('notify_needs_you', { mode: 'boolean' }).notNull().default(true),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+})
+
 export type Setting = typeof settings.$inferSelect
 export type SystemCredential = typeof systemCredentials.$inferSelect
 export type Bot = typeof bots.$inferSelect
@@ -469,3 +491,4 @@ export type Routine = typeof routines.$inferSelect
 export type RoutineRun = typeof routineRuns.$inferSelect
 export type PluginAccount = typeof pluginAccounts.$inferSelect
 export type PluginGrant = typeof pluginGrants.$inferSelect
+export type Device = typeof devices.$inferSelect

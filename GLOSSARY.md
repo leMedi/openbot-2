@@ -64,6 +64,10 @@ _Avoid_: Archived chat, hidden bot
 A chat whose bots' messages don't notify the owner, for a set time or until unmuted; its cards still do. A hidden chat is always muted.
 _Avoid_: Silenced chat, snoozed chat
 
+**Phone**:
+One of the owner's phones registered with the instance for notifications (a `device` in the code), with its own two switches: **Messages** (bots' messages) and **When a bot needs you** (cards starting to wait). The owner removes it from Settings → General → Phones.
+_Avoid_: Device (in the UI), handset, client
+
 **History**:
 A bot's single private record of everything it has seen and done across all its chats, messages from other bots, and routines; what its model reads.
 _Avoid_: Conversation, transcript, context

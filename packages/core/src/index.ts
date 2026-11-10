@@ -51,6 +51,16 @@ export {
   reorderSections,
   showChats,
 } from './sections.ts'
+export {
+  DeviceNotFoundError,
+  type DeviceRegistration,
+  type DeviceSwitches,
+  listDevices,
+  registerDevice,
+  removeDevice,
+  setDeviceSwitches,
+  unregisterDevice,
+} from './devices.ts'
 export { type FileMatch, maxSearchHits, type MessageMatch, searchFiles, searchMessages, type SnippetPart } from './search.ts'
 export {
   AllowAllOrchestrator,

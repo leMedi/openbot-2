@@ -101,6 +101,7 @@ describe('system credentials', () => {
     const routineList = await server.client.routines.list({ botId: bot.id })
     await server.client.routines.delete({ botId: bot.id, routineId: routine.id })
     const section = await server.client.sections.create({ name: 'Work' })
+    const phone = await server.client.devices.register({ expoPushToken: 'ExponentPushToken[phone]', name: 'iPhone', platform: 'ios' })
     server.providers.script(...[1, 2, 3].flatMap(() => [callsTools(['sendMessage', { text: 'OK' }]), endsSilently()]))
 
     // Each procedure that returns data, called once it has something to return. A new procedure fails the check
@@ -177,6 +178,11 @@ describe('system credentials', () => {
       'sections.rename': await server.client.sections.rename({ sectionId: section.id, name: 'Clients' }),
       'sections.reorder': await server.client.sections.reorder({ sectionIds: (await server.client.sections.list()).map((section) => section.id).reverse() }),
       'sections.delete': null,
+      'devices.register': phone,
+      'devices.setSwitches': await server.client.devices.setSwitches({ deviceId: phone.id, messages: false }),
+      'devices.list': await server.client.devices.list(),
+      'devices.unregister': null,
+      'devices.remove': null,
       'groups.create': group,
       'groups.update': await server.client.groups.update({ chatId: group.chat.id, title: 'Team' }),
       'groups.delete': null,

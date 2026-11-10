@@ -625,6 +625,36 @@ export type NewFact = z.infer<typeof newFact>
 export const factChanges = newFact.partial()
 export type FactChanges = z.infer<typeof factChanges>
 
+export const devicePlatforms = ['ios', 'android'] as const
+
+/** A phone registered for push notifications. Its push token isn't shown. */
+export const device = z.object({
+  id: z.string(),
+  /** The phone's name, as the phone gives it. */
+  name: z.string(),
+  platform: z.enum(devicePlatforms),
+  /** Messages: a bot posting in a chat notifies this phone. */
+  messages: z.boolean(),
+  /** When a bot needs you: a card starting to wait (a question, a take-over, a plugin request…) notifies this phone. */
+  needsYou: z.boolean(),
+  /** When it first registered, in milliseconds since the epoch. */
+  createdAt: z.number(),
+})
+export type DeviceInfo = z.infer<typeof device>
+
+/** The longest name a phone can register with. */
+export const maxDeviceNameLength = 100
+
+/** What a phone registers with. */
+export const deviceRegistration = z.object({
+  /** The phone's Expo push token, `ExponentPushToken[…]`. */
+  expoPushToken: z.string().regex(/^Expo(nent)?PushToken\[[^\]]+\]$/, 'Not an Expo push token'),
+  /** Trimmed; not empty. */
+  name: z.string().trim().min(1).max(maxDeviceNameLength),
+  platform: z.enum(devicePlatforms),
+})
+export type DeviceRegistration = z.infer<typeof deviceRegistration>
+
 export const screenStates = ['stopped', 'starting', 'running', 'crashed'] as const
 
 /** A bot's screen on the computer. */
@@ -1187,6 +1217,27 @@ export const contract = {
       })
       .input(z.object({ botId: z.string() }))
       .output(screenTicket),
+  },
+  devices: {
+    register: oc
+      .route({
+        method: 'POST',
+        path: '/devices',
+        summary: "Register a phone for push notifications; a token already registered keeps its row and switches, with its name and platform updated",
+      })
+      .input(deviceRegistration)
+      .output(device),
+    unregister: oc
+      .route({ method: 'POST', path: '/devices/unregister', summary: 'Unregister the phone with this push token, as it disconnects; nothing happens if it isn\'t registered' })
+      .input(deviceRegistration.pick({ expoPushToken: true })),
+    list: oc.route({ method: 'GET', path: '/devices', summary: 'The registered phones, oldest first' }).output(z.array(device)),
+    remove: oc
+      .route({ method: 'DELETE', path: '/devices/{deviceId}', summary: 'Remove a registered phone; it gets no more notifications until it registers again' })
+      .input(z.object({ deviceId: z.string() })),
+    setSwitches: oc
+      .route({ method: 'PATCH', path: '/devices/{deviceId}', summary: "Turn a phone's Messages or When a bot needs you notifications on or off; not found once the phone was removed" })
+      .input(z.object({ deviceId: z.string(), messages: z.boolean().optional(), needsYou: z.boolean().optional() }))
+      .output(device),
   },
   orchestrator: {
     getModes: oc

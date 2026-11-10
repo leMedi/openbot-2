@@ -1,7 +1,7 @@
-import { type AuditEntryInfo, type BotInfo, type CardInfo, type ChatInfo, type FactInfo, deletedAuthorName, type MessageInfo, type PluginAccountInfo, type PluginInfo, pluginIconPath, type RoutineInfo, type RoutineRunInfo, type SectionInfo, type MessageHit, type FileHit, unassignedSectionId } from '@openbot/api-contract'
+import { type AuditEntryInfo, type BotInfo, type CardInfo, type ChatInfo, type DeviceInfo, type FactInfo, deletedAuthorName, type MessageInfo, type PluginAccountInfo, type PluginInfo, pluginIconPath, type RoutineInfo, type RoutineRunInfo, type SectionInfo, type MessageHit, type FileHit, unassignedSectionId } from '@openbot/api-contract'
 import type { BotStatus, PluginAccountSummary } from '@openbot/agent'
 import { type BotWithChat, type ChatSummary, type FileMatch, type MessageMatch, type RoutineState, factSourceName, handBackOutcomeOf, isPluginReconnectCard, isPluginRequestCard, isQuestionCard, pluginReconnectOutcomeOf, pluginRequestDecisionOf, isRoutineChangeCard, isTakeOverCard, questionAnswerOf, questionDismissedOf } from '@openbot/core'
-import type { AuditEntry, Fact, Message, RoutineRun, Section } from '@openbot/db'
+import type { AuditEntry, Device, Fact, Message, RoutineRun, Section } from '@openbot/db'
 import type { Plugin } from '@openbot/plugins'
 
 /**
@@ -77,6 +77,17 @@ export function toMessageHit(hit: MessageMatch): MessageHit {
 
 export function toFileHit(hit: FileMatch): FileHit {
   return { ...hitOf(hit.message), attachment: hit.attachment }
+}
+
+export function toDeviceInfo(device: Device): DeviceInfo {
+  return {
+    id: device.id,
+    name: device.name,
+    platform: device.platform,
+    messages: device.notifyMessages,
+    needsYou: device.notifyNeedsYou,
+    createdAt: device.createdAt.getTime(),
+  }
 }
 
 export function toSectionInfo(section: Section): SectionInfo {

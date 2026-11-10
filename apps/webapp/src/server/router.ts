@@ -20,6 +20,12 @@ import {
   createGroup,
   deleteGroup,
   detectTimeZone,
+  DeviceNotFoundError,
+  listDevices,
+  registerDevice,
+  removeDevice,
+  setDeviceSwitches,
+  unregisterDevice,
   getGroup,
   GroupMembersError,
   listGroups,
@@ -100,7 +106,7 @@ import { implement, ORPCError } from '@orpc/server'
 import { generateContentDisposition } from '@orpc/standard-server'
 import { chatInfoOf, publishChat, type ServerContext } from './context.ts'
 import { screenStreamUrl } from './screen-stream.ts'
-import { toAuditEntryInfo, toFileHit, toMessageHit, toSectionInfo, toBotInfo, toFactInfo, toMessageInfo, toPluginAccountInfo, toPluginInfo, toRoutineInfo, toRoutineRunInfo } from './views.ts'
+import { toAuditEntryInfo, toFileHit, toMessageHit, toSectionInfo, toBotInfo, toDeviceInfo, toFactInfo, toMessageInfo, toPluginAccountInfo, toPluginInfo, toRoutineInfo, toRoutineRunInfo } from './views.ts'
 
 const os = implement(contract).$context<ServerContext>()
 
@@ -250,6 +256,9 @@ async function assertCanRun(context: ServerContext, bot: BotWithChat) {
 
 /** `work`'s result, with a missing chat answered as NOT_FOUND. */
 const chatMustExist = <T>(work: Promise<T>) => answering(() => work, [[ChatNotFoundError, 'NOT_FOUND']])
+
+/** `work`'s result, with a missing phone answered as NOT_FOUND. */
+const deviceMustExist = <T>(work: Promise<T>) => answering(() => work, [[DeviceNotFoundError, 'NOT_FOUND']])
 
 /** `work`'s result, with a missing section answered as NOT_FOUND and a change the sidebar can't make as BAD_REQUEST. */
 const sectionMustFit = <T>(work: Promise<T>) =>
@@ -518,6 +527,20 @@ export const router = os.router({
       const bot = await botMustExist(context, input.botId)
       return (await routineMustFit(context.routines.runs(bot.id, input.routineId))).map((run) => toRoutineRunInfo(run, bot.chatId))
     }),
+  },
+
+  devices: {
+    register: os.devices.register.handler(async ({ context, input }) => toDeviceInfo(await registerDevice(context.db, input))),
+
+    unregister: os.devices.unregister.handler(async ({ context, input }) => unregisterDevice(context.db, input.expoPushToken)),
+
+    list: os.devices.list.handler(async ({ context }) => (await listDevices(context.db)).map(toDeviceInfo)),
+
+    remove: os.devices.remove.handler(async ({ context, input }) => deviceMustExist(removeDevice(context.db, input.deviceId))),
+
+    setSwitches: os.devices.setSwitches.handler(async ({ context, input }) =>
+      toDeviceInfo(await deviceMustExist(setDeviceSwitches(context.db, input.deviceId, { notifyMessages: input.messages, notifyNeedsYou: input.needsYou }))),
+    ),
   },
 
   sections: {
