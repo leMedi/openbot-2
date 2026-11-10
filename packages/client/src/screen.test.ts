@@ -5,6 +5,8 @@ import { type Rfb, ScreenConnection, type ScreenConnectionOptions, type ScreenSt
 class FakeRfb extends EventTarget implements Rfb {
   viewOnly = false
   scaleViewport = false
+  clipViewport = false
+  dragViewport = false
   background = ''
   qualityLevel = 6
   compressionLevel = 2
@@ -15,7 +17,11 @@ class FakeRfb extends EventTarget implements Rfb {
   ) {
     super()
   }
+  keys: [number, string, boolean | undefined][] = []
   focus() {}
+  sendKey(keysym: number, code: string, down?: boolean) {
+    this.keys.push([keysym, code, down])
+  }
   disconnect() {
     this.disconnected = true
     this.dispatchEvent(new Event('disconnect'))
@@ -106,6 +112,21 @@ describe('ScreenConnection', () => {
     connection.setQuality('high')
     expect(last().qualityLevel).toBe(6)
     expect(last().compressionLevel).toBe(2)
+  })
+
+  it('fits the screen by default, and shows it 1:1, dragged to pan, on actual, kept across reconnects', async () => {
+    const { connection, last } = setup()
+    connection.start()
+    await vi.advanceTimersByTimeAsync(0)
+    expect([last().scaleViewport, last().clipViewport, last().dragViewport]).toEqual([true, false, false])
+    last().connects()
+    connection.setViewport('actual')
+    expect([last().scaleViewport, last().clipViewport, last().dragViewport]).toEqual([false, true, true])
+    last().drops()
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect([last().scaleViewport, last().clipViewport, last().dragViewport]).toEqual([false, true, true])
+    connection.setViewport('fit')
+    expect([last().scaleViewport, last().clipViewport, last().dragViewport]).toEqual([true, false, false])
   })
 
   it('waits while the computer boots, without counting it as a failure', async () => {

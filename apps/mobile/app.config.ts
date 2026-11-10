@@ -12,8 +12,8 @@ export default ({ config }: ConfigContext): ExpoConfig =>
       slug: 'openbot',
       version: '0.1.0',
       scheme: 'openbot',
-      // Portrait only; the Screen will unlock landscape for itself.
-      orientation: 'portrait',
+      // Every orientation the phone allows, so the Screen can turn; the app's stack keeps every other screen portrait.
+      orientation: 'default',
       userInterfaceStyle: 'automatic',
       ios: { bundleIdentifier: bundleId, supportsTablet: false },
       android: { package: bundleId },

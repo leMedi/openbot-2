@@ -157,3 +157,47 @@ export const PauseIcon = ({ size = 16, color }: IconProps) => (
     <Path d="M6.5 5.75v4.5M9.5 5.75v4.5" />
   </Icon>
 )
+
+/** The Screen's Keyboard: raises the phone's keyboard to type on it. */
+export const KeyboardIcon = ({ size = 20, color }: IconProps) => (
+  <Icon size={size} color={color}>
+    <Path d="M3 6.5h18v11H3z" />
+    <Path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M8 14h8" />
+  </Icon>
+)
+
+/** The Screen's Keys: Esc, Tab, Enter, arrows and the modifiers. */
+export const KeysIcon = ({ size = 20, color }: IconProps) => (
+  <Icon size={size} color={color}>
+    <Path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z" />
+  </Icon>
+)
+
+/** The Screen's Paste: the clipboard. */
+export const PasteIcon = ({ size = 20, color }: IconProps) => (
+  <Icon size={size} color={color}>
+    <Path d="M8.5 4.5H6v16h12v-16h-2.5" />
+    <Path d="M9 3h6v3H9z" />
+  </Icon>
+)
+
+/** The Screen's Fit: the whole Screen in view. */
+export const FitIcon = ({ size = 20, color }: IconProps) => (
+  <Icon size={size} color={color}>
+    <Path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" />
+  </Icon>
+)
+
+/** The Screen's 1:1: actual size, panned. */
+export const ActualSizeIcon = ({ size = 20, color }: IconProps) => (
+  <Icon size={size} color={color}>
+    <Path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5M9.5 9.5l5 5M14.5 9.5l-5 5" />
+  </Icon>
+)
+
+/** The landscape toolbar's tuck: a chevron toward the edge, or back. */
+export const TuckIcon = ({ size = 16, color, out }: IconProps & { out: boolean }) => (
+  <Icon size={size} color={color} box={16} stroke={1.8}>
+    <Path d={out ? 'M10 4 6 8l4 4' : 'M6 4l4 4-4 4'} />
+  </Icon>
+)

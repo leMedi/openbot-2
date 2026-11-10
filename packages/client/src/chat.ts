@@ -1,4 +1,4 @@
-import { maxAttachmentBytes, maxAttachments, type MessageInfo, type QuestionCardInfo, type RoutineChangeCardInfo } from '@openbot/api-contract'
+import { maxAttachmentBytes, maxAttachments, type MessageInfo, type QuestionCardInfo, type RoutineChangeCardInfo, type TakeOverCardInfo } from '@openbot/api-contract'
 
 /** What the composer needs to know of a file it holds: a browser `File`, or a file picked on the phone. */
 export type ComposerFile = { name: string; size: number }
@@ -108,4 +108,14 @@ export const routineChangeVerbs: Record<RoutineChangeCardInfo['change'], string>
   paused: 'paused',
   resumed: 'resumed',
   deleted: 'deleted',
+}
+
+/**
+ * The take-over card a bot's Screen shows, while it waits for the owner: `messageId`'s, or else the latest waiting
+ * among `messages` (its chat's, as loaded).
+ */
+export function waitingTakeOver(messages: readonly MessageInfo[], messageId?: string): { message: MessageInfo; card: TakeOverCardInfo } | undefined {
+  const message = messageId ? messages.find((each) => each.id === messageId) : [...messages].reverse().find((each) => each.card?.type === 'take_over' && !each.card.outcome)
+  const card = message?.card
+  return message && card?.type === 'take_over' && !card.outcome ? { message, card } : undefined
 }

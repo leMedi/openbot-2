@@ -1,6 +1,6 @@
 import type { MessageInfo } from '@openbot/api-contract'
 import { describe, expect, it } from 'vitest'
-import { addFiles, attachmentKind, formatSize, transcript } from './chat.ts'
+import { addFiles, attachmentKind, formatSize, transcript, waitingTakeOver } from './chat.ts'
 
 const mb = 1024 * 1024
 const file = (name: string, size = 10) => ({ name, size })
@@ -94,5 +94,22 @@ describe("a chat's transcript", () => {
   it('tells bots apart in a group', () => {
     const rows = transcript([message({ author: 'bot', botId: 'rex' }), message({ author: 'bot', botId: 'ana', authorName: 'Ana' })], [])
     expect(rows[0]!.continuesNext).toBe(false)
+  })
+})
+
+describe('the take-over card waiting on a Screen', () => {
+  const takeOver = (id: string, outcome?: 'done' | 'skipped') =>
+    message({ id, author: 'bot', card: { type: 'take_over', instruction: `Step ${id}`, ...(outcome ? { outcome } : {}) } } as Partial<MessageInfo> & Pick<MessageInfo, 'author'>)
+
+  it('is the latest card still waiting', () => {
+    const messages = [takeOver('a'), takeOver('b'), takeOver('c', 'done'), message({ id: 'd', author: 'bot', text: 'Hi' })]
+    expect(waitingTakeOver(messages)?.message.id).toBe('b')
+  })
+
+  it('is the card asked for while it waits, and none once handed back', () => {
+    const messages = [takeOver('a'), takeOver('b'), takeOver('c', 'skipped')]
+    expect(waitingTakeOver(messages, 'a')?.card.instruction).toBe('Step a')
+    expect(waitingTakeOver(messages, 'c')).toBeUndefined()
+    expect(waitingTakeOver([takeOver('x', 'done')])).toBeUndefined()
   })
 })

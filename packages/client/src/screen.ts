@@ -1,6 +1,8 @@
 /// <reference path="./types/novnc.d.ts" />
-import type { ApiClient } from '@openbot/api-contract'
 import { type RefObject, useCallback, useEffect, useRef, useState } from 'react'
+
+// Typing on the Screen from a phone, which the phone's Screen takes with the connection.
+export * from './screen-keys.ts'
 
 /**
  * Where a bot's Screen connection is: `starting` while its computer boots, `reconnecting` after a stream that was
@@ -11,14 +13,21 @@ export type ScreenStatus = 'connecting' | 'starting' | 'connected' | 'reconnecti
 /** `low` trades picture quality for less data, as on cellular. */
 export type ScreenQuality = 'high' | 'low'
 
+/** `fit` scales the whole Screen into its frame; `actual` shows it 1:1, clipped, a drag panning it (a tap still clicks). */
+export type ScreenViewport = 'fit' | 'actual'
+
 /** The parts of noVNC's client (https://github.com/novnc/noVNC/blob/master/docs/API.md) the connection sets. */
 export type Rfb = EventTarget & {
   viewOnly: boolean
   scaleViewport: boolean
+  clipViewport: boolean
+  dragViewport: boolean
   background: string
   qualityLevel: number
   compressionLevel: number
   focus(options?: FocusOptions): void
+  /** Presses and releases `keysym`, or only presses (`down`) or releases it. */
+  sendKey(keysym: number, code: string, down?: boolean): void
   disconnect(): void
 }
 
@@ -35,6 +44,11 @@ const qualityLevels: Record<ScreenQuality, { qualityLevel: number; compressionLe
   low: { qualityLevel: 3, compressionLevel: 7 },
 }
 
+const viewports: Record<ScreenViewport, Pick<Rfb, 'scaleViewport' | 'clipViewport' | 'dragViewport'>> = {
+  fit: { scaleViewport: true, clipViewport: false, dragViewport: false },
+  actual: { scaleViewport: false, clipViewport: true, dragViewport: true },
+}
+
 export type ScreenConnectionOptions = {
   botId: string
   /** Asks the instance for a ticket to the bot's Screen; `api.screens.ticket`. */
@@ -44,6 +58,7 @@ export type ScreenConnectionOptions = {
   /** Whether the owner controls the Screen; view-only otherwise. */
   interactive?: boolean
   quality?: ScreenQuality
+  viewport?: ScreenViewport
   /** Opens noVNC's client on `target`; noVNC itself unless replaced. */
   openRfb?: (target: HTMLElement, url: string) => Promise<Rfb>
   /** Called whenever `status` or `rfb` changes. */
@@ -67,6 +82,7 @@ export class ScreenConnection {
   private options: ScreenConnectionOptions
   private interactive: boolean
   private quality: ScreenQuality
+  private viewport: ScreenViewport
   /** The client opened last, connected or not. */
   private client: Rfb | undefined
   private failures = 0
@@ -82,6 +98,7 @@ export class ScreenConnection {
     this.options = options
     this.interactive = options.interactive ?? false
     this.quality = options.quality ?? 'high'
+    this.viewport = options.viewport ?? 'fit'
   }
 
   start() {
@@ -108,6 +125,11 @@ export class ScreenConnection {
   setQuality(quality: ScreenQuality) {
     this.quality = quality
     if (this.client) Object.assign(this.client, qualityLevels[quality])
+  }
+
+  setViewport(viewport: ScreenViewport) {
+    this.viewport = viewport
+    if (this.client) Object.assign(this.client, viewports[viewport])
   }
 
   private reset() {
@@ -155,7 +177,7 @@ export class ScreenConnection {
       return generation === this.generation ? this.fail(generation) : undefined
     }
     if (generation !== this.generation) return client.disconnect()
-    client.scaleViewport = true
+    Object.assign(client, viewports[this.viewport])
     client.background = 'transparent'
     client.viewOnly = !this.interactive
     Object.assign(client, qualityLevels[this.quality])
@@ -183,27 +205,30 @@ export class ScreenConnection {
 }
 
 export type ScreenConnectionHookOptions = {
-  api: ApiClient
+  /** The instance's API, or as much of it as the ticket needs (a DOM component on the phone gets it from the app). */
+  api: { screens: { ticket: (input: { botId: string }) => Promise<{ url: string }> } }
   botId: string
   interactive?: boolean
   quality?: ScreenQuality
+  viewport?: ScreenViewport
   /** The instance's address; the page's own by default. */
   server?: string
 }
 
 /**
  * Connects `target` to a bot's Screen while mounted (see {@link ScreenConnection}), reconnecting for another bot or
- * instance; control and quality change in place, and taking control takes the keyboard. `target` must be rendered
- * from the start, as the hook connects once it has mounted. Owns no markup: the app draws `target` and the status around it.
+ * instance; control, quality and viewport change in place, and taking control takes the keyboard. `target` must be
+ * rendered from the start, as the hook connects once it has mounted. Owns no markup: the app draws `target` and the
+ * status around it. `rfb` is noVNC's client while connected, for an app's own controls (keys, the keyboard).
  */
 export function useScreenConnection(
   target: RefObject<HTMLElement | null>,
-  { api, botId, interactive = false, quality = 'high', server }: ScreenConnectionHookOptions,
-): { status: ScreenStatus; retry: () => void } {
-  const [status, setStatus] = useState<ScreenStatus>('connecting')
+  { api, botId, interactive = false, quality = 'high', viewport = 'fit', server }: ScreenConnectionHookOptions,
+): { status: ScreenStatus; retry: () => void; rfb: Rfb | undefined } {
+  const [state, setState] = useState<{ status: ScreenStatus; rfb: Rfb | undefined }>({ status: 'connecting', rfb: undefined })
   const connection = useRef<ScreenConnection>(undefined)
-  const latest = useRef({ interactive, quality })
-  latest.current = { interactive, quality }
+  const latest = useRef({ interactive, quality, viewport })
+  latest.current = { interactive, quality, viewport }
 
   useEffect(() => {
     if (!target.current) return
@@ -212,7 +237,7 @@ export function useScreenConnection(
       ticket: (input) => api.screens.ticket(input),
       server: server ?? window.location.href,
       ...latest.current,
-      onChange: () => setStatus(next.status),
+      onChange: () => setState({ status: next.status, rfb: next.rfb }),
     })
     connection.current = next
     next.start()
@@ -222,13 +247,15 @@ export function useScreenConnection(
     }
   }, [target, api, botId, server])
 
+  const { status, rfb } = state
   useEffect(() => connection.current?.setInteractive(interactive), [interactive])
   // Control takes the keyboard once connected, or when taken; after rendering, as the app may hide `target` until then.
   useEffect(() => {
     if (interactive && status === 'connected') connection.current?.rfb?.focus()
   }, [status, interactive])
   useEffect(() => connection.current?.setQuality(quality), [quality])
+  useEffect(() => connection.current?.setViewport(viewport), [viewport])
 
   const retry = useCallback(() => connection.current?.retry(), [])
-  return { status, retry }
+  return { status, retry, rfb }
 }

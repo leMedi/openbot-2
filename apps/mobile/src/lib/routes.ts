@@ -12,3 +12,10 @@ export const openRoutine = (botId: string, routineId: string) => router.push({ p
 
 /** Pushes a group chat's Members screen. */
 export const openMembers = (chatId: string) => router.push({ pathname: '/members/[chatId]', params: { chatId } })
+
+/**
+ * Opens a bot's Screen, view-only; from a take-over card (`takeOver`, its message in `chatId`), in control with the
+ * card's instruction pinned.
+ */
+export const openScreen = (botId: string, takeOver?: { messageId: string; chatId: string }) =>
+  router.push({ pathname: '/screen/[botId]', params: takeOver ? { botId, takeOverId: takeOver.messageId, chatId: takeOver.chatId } : { botId } })

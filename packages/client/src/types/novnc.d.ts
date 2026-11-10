@@ -6,6 +6,7 @@ declare module '@novnc/novnc' {
     scaleViewport: boolean
     resizeSession: boolean
     clipViewport: boolean
+    dragViewport: boolean
     focusOnClick: boolean
     showDotCursor: boolean
     background: string
@@ -13,6 +14,7 @@ declare module '@novnc/novnc' {
     compressionLevel: number
     focus(options?: FocusOptions): void
     blur(): void
+    sendKey(keysym: number, code: string | null, down?: boolean): void
     disconnect(): void
   }
 }

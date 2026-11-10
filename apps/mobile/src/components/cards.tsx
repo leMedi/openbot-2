@@ -235,11 +235,23 @@ const takeOverStatus = {
 } as const
 
 /**
- * A bot stuck on its screen asks the owner to take over: the instruction, then **Take over**, which opens the bot's
- * screen (on the web until the phone's Screen comes, #114), **I'm done**, which hands it back and wakes the bot, and
- * **Skip**, which hands it back without the step. Once handed back it shows how.
+ * A bot stuck on its screen asks the owner to take over: its instruction, then, while it waits, **Take over** (the
+ * Screen in control, the instruction pinned), **I'm done** and **Skip**, which hand back; once handed back, **Open
+ * screen** watches it.
  */
-export function TakeOverCard({ message, card, botName, onScreen }: { message: MessageInfo; card: TakeOverCardInfo; botName: string; onScreen?: () => void }) {
+export function TakeOverCard({
+  message,
+  card,
+  botName,
+  onScreen,
+  onTakeOver,
+}: {
+  message: MessageInfo
+  card: TakeOverCardInfo
+  botName: string
+  onScreen?: () => void
+  onTakeOver?: () => void
+}) {
   const { api } = useInstance()
   const colors = useColors()
   const { sending, error, run, blocked } = useCardAction()
@@ -255,7 +267,7 @@ export function TakeOverCard({ message, card, botName, onScreen }: { message: Me
         </View>
       ) : (
         <View style={styles.buttons}>
-          {onScreen && <CardButton label="✋ Take over" kind="primary" onPress={onScreen} />}
+          {onTakeOver && <CardButton label="✋ Take over" kind="primary" onPress={onTakeOver} />}
           <CardButton label="I'm done" busy={sending === 'done'} disabled={blocked} onPress={() => handBack('done')} />
           <CardButton label="Skip" kind="plain" busy={sending === 'skipped'} disabled={blocked} onPress={() => handBack('skipped')} />
         </View>

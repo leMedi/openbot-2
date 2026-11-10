@@ -1,8 +1,9 @@
 import { LiveProvider, LiveStore } from '@openbot/client'
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
-import { useColorScheme } from 'react-native'
+import { type ReactNode, useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import { StyleSheet, useColorScheme } from 'react-native'
+import { ScreenStack, ScreenStackItem } from 'react-native-screens'
 import { Blocked } from '../components/blocked.tsx'
 import { Connect } from '../components/connect.tsx'
 import { FinishSetup } from '../components/finish-setup.tsx'
@@ -94,9 +95,31 @@ function Root() {
   }
 
   if (saved?.setUp) return <Instance key={saved.url} saved={saved} moveTo={moveTo} disconnect={disconnect} />
-  if (block) return <Blocked key={block.url} kind={block.kind} url={block.url} onResult={onResult} onChangeAddress={changeAddress} />
-  if (saved) return <FinishSetup key={saved.url} url={saved.url} onResult={onResult} onChangeAddress={changeAddress} />
-  return <Connect initialAddress={address} onResult={onResult} />
+  return (
+    <Portrait>
+      {block ? (
+        <Blocked key={block.url} kind={block.kind} url={block.url} onResult={onResult} onChangeAddress={changeAddress} />
+      ) : saved ? (
+        <FinishSetup key={saved.url} url={saved.url} onResult={onResult} onChangeAddress={changeAddress} />
+      ) : (
+        <Connect initialAddress={address} onResult={onResult} />
+      )}
+    </Portrait>
+  )
+}
+
+/**
+ * Keeps a screen drawn outside the app's stack (Connect, Finish setup, the version blocks) portrait: the app turns with
+ * the phone so the Screen can, and only a native screen can say which way it may turn.
+ */
+function Portrait({ children }: { children: ReactNode }) {
+  return (
+    <ScreenStack style={StyleSheet.absoluteFill}>
+      <ScreenStackItem screenId="portrait" screenOrientation="portrait" headerConfig={{ hidden: true }} style={StyleSheet.absoluteFill}>
+        {children}
+      </ScreenStackItem>
+    </ScreenStack>
+  )
 }
 
 /**
@@ -131,11 +154,19 @@ function Instance({ saved, moveTo, disconnect }: { saved: SavedInstance } & Pick
     return () => void (current = false)
   }, [connected, active, url, noteCheck])
 
-  if (block) return <Blocked kind={block} url={url} onResult={noteCheck} />
+  if (block) {
+    return (
+      <Portrait>
+        <Blocked kind={block} url={url} onResult={noteCheck} />
+      </Portrait>
+    )
+  }
   return (
     <InstanceContext value={{ url, instanceId, api, noteCheck, moveTo, disconnect }}>
       <LiveProvider store={store} active={active}>
-        <Stack>
+        {/* Portrait everywhere but the Screen, which turns with the phone (spec: Screen and take-over → Layout). */}
+        <Stack screenOptions={{ orientation: 'portrait' }}>
+          <Stack.Screen name="screen/[botId]" options={{ presentation: 'fullScreenModal', headerShown: false, orientation: 'all', animation: 'fade' }} />
           <Stack.Screen name="settings" options={{ presentation: 'modal', headerShown: false }} />
           <Stack.Screen name="new-bot" options={{ presentation: 'modal', headerShown: false }} />
           <Stack.Screen name="new-group" options={{ presentation: 'modal', headerShown: false }} />

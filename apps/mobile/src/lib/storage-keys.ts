@@ -11,6 +11,8 @@ export const localNetworkAskedKey = 'openbot.localNetworkAsked'
 export const foldsKey = 'openbot.chats.folds'
 /** LiveStore's snapshot of the instance's chats and loaded messages, shown while it can't be reached. */
 export const snapshotKey = 'openbot.snapshot'
+/** Set once the Screen's "Turn sideways" hint was shown: a tip about the phone, kept as the phone's own. */
+export const turnHintKey = 'openbot.screen.turnHintShown'
 
 /** What belongs to the phone rather than to an instance, kept when it disconnects or moves to another. */
-export const phoneKeys: readonly string[] = [localNetworkAskedKey]
+export const phoneKeys: readonly string[] = [localNetworkAskedKey, turnHintKey]

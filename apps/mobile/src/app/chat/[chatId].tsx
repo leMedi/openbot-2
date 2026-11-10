@@ -16,8 +16,7 @@ import { useAppActive } from '../../lib/app-state.ts'
 import { hasBlocks, parseMarkdown } from '../../lib/markdown.ts'
 import { errorMessage } from '../../lib/errors.ts'
 import { useInstance } from '../../lib/instance-context.ts'
-import { openOnWeb } from '../../lib/open-on-web.ts'
-import { openBot, openMembers, openRoutine } from '../../lib/routes.ts'
+import { openBot, openMembers, openRoutine, openScreen } from '../../lib/routes.ts'
 import { useColors } from '../../lib/theme.ts'
 import { type Sending, updateSends, useSends } from '../../lib/sends.ts'
 import { type PickedFile, sendWithFiles } from '../../lib/upload.ts'
@@ -200,9 +199,6 @@ export default function Chat() {
     return () => clearTimeout(timer)
   }, [highlighted])
 
-  // The phone's Screen comes with #114; until then it's the bot's page on the web, where the Screen is.
-  const openScreen = (botId: string) => openOnWeb(url, `/bots/${encodeURIComponent(botId)}`)
-
   if (!chat) {
     return (
       <>
@@ -231,7 +227,15 @@ export default function Chat() {
         <View style={styles.cardRow}>
           {group && !row.continuesPrevious && <Text style={[styles.author, { color: colors.mutedForeground }]}>{row.authorName}</Text>}
           {card.type === 'question' && <QuestionCard message={row.message!} card={card} />}
-          {card.type === 'take_over' && <TakeOverCard message={row.message!} card={card} botName={row.authorName} onScreen={author ? () => openScreen(author) : undefined} />}
+          {card.type === 'take_over' && (
+            <TakeOverCard
+              message={row.message!}
+              card={card}
+              botName={row.authorName}
+              onScreen={author ? () => openScreen(author) : undefined}
+              onTakeOver={author ? () => openScreen(author, { messageId: row.message!.id, chatId }) : undefined}
+            />
+          )}
           {card.type === 'plugin_request' && <PluginRequestCard message={row.message!} card={card} botName={row.authorName} />}
           {card.type === 'plugin_reconnect' && <PluginReconnectCard card={card} botName={row.authorName} />}
         </View>

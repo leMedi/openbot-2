@@ -11,8 +11,7 @@ import { ClockIcon, KeyIcon, MemoryIcon, ScreenIcon } from '../../../components/
 import { statusNote, useBotSave, useBotText } from '../../../lib/bot-save.ts'
 import { errorMessage } from '../../../lib/errors.ts'
 import { useInstance } from '../../../lib/instance-context.ts'
-import { openOnWeb } from '../../../lib/open-on-web.ts'
-import { openBot } from '../../../lib/routes.ts'
+import { openBot, openScreen } from '../../../lib/routes.ts'
 import { useColors } from '../../../lib/theme.ts'
 import { useLoadOnFocus } from '../../../lib/use-load.ts'
 import { useWhenDone } from '../../../lib/when-done.ts'
@@ -44,7 +43,7 @@ export default function BotInfoScreen() {
 
 function Info({ bot }: { bot: BotInfo }) {
   const live = useLive()
-  const { api, url } = useInstance()
+  const { api } = useInstance()
   const colors = useColors()
   const { status, save } = useBotSave(bot.id)
   const name = useBotText(bot, 'name', save)
@@ -66,9 +65,6 @@ function Info({ bot }: { bot: BotInfo }) {
   // What the bot remembers changes as it works: counted again once it's done.
   const { reload } = counts
   useWhenDone(bot.working, reload)
-
-  // The phone's Screen comes with #114; until then it's the bot's page on the web, where the Screen is.
-  const openScreen = () => openOnWeb(url, `/bots/${encodeURIComponent(bot.id)}`)
 
   const confirmDelete = () =>
     Alert.alert(`Delete ${bot.name}?`, deleteWarnings.bot(bot.name), [
@@ -111,7 +107,7 @@ function Info({ bot }: { bot: BotInfo }) {
           </Group>
         )}
         <View style={styles.quick}>
-          <QuickButton label="Screen" icon={<ScreenIcon color={colors.foreground} />} onPress={openScreen} />
+          <QuickButton label="Screen" icon={<ScreenIcon color={colors.foreground} />} onPress={() => openScreen(bot.id)} />
           <QuickButton label="Routines" icon={<ClockIcon size={22} color={colors.foreground} />} onPress={() => openBot(bot.id, 'routines')} />
           <QuickButton label="Memory" icon={<MemoryIcon color={colors.foreground} />} onPress={() => openBot(bot.id, 'memory')} />
           <QuickButton label="Access" icon={<KeyIcon color={colors.foreground} />} onPress={() => openBot(bot.id, 'access')} />

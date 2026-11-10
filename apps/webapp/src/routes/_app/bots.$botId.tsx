@@ -1,5 +1,5 @@
 import type { BotInfo } from '@openbot/api-contract'
-import { useLive } from '@openbot/client'
+import { useLive, waitingTakeOver } from '@openbot/client'
 import { cn } from '@openbot/ui/lib/utils'
 import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -43,7 +43,7 @@ function Dm() {
     void navigate({ to: '.', search: (previous: ChatSearch) => ({ ...previous, routine: undefined }), replace: true })
   }, [search.routine, navigate])
   const bot = live.bots?.find((entry) => entry.id === botId)
-  const waitingTakeOver = bot && [...(live.messages.get(bot.chatId) ?? [])].reverse().find((message) => message.card?.type === 'take_over' && !message.card.outcome)
+  const takeOver = bot && waitingTakeOver(live.messages.get(bot.chatId) ?? [])?.message
   function closeFullscreen() {
     setFullscreen(false)
     // As in Grok, the owner goes back to the composer.
@@ -83,8 +83,8 @@ function Dm() {
           }}
         />
       </div>
-      {pane === 'screen' && <ScreenPane bot={bot} takeOver={waitingTakeOver} onOpen={() => setFullscreen(true)} />}
-      {fullscreen && <FullscreenScreen bot={bot} takeOver={waitingTakeOver} onClose={closeFullscreen} />}
+      {pane === 'screen' && <ScreenPane bot={bot} takeOver={takeOver} onOpen={() => setFullscreen(true)} />}
+      {fullscreen && <FullscreenScreen bot={bot} takeOver={takeOver} onClose={closeFullscreen} />}
       {pane === 'memory' && <MemoryPane bot={bot} />}
       {pane === 'access' && <AccessPane key={bot.id} bot={bot} />}
       {pane === 'routines' && <RoutinesPane key={bot.id} bot={bot} open={routineToOpen} onClose={() => setPane(null)} />}
