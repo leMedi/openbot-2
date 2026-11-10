@@ -105,7 +105,7 @@ export function screenPrograms(home: string, options: { sandbox: boolean }): (sc
       {
         name: 'x11vnc',
         command: 'x11vnc',
-        args: ['-display', `:${display}`, '-rfbport', String(streamPort(display)), '-localhost', '-forever', '-shared', '-nopw', '-quiet', '-xkb'],
+        args: ['-display', `:${display}`, '-rfbport', String(streamPort(display)), '-localhost', '-forever', '-shared', '-nopw', '-quiet', '-xkb', '-noprimary'],
         env,
         ready: () => until(() => listening(streamPort(display)), 'the stream'),
       },

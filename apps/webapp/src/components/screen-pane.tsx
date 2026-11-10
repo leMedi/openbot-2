@@ -117,37 +117,92 @@ export function FullscreenScreen({ bot, takeOver, onClose }: { bot: BotInfo; tak
   )
 }
 
-// X keysyms sent to the screen for a paste.
+// X keysyms sent to the screen for a copy, cut or paste.
 const XK_Control_L = 0xffe3
 const XK_Alt_L = 0xffe9
 const XK_Super_L = 0xffeb
-const XK_v = 0x76
+const keys = { c: { keysym: 0x63, code: 'KeyC' }, x: { keysym: 0x78, code: 'KeyX' }, v: { keysym: 0x76, code: 'KeyV' } }
+
+/** The modifiers the owner held for a shortcut. */
+type Held = { meta: boolean; ctrl: boolean }
+
+/** Ctrl+`key` on the screen, for the owner's Ctrl or ⌘ + `key`. */
+function pressCtrl(rfb: Rfb, key: keyof typeof keys, held?: Held) {
+  // ⌘ reaches the screen as Alt (left) or Super (right), so let it go: ⌘+Ctrl+V pastes nothing.
+  if (held?.meta) {
+    rfb.sendKey(XK_Alt_L, 'AltLeft', false)
+    rfb.sendKey(XK_Super_L, 'MetaRight', false)
+  }
+  rfb.sendKey(XK_Control_L, 'ControlLeft', true)
+  rfb.sendKey(keys[key].keysym, keys[key].code)
+  // A held Ctrl is let go when the owner lets go of it.
+  if (!held?.ctrl) rfb.sendKey(XK_Control_L, 'ControlLeft', false)
+}
+
+/** The shortcut's letter, for Ctrl or ⌘ without Alt. */
+function shortcut(event: KeyboardEvent): string | undefined {
+  if (event.altKey || !(event.ctrlKey || event.metaKey)) return
+  return event.key.toLowerCase()
+}
+
+/** How long a copy waits for the screen's clipboard to change before taking what it already holds. */
+const copyWaitMs = 500
 
 /**
- * Pastes the owner's clipboard on the screen: Ctrl+V (⌘V on a Mac), or the browser's own Paste, puts the text in the
- * screen's clipboard (x11vnc sets its CLIPBOARD and PRIMARY) and presses Ctrl+V there. noVNC never sees the V, so the
- * browser fires its `paste` event, which reads the clipboard without asking; where it doesn't fire (Safari, on a
- * canvas), the Clipboard API asks instead. Text only, and the RFB clipboard is Latin-1: other characters arrive as ?.
+ * The clipboard between the owner's computer and the screen, while the owner controls it.
+ *
+ * Paste: Ctrl+V (⌘V on a Mac), or the browser's own Paste, puts the text in the screen's clipboard (x11vnc sets its
+ * CLIPBOARD and PRIMARY) and presses Ctrl+V there. noVNC never sees the V, so the browser fires its `paste` event,
+ * which reads the clipboard without asking; where it doesn't fire (Safari, on a canvas), the Clipboard API asks.
+ *
+ * Copy: Ctrl+C or Ctrl+X (⌘C, ⌘X) presses Ctrl+C or Ctrl+X on the screen, and its clipboard, which x11vnc sends when
+ * it changes, is written to the owner's. The write starts during the key press, as Safari requires, with a promise of
+ * the text: the clipboard that arrives next or, for ⌘, the one the screen already had if none does (the same text
+ * copied again). Ctrl+C still reaches the screen as Ctrl+C, for a terminal.
+ *
+ * Text only, and the RFB clipboard is Latin-1: other characters arrive as ?.
  */
-function forwardPaste(screen: HTMLElement, rfb: Rfb): () => void {
-  // The modifier the owner holds for the shortcut, until its paste arrives.
-  let pending: { meta: boolean; ctrl: boolean; fallback: ReturnType<typeof setTimeout> } | undefined
+function forwardClipboard(screen: HTMLElement, rfb: Rfb): () => void {
+  // The screen's clipboard as last sent, and whoever waits for its next one.
+  let screenText: string | undefined
+  let nextText: ((text: string) => void) | undefined
+  // The modifier the owner holds for a paste, until the browser's paste arrives.
+  let pending: (Held & { fallback: ReturnType<typeof setTimeout> }) | undefined
 
-  function paste(text: string, held?: { meta: boolean; ctrl: boolean }) {
+  function paste(text: string, held?: Held) {
     rfb.clipboardPasteFrom(text)
-    // ⌘ reaches the screen as Alt (left) or Super (right), so let it go: ⌘+Ctrl+V pastes nothing.
-    if (held?.meta) {
-      rfb.sendKey(XK_Alt_L, 'AltLeft', false)
-      rfb.sendKey(XK_Super_L, 'MetaRight', false)
+    // Pasted here, so it's the screen's clipboard now; x11vnc doesn't send back what it got.
+    screenText = text
+    pressCtrl(rfb, 'v', held)
+  }
+
+  function copy(event: KeyboardEvent, key: 'c' | 'x') {
+    const held = { meta: event.metaKey, ctrl: event.ctrlKey }
+    // On a Mac ⌘ isn't Ctrl on the screen, so press it ourselves; Ctrl goes through noVNC as typed.
+    if (held.meta && !held.ctrl) {
+      event.stopPropagation()
+      event.preventDefault()
     }
-    rfb.sendKey(XK_Control_L, 'ControlLeft', true)
-    rfb.sendKey(XK_v, 'KeyV')
-    // A held Ctrl is let go when the owner lets go of it.
-    if (!held?.ctrl) rfb.sendKey(XK_Control_L, 'ControlLeft', false)
+    const text = new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        nextText = undefined
+        // ⌘C copies; Ctrl+C may have been a terminal's interrupt, which mustn't put the old clipboard on the owner's.
+        if (screenText && held.meta) resolve(screenText)
+        else reject(new Error('Nothing was copied on the screen'))
+      }, copyWaitMs)
+      nextText = (copied) => {
+        clearTimeout(timer)
+        resolve(copied)
+      }
+    })
+    if (held.meta && !held.ctrl) pressCtrl(rfb, key, held)
+    writeClipboard(text).catch((error) => console.warn("[screen] Couldn't copy to the clipboard:", error))
   }
 
   function onKeyDown(event: KeyboardEvent) {
-    if (event.key.toLowerCase() !== 'v' || event.altKey || !(event.ctrlKey || event.metaKey)) return
+    const key = shortcut(event)
+    if (key === 'c' || key === 'x') return copy(event, key)
+    if (key !== 'v') return
     // Keeps the V from noVNC, which would cancel the browser's paste, and lets the browser paste.
     event.stopPropagation()
     clearTimeout(pending?.fallback)
@@ -173,20 +228,41 @@ function forwardPaste(screen: HTMLElement, rfb: Rfb): () => void {
     if (text) paste(text, held)
   }
 
+  function onScreenClipboard(event: Event) {
+    const text = (event as CustomEvent<{ text: string }>).detail.text
+    screenText = text
+    nextText?.(text)
+    nextText = undefined
+  }
+
   screen.addEventListener('keydown', onKeyDown, true)
   screen.addEventListener('paste', onPaste)
+  rfb.addEventListener('clipboard', onScreenClipboard)
   return () => {
     clearTimeout(pending?.fallback)
     screen.removeEventListener('keydown', onKeyDown, true)
     screen.removeEventListener('paste', onPaste)
+    rfb.removeEventListener('clipboard', onScreenClipboard)
   }
+}
+
+/**
+ * Writes text that's still coming to the clipboard. A ClipboardItem takes the promise during the key press, which
+ * Safari needs; where there's none, the text is written once it comes.
+ */
+async function writeClipboard(text: Promise<string>) {
+  if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+    const blob = text.then((value) => new Blob([value], { type: 'text/plain' }))
+    return navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob })])
+  }
+  return navigator.clipboard.writeText(await text)
 }
 
 /** The live screen, reconnecting when it drops (see `useScreenConnection`). */
 function ScreenView({ bot, interactive = false, className, dark }: { bot: BotInfo; interactive?: boolean; className?: string; dark?: boolean }) {
   const target = useRef<HTMLDivElement>(null)
   const { status, retry, rfb } = useScreenConnection(target, { api: api(), botId: bot.id, interactive })
-  useEffect(() => (interactive && rfb && target.current ? forwardPaste(target.current, rfb) : undefined), [interactive, rfb])
+  useEffect(() => (interactive && rfb && target.current ? forwardClipboard(target.current, rfb) : undefined), [interactive, rfb])
   const state = status === 'reconnecting' ? 'connecting' : status
 
   return (
