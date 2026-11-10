@@ -225,7 +225,7 @@ export const quickReactions = ['👍', '👎', '❤️', '😂', '🎉', '😮']
  * `reactions` with `emoji` by `by` toggled: added at the end when it isn't there, taken back when it is. Each reactor
  * leaves an emoji once; several reactors, or several emoji, may share a message.
  */
-export function toggledReactions(reactions: readonly ReactionInfo[], emoji: string, by: string): ReactionInfo[] {
+export function toggledReactions(reactions: readonly ReactionInfo[] = [], emoji: string, by: string): ReactionInfo[] {
   const has = reactions.some((entry) => entry.emoji === emoji && entry.by === by)
   return has ? reactions.filter((entry) => !(entry.emoji === emoji && entry.by === by)) : [...reactions, { emoji, by }]
 }

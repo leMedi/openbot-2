@@ -6,8 +6,11 @@ export const ownerReactor = 'owner'
 /** One emoji's pill under a message: how many left it, whether the owner did, and who, in the order they did. */
 export type ReactionPill = { emoji: string; count: number; mine: boolean; by: string[] }
 
-/** A message's reactions as pills, one per emoji, in the order each was first left. */
-export function reactionPills(reactions: readonly ReactionInfo[]): ReactionPill[] {
+/**
+ * A message's reactions as pills, one per emoji, in the order each was first left. A message from a server older than
+ * reactions (before migration 0023) has none.
+ */
+export function reactionPills(reactions: readonly ReactionInfo[] = []): ReactionPill[] {
   const pills = new Map<string, ReactionPill>()
   for (const { emoji, by } of reactions) {
     const pill = pills.get(emoji) ?? { emoji, count: 0, mine: false, by: [] }
@@ -17,7 +20,7 @@ export function reactionPills(reactions: readonly ReactionInfo[]): ReactionPill[
 }
 
 /** Whether the owner left `emoji` on a message. */
-export const ownerReacted = ({ reactions }: { reactions: readonly ReactionInfo[] }, emoji: string) =>
+export const ownerReacted = ({ reactions = [] }: { reactions?: readonly ReactionInfo[] }, emoji: string) =>
   reactions.some((reaction) => reaction.emoji === emoji && reaction.by === ownerReactor)
 
 /** Who left a pill, for its label: "You, Rex", the owner first, a bot that's gone as "Deleted bot". */

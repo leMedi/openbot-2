@@ -1,6 +1,6 @@
 import type { MessageInfo } from '@openbot/api-contract'
 import { describe, expect, it } from 'vitest'
-import { reactionPills, reactorNames, replyTargetOf } from './reactions.ts'
+import { ownerReacted, reactionPills, reactorNames, replyTargetOf } from './reactions.ts'
 
 const message = (fields: Partial<MessageInfo>): MessageInfo => ({
   id: 'm1',
@@ -32,6 +32,11 @@ describe("a message's reaction pills", () => {
       { emoji: '❤️', count: 1, mine: true, by: ['owner'] },
     ])
     expect(reactionPills([])).toEqual([])
+  })
+
+  it('are none for a message from a server older than reactions', () => {
+    expect(reactionPills(undefined)).toEqual([])
+    expect(ownerReacted({}, '👍')).toBe(false)
   })
 
   it('names who left a pill, the owner as You first, a bot gone as Deleted bot', () => {
