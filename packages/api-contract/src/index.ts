@@ -303,6 +303,23 @@ export function isMuted(chat: Pick<ChatInfo, 'mutedUntil' | 'hidden'>, now: numb
   return chat.hidden || chat.mutedUntil === 'forever' || (chat.mutedUntil !== null && chat.mutedUntil > now)
 }
 
+/** What a push notification tells the owner of: a bot's message, or a card that started waiting for them. */
+export const pushKinds = ['message', 'question', 'take_over', 'plugin_request', 'plugin_reconnect'] as const
+export type PushKind = (typeof pushKinds)[number]
+
+/** A push notification's `data`: the chat and message (or card) a tap opens, and what it was for. */
+export type PushData = { chatId: string; messageId: string; kind: PushKind }
+
+/** One line of plain text from Markdown, for previews: the sidebar's, a push notification's. */
+export function previewText(markdown: string): string {
+  return markdown
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[`*_~#>|]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 /** The sidebar's Unassigned section, where chats in no section of the owner's sit. */
 export const unassignedSectionId = 'unassigned'
 

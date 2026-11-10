@@ -30,6 +30,8 @@ export const env = createEnv({
     OPENBOT_DESKTOPD_SOCKET: z.string().min(1).default('/run/openbot/desktopd.sock'),
     /** Encrypts system credentials; when unset, one is generated into the data dir on first boot. */
     OPENBOT_SECRET_KEY: z.string().min(32).optional(),
+    /** Expo's access token, for self-built apps whose EAS project has push security on; push goes without one otherwise. */
+    EXPO_ACCESS_TOKEN: z.string().min(1).optional(),
   },
   runtimeEnv: process.env,
   emptyStringAsUndefined: true,

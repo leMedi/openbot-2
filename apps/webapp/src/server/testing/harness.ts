@@ -13,6 +13,7 @@ import { openDb } from '@openbot/db'
 import { bundledCatalog } from '@openbot/plugins'
 import { createRouterClient } from '@orpc/server'
 import { createServerContext } from '../context.ts'
+import { createFakeExpoPush, type FakeExpoPush } from './expo-push.ts'
 import { handleScreenUpgrade, ScreenTickets } from '../screen-stream.ts'
 import { handleApiRequest } from '../http.ts'
 import { router } from '../router.ts'
@@ -88,6 +89,8 @@ export type TestServerOptions = {
   consolidation?: boolean
   /** The plugin catalog's folder, e.g. a fixture; the release's bundled catalog by default. */
   catalog?: string
+  /** Expo's access token the push sender sends with, as `EXPO_ACCESS_TOKEN` gives it. */
+  expoAccessToken?: string
 }
 
 /**
@@ -99,12 +102,12 @@ export async function createTestServer(options: TestServerOptions = {}) {
 }
 
 /** The fakes that outlive a server, as the computer and the time do. */
-type KeptFakes = { computer: FakeComputer; botComputer: FakeBotComputer; clock: FakeClock }
+type KeptFakes = { computer: FakeComputer; botComputer: FakeBotComputer; clock: FakeClock; expoPush: FakeExpoPush }
 
 async function open(
   dir: string,
   secretKey: string,
-  { shell, pages, realComputer, outsideImage, modelProviders = [], script, extraction = false, consolidation = false, memoryModel = extraction || consolidation, compaction, now, catalog = bundledCatalog, ...options }: TestServerOptions,
+  { shell, pages, realComputer, outsideImage, modelProviders = [], script, extraction = false, consolidation = false, memoryModel = extraction || consolidation, compaction, now, catalog = bundledCatalog, expoAccessToken, ...options }: TestServerOptions,
   kept?: KeptFakes,
 ) {
   const db = await openDb(join(dir, 'openbot.db'))
@@ -115,6 +118,8 @@ async function open(
   const computer = kept?.computer ?? createFakeComputer({ pages })
   const botComputer = kept?.botComputer ?? fakeBotComputer(home, shell)
   const clock = kept?.clock ?? createFakeClock(now)
+  // Tests never reach exp.host: pushes go to a fake Expo Push Service, kept across a restart as the real one would be.
+  const expoPush = kept?.expoPush ?? createFakeExpoPush()
   const screenTickets = new ScreenTickets()
   // The real screens without the test's display offset, so the browser finds each screen's DevTools where it is.
   const realScreens = realComputer ? connectScreens({ socketPath: process.env.OPENBOT_DESKTOPD_SOCKET || defaultDaemonSocket }) : undefined
@@ -140,6 +145,7 @@ async function open(
     memoryConsolidation: consolidation,
     catalog,
     home,
+    expoPush: { fetch: expoPush.fetch, accessToken: expoAccessToken },
     ...options,
   })
   await context.screensSynced
@@ -175,8 +181,12 @@ async function open(
     routines: context.routines,
     /** Which chats the owner is viewing, from the clients' heartbeats, as the push sender asks. */
     viewedChats: context.viewedChats,
+    /** The push sender; `push.idle()` waits for the notifications asked so far to be sent. */
+    push: context.push,
+    /** The fake Expo Push Service the server sends notifications to: what it was sent, and tokens made to fail. */
+    expoPush,
     /** The fakes, to keep across a restart. */
-    kept: { computer, botComputer, clock } satisfies KeptFakes,
+    kept: { computer, botComputer, clock, expoPush } satisfies KeptFakes,
     /** The bots' home, a temporary folder: `shared/`, `bots/<id>/`. */
     home,
     /** Every message of a chat, oldest first, read page by page as the apps read them. */
@@ -226,6 +236,7 @@ async function open(
     async shutdown() {
       for (const http of streamServers.splice(0)) http.close()
       await context.jobs.close()
+      context.push.close()
       await context.routines.close()
       context.stopSyncingScreens()
       context.rounds.close()
@@ -238,6 +249,7 @@ async function open(
     async close() {
       for (const http of streamServers.splice(0)) http.close()
       await context.jobs.close()
+      context.push.close()
       await context.routines.close()
       context.stopSyncingScreens()
       await computer.close()

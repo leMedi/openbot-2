@@ -1,4 +1,4 @@
-import { type BotInfo, type ChatInfo, isMuted, maxSectionNameLength, type MuteDuration, type SectionInfo, unassignedSectionId } from '@openbot/api-contract'
+import { type BotInfo, type ChatInfo, isMuted, maxSectionNameLength, previewText, type MuteDuration, type SectionInfo, unassignedSectionId } from '@openbot/api-contract'
 import {
   hiddenFoldKey,
   membersOf,
@@ -834,16 +834,6 @@ function nextMuteEnd(chats: Iterable<ChatInfo>): number | undefined {
   let next: number | undefined
   for (const { mutedUntil } of chats) if (typeof mutedUntil === 'number' && mutedUntil > now && (next === undefined || mutedUntil < next)) next = mutedUntil
   return next
-}
-
-/** One line of plain text from markdown, for previews. */
-function previewText(markdown: string): string {
-  return markdown
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[`*_~#>|]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
 }
 
 /**

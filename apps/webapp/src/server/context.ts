@@ -36,6 +36,7 @@ import {
 } from '@openbot/core'
 import type { Db } from '@openbot/db'
 import { installedSkillFile, installSkills, loadCatalog, type Plugin } from '@openbot/plugins'
+import { PushSender } from './push.ts'
 import type { ScreenTickets } from './screen-stream.ts'
 import { ViewedChats } from './viewed-chats.ts'
 import { toChatInfo, toMessageInfo, toRoutineInfo, toRoutineRunInfo } from './views.ts'
@@ -80,6 +81,8 @@ export type ServerContext = {
   routines: Routines
   /** Which chats the owner is viewing, from the clients' heartbeats; the push sender skips those. */
   viewedChats: ViewedChats
+  /** Notifies the owner's phones of bots' messages and cards; `push.close()` stops its receipt checks. */
+  push: PushSender
   /** The plugin catalog, read once on boot, by name. */
   plugins: Plugin[]
   /** The owner's plugin accounts, their sign-ins, grants and connections; `pluginAccounts.close()` closes those. */
@@ -133,6 +136,7 @@ export async function createServerContext({
   memoryConsolidation = true,
   catalog,
   home,
+  expoPush,
 }: {
   db: Db
   /** Encrypts system credentials. */
@@ -179,11 +183,18 @@ export async function createServerContext({
   catalog: string
   /** The bots' home, where plugins' skills are copied for them to read. */
   home: string
+  /**
+   * How to reach the Expo Push Service: its access token (`EXPO_ACCESS_TOKEN`) for a project with push security on, or
+   * a fake `fetch` in tests. The real service, without a token, by default.
+   */
+  expoPush?: { fetch?: typeof globalThis.fetch; accessToken?: string }
 }): Promise<ServerContext> {
   // Created on the first start, and first: written later in boot, it could find the database busy with the writes
   // the server starts in the background (SQLITE_BUSY).
   const instanceId = await getInstanceId(db)
   const bus = new EventBus<LiveEvent>()
+  const viewedChats = new ViewedChats(clock)
+  const push = new PushSender({ db, clock, viewedChats, ...expoPush })
   const pluginsDir = join(home, 'plugins')
   const plugins = await openCatalog(catalog, pluginsDir)
   const attachments = new AttachmentStore(attachmentsDir)
@@ -244,8 +255,11 @@ export async function createServerContext({
       if (bot) bus.publish({ type: 'routineRun.updated', botId: bot.id, run: toRoutineRunInfo(run, bot.chatId) })
     },
   })
-  /** Posts a bot's message with copies of its files to `chatId`; returns it, or undefined for a replayed call's. */
-  async function postBotMessage(bot: BotWithChat, chatId: string, text: string, files: AttachmentFile[], idempotencyKey: string) {
+  /**
+   * Posts a bot's message with copies of its files to `chatId`, notifying the owner's phones, as a message of its run of
+   * input `inputId` when it has one; returns it, or undefined for a replayed call's.
+   */
+  async function postBotMessage(bot: BotWithChat, chatId: string, text: string, files: AttachmentFile[], idempotencyKey: string, inputId?: string) {
     const saved = await attachments.save(chatId, files)
     const posted = await postMessage(db, {
       chatId,
@@ -266,6 +280,7 @@ export async function createServerContext({
     }
     bus.publish({ type: 'message.created', message: toMessageInfo(posted.message) })
     await publish(chatId)
+    push.messagePosted(posted.message, inputId)
     return posted.message
   }
   /** Posts a bot's card (a question, a take-over, a plugin request or reconnect, a routine change) to its DM, once per idempotency key. */
@@ -274,6 +289,8 @@ export async function createServerContext({
     if (!created) return
     bus.publish({ type: 'message.created', message: toMessageInfo(message) })
     await publish(bot.chatId)
+    // A card waiting for the owner notifies their phones; a routine change row doesn't.
+    push.cardPosted(message)
   }
   const runtime = await BotRuntime.open({
     db,
@@ -306,7 +323,7 @@ export async function createServerContext({
     routines,
     ...(memoryExtraction && { onRunSettled: (botId, exchange) => extraction.extract(botId, exchange) }),
     async sendMessage(bot, chatId, { text, attachments: files }, idempotencyKey, inputId) {
-      const message = await postBotMessage(bot, chatId, text, files, idempotencyKey)
+      const message = await postBotMessage(bot, chatId, text, files, idempotencyKey, inputId)
       // A routine's run links the first message it sent the owner.
       if (message && chatId === bot.chatId) await routines.sentMessage(inputId, message.id)
     },
@@ -403,7 +420,8 @@ export async function createServerContext({
     ownerTime,
     extraction,
     routines,
-    viewedChats: new ViewedChats(clock),
+    viewedChats,
+    push,
     plugins,
     pluginAccounts,
   }

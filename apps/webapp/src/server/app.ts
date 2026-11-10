@@ -46,6 +46,7 @@ async function open(): Promise<ServerContext> {
     screenTickets: serverScreenTickets(),
     catalog: bundledCatalog,
     home: paths.home,
+    expoPush: { accessToken: env.EXPO_ACCESS_TOKEN },
   })
 }
 
