@@ -22,6 +22,7 @@ class FakeRfb extends EventTarget implements Rfb {
   sendKey(keysym: number, code: string, down?: boolean) {
     this.keys.push([keysym, code, down])
   }
+  clipboardPasteFrom() {}
   disconnect() {
     this.disconnected = true
     this.dispatchEvent(new Event('disconnect'))

@@ -28,6 +28,8 @@ export type Rfb = EventTarget & {
   focus(options?: FocusOptions): void
   /** Presses and releases `keysym`, or only presses (`down`) or releases it. */
   sendKey(keysym: number, code: string, down?: boolean): void
+  /** Puts `text` in the Screen's clipboard. */
+  clipboardPasteFrom(text: string): void
   disconnect(): void
 }
 

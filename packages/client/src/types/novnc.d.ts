@@ -15,6 +15,7 @@ declare module '@novnc/novnc' {
     focus(options?: FocusOptions): void
     blur(): void
     sendKey(keysym: number, code: string | null, down?: boolean): void
+    clipboardPasteFrom(text: string): void
     disconnect(): void
   }
 }

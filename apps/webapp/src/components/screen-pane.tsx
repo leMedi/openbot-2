@@ -1,7 +1,7 @@
 import type { BotInfo, MessageInfo } from '@openbot/api-contract'
-import { useScreenConnection } from '@openbot/client/screen'
+import { type Rfb, useScreenConnection } from '@openbot/client/screen'
 import { cn } from '@openbot/ui/lib/utils'
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { api } from '../lib/api.ts'
 import { useHandBack } from './take-over-card.tsx'
 
@@ -117,10 +117,76 @@ export function FullscreenScreen({ bot, takeOver, onClose }: { bot: BotInfo; tak
   )
 }
 
+// X keysyms sent to the screen for a paste.
+const XK_Control_L = 0xffe3
+const XK_Alt_L = 0xffe9
+const XK_Super_L = 0xffeb
+const XK_v = 0x76
+
+/**
+ * Pastes the owner's clipboard on the screen: Ctrl+V (⌘V on a Mac), or the browser's own Paste, puts the text in the
+ * screen's clipboard (x11vnc sets its CLIPBOARD and PRIMARY) and presses Ctrl+V there. noVNC never sees the V, so the
+ * browser fires its `paste` event, which reads the clipboard without asking; where it doesn't fire (Safari, on a
+ * canvas), the Clipboard API asks instead. Text only, and the RFB clipboard is Latin-1: other characters arrive as ?.
+ */
+function forwardPaste(screen: HTMLElement, rfb: Rfb): () => void {
+  // The modifier the owner holds for the shortcut, until its paste arrives.
+  let pending: { meta: boolean; ctrl: boolean; fallback: ReturnType<typeof setTimeout> } | undefined
+
+  function paste(text: string, held?: { meta: boolean; ctrl: boolean }) {
+    rfb.clipboardPasteFrom(text)
+    // ⌘ reaches the screen as Alt (left) or Super (right), so let it go: ⌘+Ctrl+V pastes nothing.
+    if (held?.meta) {
+      rfb.sendKey(XK_Alt_L, 'AltLeft', false)
+      rfb.sendKey(XK_Super_L, 'MetaRight', false)
+    }
+    rfb.sendKey(XK_Control_L, 'ControlLeft', true)
+    rfb.sendKey(XK_v, 'KeyV')
+    // A held Ctrl is let go when the owner lets go of it.
+    if (!held?.ctrl) rfb.sendKey(XK_Control_L, 'ControlLeft', false)
+  }
+
+  function onKeyDown(event: KeyboardEvent) {
+    if (event.key.toLowerCase() !== 'v' || event.altKey || !(event.ctrlKey || event.metaKey)) return
+    // Keeps the V from noVNC, which would cancel the browser's paste, and lets the browser paste.
+    event.stopPropagation()
+    clearTimeout(pending?.fallback)
+    const held = { meta: event.metaKey, ctrl: event.ctrlKey }
+    pending = {
+      ...held,
+      fallback: setTimeout(() => {
+        pending = undefined
+        navigator.clipboard
+          ?.readText()
+          .then((text) => paste(text, held))
+          .catch((error) => console.warn("[screen] Couldn't read the clipboard:", error))
+      }, 150),
+    }
+  }
+
+  function onPaste(event: ClipboardEvent) {
+    event.preventDefault()
+    const held = pending
+    clearTimeout(held?.fallback)
+    pending = undefined
+    const text = event.clipboardData?.getData('text/plain')
+    if (text) paste(text, held)
+  }
+
+  screen.addEventListener('keydown', onKeyDown, true)
+  screen.addEventListener('paste', onPaste)
+  return () => {
+    clearTimeout(pending?.fallback)
+    screen.removeEventListener('keydown', onKeyDown, true)
+    screen.removeEventListener('paste', onPaste)
+  }
+}
+
 /** The live screen, reconnecting when it drops (see `useScreenConnection`). */
 function ScreenView({ bot, interactive = false, className, dark }: { bot: BotInfo; interactive?: boolean; className?: string; dark?: boolean }) {
   const target = useRef<HTMLDivElement>(null)
-  const { status, retry } = useScreenConnection(target, { api: api(), botId: bot.id, interactive })
+  const { status, retry, rfb } = useScreenConnection(target, { api: api(), botId: bot.id, interactive })
+  useEffect(() => (interactive && rfb && target.current ? forwardPaste(target.current, rfb) : undefined), [interactive, rfb])
   const state = status === 'reconnecting' ? 'connecting' : status
 
   return (
