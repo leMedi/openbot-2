@@ -1,4 +1,5 @@
 import type { BotInfo, PluginAccountInfo, PluginInfo } from '@openbot/api-contract'
+import { pluginStatusLabels } from '@openbot/client'
 import { cn } from '@openbot/ui/lib/utils'
 import { useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
@@ -18,16 +19,16 @@ export function PluginIcon({ plugin, size = 36 }: { plugin: PluginInfo; size?: n
   )
 }
 
-const statuses: Record<PluginInfo['status'], { label: string; className: string }> = {
-  not_connected: { label: 'Not connected', className: 'bg-secondary text-muted-foreground' },
-  connected: { label: 'Connected', className: 'bg-green/15 text-green-foreground' },
-  needs_reconnect: { label: 'Needs reconnect', className: 'bg-destructive/15 text-destructive-foreground' },
+const statusClasses: Record<PluginInfo['status'], string> = {
+  not_connected: 'bg-secondary text-muted-foreground',
+  connected: 'bg-green/15 text-green-foreground',
+  needs_reconnect: 'bg-destructive/15 text-destructive-foreground',
 }
 
 /** Whether a plugin is connected, as Settings → Plugins shows it. */
 export function PluginStatus({ status }: { status: PluginInfo['status'] }) {
   return (
-    <span className={cn('shrink-0 rounded-sm px-1.5 text-sm', statuses[status].className)}>{statuses[status].label}</span>
+    <span className={cn('shrink-0 rounded-sm px-1.5 text-sm', statusClasses[status])}>{pluginStatusLabels[status]}</span>
   )
 }
 

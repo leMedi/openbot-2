@@ -7,6 +7,7 @@ import {
   type Onboarding,
   type ProviderInfo,
 } from '@openbot/api-contract'
+import { offsetOf } from '@openbot/client'
 import { cn } from '@openbot/ui/lib/utils'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
@@ -15,7 +16,7 @@ import { inputClass } from '../components/bot-fields.tsx'
 import { NewBotForm } from '../components/new-bot-form.tsx'
 import { OpenBotMark } from '../components/openbot-mark.tsx'
 import { ProviderList } from '../components/provider-list.tsx'
-import { browserTimeZone, offsetOf, TimeZonePicker } from '../components/time-zone-picker.tsx'
+import { browserTimeZone, TimeZonePicker } from '../components/time-zone-picker.tsx'
 import { api, errorMessage } from '../lib/api.ts'
 
 export const Route = createFileRoute('/onboarding')({

@@ -1,4 +1,5 @@
 import type { PluginInfo } from '@openbot/api-contract'
+import { pluginSections } from '@openbot/client'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { useEffect, useMemo, useState } from 'react'
 import { PluginIcon, PluginStatus } from '../../components/plugins.tsx'
@@ -7,9 +8,6 @@ import { api, errorMessage } from '../../lib/api.ts'
 export const Route = createFileRoute('/settings/plugins/')({
   component: Plugins,
 })
-
-/** The plugins most owners connect first, in this order. */
-const popular = ['notion', 'linear', 'atlassian', 'airtable', 'clickup', 'monday', 'todoist', 'granola', 'stripe', 'zapier', 'miro', 'exa']
 
 /**
  * Settings → Plugins: the catalog bundled with this release, searchable, connected plugins first, then the popular
@@ -24,21 +22,7 @@ function Plugins() {
     api().plugins.list().then(setPlugins, (caught) => setError(errorMessage(caught)))
   }, [])
 
-  const sections = useMemo(() => {
-    const words = query.toLowerCase().split(/\s+/).filter(Boolean)
-    const shown = (plugins ?? []).filter((plugin) => {
-      const text = [plugin.displayName, plugin.name, plugin.description, ...plugin.keywords].join(' ').toLowerCase()
-      return words.every((word) => text.includes(word))
-    })
-    const connected = shown.filter((plugin) => plugin.status !== 'not_connected')
-    const rest = shown.filter((plugin) => plugin.status === 'not_connected')
-    const byName = (a: PluginInfo, b: PluginInfo) => a.displayName.localeCompare(b.displayName)
-    return [
-      { title: 'Connected', plugins: connected.sort(byName) },
-      { title: 'Popular', plugins: rest.filter((plugin) => popular.includes(plugin.name)).sort((a, b) => popular.indexOf(a.name) - popular.indexOf(b.name)) },
-      { title: 'Other', plugins: rest.filter((plugin) => !popular.includes(plugin.name)).sort(byName) },
-    ].filter((section) => section.plugins.length > 0)
-  }, [plugins, query])
+  const sections = useMemo(() => pluginSections(plugins ?? [], query), [plugins, query])
 
   return (
     <section className="flex flex-col gap-4">

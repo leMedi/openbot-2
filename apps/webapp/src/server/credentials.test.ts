@@ -146,6 +146,7 @@ describe('system credentials', () => {
       'general.updateSettings': await server.client.general.updateSettings({ timeZone: 'Asia/Tokyo' }),
       'general.updateProfile': await server.client.general.updateProfile({ name: 'Sam', about: 'I run a bakery.' }),
       'general.getSettings': await server.client.general.getSettings(),
+      'general.timeZones': await server.client.general.timeZones(),
       'sharedMemory.add': await server.client.sharedMemory.add({ tier: 'profile', text: 'The owner is called Sam.' }),
       'sharedMemory.edit': await server.client.sharedMemory.edit({ factId: 2, importance: 4 }),
       'sharedMemory.list': await server.client.sharedMemory.list(),

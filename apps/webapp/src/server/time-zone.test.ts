@@ -53,6 +53,16 @@ describe("the owner's time zone", () => {
     expect(await server.client.general.getSettings()).toMatchObject({ timeZone: 'Asia/Tokyo' })
   })
 
+  it('can be chosen from every zone the server knows, for the phone, which has no list of its own', async () => {
+    const server = await start()
+
+    const zones = await server.client.general.timeZones()
+
+    expect(zones).toEqual(expect.arrayContaining(['UTC', 'Asia/Tokyo', 'Africa/Casablanca']))
+    expect(zones).toEqual([...zones].sort())
+    expect(await server.client.general.updateSettings({ timeZone: zones.at(-1)! })).toMatchObject({ timeZone: zones.at(-1) })
+  })
+
   it('is kept spelled as the server knows it', async () => {
     const server = await start()
 

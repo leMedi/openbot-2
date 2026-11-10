@@ -1,7 +1,6 @@
 import { Storage } from 'expo-sqlite/kv-store'
 import { useSyncExternalStore } from 'react'
-
-const foldsKey = 'openbot.chats.folds'
+import { foldsKey } from './storage-keys.ts'
 
 function read(): Record<string, boolean> {
   try {
@@ -23,6 +22,12 @@ export function setFolded(id: string, folded: boolean) {
   } catch {
     // Not kept: the choice lasts while the app is open.
   }
+  for (const listener of listeners) listener()
+}
+
+/** Reads the folds again from storage, e.g. once the phone forgot its instance's. */
+export function reloadFolds() {
+  folds = read()
   for (const listener of listeners) listener()
 }
 

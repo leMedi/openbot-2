@@ -922,6 +922,8 @@ export const router = os.router({
       ...(await writeOwnerProfile(context.db, input)),
     })),
 
+    timeZones: os.general.timeZones.handler(() => [...new Set([...Intl.supportedValuesOf('timeZone'), 'UTC'])].sort()),
+
     detectTimeZone: os.general.detectTimeZone.handler(async ({ context, input }) => ({
       ...(await setTimeZone(context, () => detectTimeZone(context.db, input.timeZone))),
       ...(await readOwnerProfile(context.db)),

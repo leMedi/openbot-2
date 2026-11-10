@@ -1,9 +1,10 @@
 import { type DeviceInfo, type GeneralSettings, maxOwnerAboutLength, maxOwnerNameLength } from '@openbot/api-contract'
+import { notifiedFor, offsetOf, platformNames } from '@openbot/client'
 import { cn } from '@openbot/ui/lib/utils'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { Field, inputClass } from '../../components/bot-fields.tsx'
-import { offsetOf, TimeZonePicker } from '../../components/time-zone-picker.tsx'
+import { TimeZonePicker } from '../../components/time-zone-picker.tsx'
 import { api, errorMessage } from '../../lib/api.ts'
 
 export const Route = createFileRoute('/settings/general')({
@@ -57,16 +58,6 @@ function General() {
       <Phones />
     </section>
   )
-}
-
-const platformNames: Record<DeviceInfo['platform'], string> = { ios: 'iOS', android: 'Android' }
-
-/** What a phone's switches let through, e.g. "Messages and when a bot needs you". */
-function notifiedFor(device: DeviceInfo): string {
-  if (device.messages && device.needsYou) return 'Messages and when a bot needs you'
-  if (device.messages) return 'Messages only'
-  if (device.needsYou) return 'Only when a bot needs you'
-  return 'Nothing'
 }
 
 /** The phones registered for notifications, each with Remove. A phone changes its own switches. */

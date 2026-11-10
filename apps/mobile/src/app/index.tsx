@@ -3,7 +3,7 @@ import { hiddenFoldKey, muteChoices, nextMuteEnd, type SearchTab, type SidebarBl
 import * as Haptics from 'expo-haptics'
 import { router, Stack } from 'expo-router'
 import { type ReactNode, useState } from 'react'
-import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ActionSheet, type SheetContent, type SheetItem } from '../components/action-sheet.tsx'
 import { ChatRow, rowName } from '../components/chat-row.tsx'
@@ -14,6 +14,7 @@ import { Prompt, type PromptRequest } from '../components/prompt.tsx'
 import { SearchField } from '../components/search-field.tsx'
 import { SearchResults } from '../components/search-results.tsx'
 import { setFolded, useFolds } from '../lib/folds.ts'
+import { openOnWeb } from '../lib/open-on-web.ts'
 import { errorMessage } from '../lib/errors.ts'
 import { useInstance } from '../lib/instance-context.ts'
 import { useColors } from '../lib/theme.ts'
@@ -58,8 +59,8 @@ export default function Chats() {
     router.push({ pathname: '/chat/[chatId]', params: { chatId: chat.id, ...(message && { message }) } })
   const openRoutine = (routine: RoutineInfo) =>
     router.push({ pathname: '/routine/[routineId]', params: { routineId: routine.id, botId: routine.botId } })
-  /** Settings and the new-bot and new-group sheets come with their own work; until then they open on the web. */
-  const openOnWeb = (path: string) => void Linking.openURL(new URL(path, url).href)
+  /** The new-bot and new-group sheets come with their own work; until then they open on the web. */
+  const onWeb = (path: string) => openOnWeb(url, path)
 
   function stopEditing() {
     setEditing(false)
@@ -235,8 +236,8 @@ export default function Chats() {
   }
 
   const newMenu: SheetItem[] = [
-    { label: 'New bot', run: () => openOnWeb('/') },
-    { label: 'New group chat', run: () => openOnWeb('/groups/new') },
+    { label: 'New bot', run: () => onWeb('/') },
+    { label: 'New group chat', run: () => onWeb('/groups/new') },
     { label: 'New section', run: () => newSection() },
   ]
 
@@ -328,7 +329,7 @@ export default function Chats() {
           headerLargeTitle: true,
           headerLargeTitleShadowVisible: false,
           headerShadowVisible: false,
-          headerLeft: () => (editing ? null : headerButton('Settings', () => openOnWeb('/settings/general'), <GearIcon color={colors.foreground} />)),
+          headerLeft: () => (editing ? null : headerButton('Settings', () => router.push('/settings'), <GearIcon color={colors.foreground} />)),
           headerRight: () =>
             editing ? (
               headerButton('Done', stopEditing, undefined, true)

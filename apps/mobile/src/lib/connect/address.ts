@@ -24,3 +24,6 @@ export function candidateUrls(input: string): string[] {
   if (scheme === 'http') return [http]
   return [url.port ? `https://${host}:${url.port}` : `https://${host}`, http]
 }
+
+/** An instance's URL as the owner would type it, without `http://`. */
+export const shownAddress = (url: string) => url.replace(/^http:\/\//, '')

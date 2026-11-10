@@ -1,5 +1,6 @@
 import { Storage } from 'expo-sqlite/kv-store'
 import { useState } from 'react'
+import { instanceKey, localNetworkAskedKey } from './storage-keys.ts'
 
 /** The instance this phone connects to, kept once Connect reached it. */
 export type SavedInstance = {
@@ -10,9 +11,6 @@ export type SavedInstance = {
   setUp: boolean
 }
 
-const instanceKey = 'openbot.instance'
-/** Set once iOS's Local Network prompt was waited for, so a later denial says so at once. */
-const localNetworkAskedKey = 'openbot.localNetworkAsked'
 
 function load(): SavedInstance | undefined {
   try {

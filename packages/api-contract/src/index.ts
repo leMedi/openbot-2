@@ -1249,6 +1249,13 @@ export const contract = {
       .route({ method: 'PATCH', path: '/settings/general/profile', summary: "Set the owner's name or description of themselves; every bot sees it on its next run" })
       .input(z.object({ name: ownerName, about: ownerAbout }).partial())
       .output(generalSettings),
+    timeZones: oc
+      .route({
+        method: 'GET',
+        path: '/settings/general/time-zones',
+        summary: "Every IANA time zone the instance knows, by name, to choose the owner's from; for the phone, which can't list them itself",
+      })
+      .output(z.array(z.string())),
     detectTimeZone: oc
       .route({
         method: 'POST',

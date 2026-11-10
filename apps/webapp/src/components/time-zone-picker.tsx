@@ -1,23 +1,7 @@
+import { knownTimeZones, matchTimeZones } from '@openbot/client'
 import { cn } from '@openbot/ui/lib/utils'
 import { useMemo, useState } from 'react'
 import { inputClass } from './bot-fields.tsx'
-
-/** Every IANA time zone this browser knows, with its current UTC offset, e.g. `GMT+9`. */
-function knownTimeZones(): { timeZone: string; offset: string }[] {
-  const zones = new Set(Intl.supportedValuesOf('timeZone'))
-  zones.add('UTC')
-  return [...zones].sort().map((timeZone) => ({ timeZone, offset: offsetOf(timeZone) }))
-}
-
-/** `timeZone`'s UTC offset now, e.g. `GMT+9`; empty if this browser doesn't know it. */
-export function offsetOf(timeZone: string): string {
-  try {
-    const parts = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'shortOffset' }).formatToParts(new Date())
-    return parts.find((part) => part.type === 'timeZoneName')?.value ?? ''
-  } catch {
-    return ''
-  }
-}
 
 /** The browser's own time zone, e.g. `Europe/Paris`; UTC if it has none. */
 export const browserTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
@@ -34,15 +18,9 @@ export function TimeZonePicker({
   onChange: (timeZone: string) => void
   autoFocus?: boolean
 }) {
-  const zones = useMemo(knownTimeZones, [])
+  const zones = useMemo(() => knownTimeZones(), [])
   const [query, setQuery] = useState('')
-  const matches = useMemo(() => {
-    const words = query.toLowerCase().replaceAll('_', ' ').split(/\s+/).filter(Boolean)
-    return zones.filter((zone) => {
-      const text = `${zone.timeZone} ${zone.offset}`.toLowerCase().replaceAll('_', ' ')
-      return words.every((word) => text.includes(word))
-    })
-  }, [zones, query])
+  const matches = useMemo(() => matchTimeZones(zones, query), [zones, query])
 
   return (
     <div className="flex flex-col gap-1.5">

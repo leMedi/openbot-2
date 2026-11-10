@@ -1,16 +1,9 @@
 import { type BotInfo, type FactChanges, type FactInfo, type FactTier, type NewFact } from '@openbot/api-contract'
+import { factImportances, factOrigin, factTierSections } from '@openbot/client'
 import { cn } from '@openbot/ui/lib/utils'
 import { useEffect, useRef, useState } from 'react'
 import { api, errorMessage } from '../lib/api.ts'
 import { inputClass } from './bot-fields.tsx'
-
-const tierSections: { tier: FactTier; title: string; hint: string }[] = [
-  { tier: 'profile', title: 'Profile', hint: 'Always relevant; never fades.' },
-  { tier: 'log', title: 'Log', hint: 'Dated events; they fade but are kept.' },
-  { tier: 'note', title: 'Notes', hint: 'Short-lived; out of prompts after a week.' },
-]
-
-const importances = [1, 2, 3, 4, 5] as const
 
 /** How the owner changes the facts listed: in a bot's bot memory, or in shared memory. */
 export type FactActions = {
@@ -35,7 +28,7 @@ export function FactsByTier({
 }) {
   const [adding, setAdding] = useState<FactTier>()
 
-  return tierSections.map(({ tier, title, hint }) => {
+  return factTierSections.map(({ tier, title, hint }) => {
     const inTier = facts.filter((fact) => fact.tier === tier)
     return (
       <section key={tier} aria-label={title} className="flex flex-col gap-2">
@@ -136,10 +129,7 @@ function FactRow({ fact, actions, onSaved, onDeleted }: { fact: FactInfo; action
         className="resize-y bg-transparent text-base break-words outline-offset-2"
       />
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span>
-          Learned {new Date(fact.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}{' '}
-          {fact.source === 'owner' ? 'from you' : `via ${fact.sourceBotName ?? 'a deleted bot'}`}
-        </span>
+        <span>{factOrigin(fact)}</span>
         <TierSelect value={fact.tier} onChange={(tier) => save({ tier })} />
         <ImportanceSelect value={fact.importance} onChange={(importance) => save({ importance })} />
         <button
@@ -206,7 +196,7 @@ function NewFactRow({ tier, actions, onAdded, onCancel }: { tier: FactTier; acti
 function TierSelect({ value, onChange }: { value: FactTier; onChange: (tier: FactTier) => void }) {
   return (
     <select aria-label="Tier" value={value} onChange={(event) => onChange(event.target.value as FactTier)} className="rounded bg-transparent">
-      {tierSections.map(({ tier, title }) => (
+      {factTierSections.map(({ tier, title }) => (
         <option key={tier} value={tier}>
           {title}
         </option>
@@ -218,7 +208,7 @@ function TierSelect({ value, onChange }: { value: FactTier; onChange: (tier: Fac
 function ImportanceSelect({ value, onChange }: { value: number; onChange: (importance: number) => void }) {
   return (
     <select aria-label="Importance" value={value} onChange={(event) => onChange(Number(event.target.value))} className="rounded bg-transparent">
-      {importances.map((importance) => (
+      {factImportances.map((importance) => (
         <option key={importance} value={importance}>
           Importance {importance}
         </option>
