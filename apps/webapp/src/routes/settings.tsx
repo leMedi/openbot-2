@@ -1,5 +1,5 @@
 import { Link, Outlet, createFileRoute } from '@tanstack/react-router'
-import { LiveProvider } from '../lib/live.tsx'
+import { WebLiveProvider } from '../lib/live.tsx'
 
 export const Route = createFileRoute('/settings')({
   component: Settings,
@@ -15,7 +15,7 @@ const sections = [
 
 function Settings() {
   return (
-    <LiveProvider>
+    <WebLiveProvider>
       <div className="safe-area flex h-dvh bg-background text-foreground">
         <nav className="flex w-52 shrink-0 flex-col gap-0.5 border-r border-border-subtle bg-sidebar p-3">
           <Link
@@ -42,6 +42,6 @@ function Settings() {
           </div>
         </main>
       </div>
-    </LiveProvider>
+    </WebLiveProvider>
   )
 }
