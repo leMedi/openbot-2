@@ -99,11 +99,17 @@ function fakeServer() {
     /** The chats each viewing heartbeat named, in order; a heartbeat fails while `unreachable`. */
     viewing: [] as string[],
     unreachable: false,
+    /** Connections to the event stream get no answer, as from an instance gone silent, until given up. */
+    silent: false,
     drop: () => {},
   }
   const api = {
     events: async (stamp: { epoch: string; seq: number } | undefined, { signal }: { signal: AbortSignal }) => {
       server.stamps.push(stamp)
+      if (server.silent) {
+        await new Promise((resolve) => signal.addEventListener('abort', resolve))
+        throw new DOMException('Aborted', 'AbortError')
+      }
       const events = server.connections.shift()
       if (!events) throw new TypeError('Failed to fetch')
       const dropped = new Promise<void>((resolve) => {
@@ -248,6 +254,30 @@ describe('the live stream', () => {
     expect(store.messages.get('dm-rex')?.map((entry) => entry.id)).toEqual(['m1', 'm2'])
     expect(server.stamps).toEqual([undefined, { epoch: 'e1', seq: 4 }])
     expect(server.refetches).toBe(2)
+  })
+  it('tries again at once when asked, not waiting for the next attempt, and gives up on one with no answer', async () => {
+    const { server, api } = fakeServer()
+    const store = new LiveStore({ api, storage: memoryStorage() })
+    void store.run(controller.signal)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(server.stamps).toHaveLength(1)
+
+    server.silent = true
+    store.retryNow()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(server.stamps).toHaveLength(2)
+
+    server.silent = false
+    server.connections = [[hello('e1', 1, false)]]
+    store.retryNow()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(server.stamps).toHaveLength(3)
+    expect(store.connected).toBe(true)
+
+    store.retryNow()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(server.stamps).toHaveLength(3)
+    expect(store.connected).toBe(true)
   })
 })
 

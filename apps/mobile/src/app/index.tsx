@@ -2,6 +2,7 @@ import { previewText, type BotInfo, type ChatInfo } from '@openbot/api-contract'
 import { sidebarLayout, useLive } from '@openbot/client'
 import { Stack } from 'expo-router'
 import { FlatList, StyleSheet, Text, View } from 'react-native'
+import { ConnectionBanner } from '../components/connection-banner.tsx'
 import { radii, text, useColors } from '../lib/theme.ts'
 
 /**
@@ -20,11 +21,7 @@ export default function Chats() {
         style={{ backgroundColor: colors.background }}
         data={rows}
         keyExtractor={(row) => row.chatId}
-        ListHeaderComponent={
-          live.connected ? undefined : (
-            <Text style={[text.base, styles.status, { color: colors.mutedForeground }]}>{live.bots ? 'Reconnecting…' : 'Connecting…'}</Text>
-          )
-        }
+        ListHeaderComponent={<ConnectionBanner />}
         renderItem={({ item }) => <ChatRow bot={item.bot} chat={item.chat} />}
       />
     </>
@@ -59,7 +56,6 @@ function ChatRow({ bot, chat }: { bot: BotInfo | undefined; chat: ChatInfo | und
 }
 
 const styles = StyleSheet.create({
-  status: { paddingHorizontal: 16, paddingVertical: 8 },
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, gap: 12 },
   text: { flex: 1, gap: 2 },
   name: { fontWeight: '600' },

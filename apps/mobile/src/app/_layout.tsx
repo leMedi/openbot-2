@@ -1,13 +1,19 @@
 import { LiveProvider, LiveStore } from '@openbot/client'
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
-import { useState } from 'react'
-import { StyleSheet, Text, useColorScheme, View } from 'react-native'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import { useColorScheme } from 'react-native'
+import { Blocked } from '../components/blocked.tsx'
+import { Connect } from '../components/connect.tsx'
+import { FinishSetup } from '../components/finish-setup.tsx'
 import { instanceApi } from '../lib/api.ts'
 import { useAppActive } from '../lib/app-state.ts'
-import { devInstanceAddress } from '../lib/instance.ts'
+import type { CheckResult } from '../lib/connect/check.ts'
+import { checkFromPhone } from '../lib/connect/phone.ts'
+import { InstanceContext } from '../lib/instance-context.ts'
+import { useSavedInstance } from '../lib/saved-instance.ts'
 import { draftStorage } from '../lib/storage.ts'
-import { text, useColors } from '../lib/theme.ts'
+import { useColors } from '../lib/theme.ts'
 
 export default function RootLayout() {
   const dark = useColorScheme() === 'dark'
@@ -25,40 +31,81 @@ export default function RootLayout() {
       notification: colors.statusUnread,
     },
   }
-  const address = devInstanceAddress()
   return (
     <ThemeProvider value={theme}>
       <StatusBar style="auto" />
-      {address ? <Instance address={address} /> : <NoInstance />}
+      <Root />
     </ThemeProvider>
   )
 }
 
-/** The app connected to the instance at `address`: its live store, following the event stream while in front. */
-function Instance({ address }: { address: string }) {
-  const [store] = useState(() => new LiveStore({ api: instanceApi(address), storage: draftStorage }))
+type VersionBlock = 'instanceTooOld' | 'appTooOld'
+type Block = { kind: VersionBlock; url: string }
+
+/** The version block a check found, undefined when the versions agree, or null when it couldn't tell (it failed). */
+function versionBlock(result: CheckResult): VersionBlock | undefined | null {
+  if (result.kind === 'failed') return null
+  return result.kind === 'connected' ? undefined : result.kind
+}
+
+/**
+ * From first launch to Chats (spec: Connect flow): Connect until an instance answers, Finish setup until its onboarding
+ * is done, and a blocking screen while the app and the instance are too far apart in version. Once set up, the app
+ * stays on the instance, never going back to Connect when it can't be reached.
+ */
+function Root() {
+  const [saved, save] = useSavedInstance()
+  // Before the instance is set up; once it is, the instance blocks for itself.
+  const [block, setBlock] = useState<Block>()
+  const [address, setAddress] = useState('')
+
+  const onResult = (result: CheckResult) => {
+    const found = versionBlock(result)
+    if (found === null) return
+    if (result.kind === 'connected') save({ url: result.url, instanceId: result.instanceId, setUp: result.setUp })
+    if (found) setAddress(result.url)
+    setBlock(found && { kind: found, url: result.url })
+  }
+  const changeAddress = () => {
+    setAddress(saved?.url ?? block?.url ?? address)
+    setBlock(undefined)
+    save(undefined)
+  }
+
+  if (saved?.setUp) return <Instance key={saved.url} url={saved.url} />
+  if (block) return <Blocked key={block.url} kind={block.kind} url={block.url} onResult={onResult} onChangeAddress={changeAddress} />
+  if (saved) return <FinishSetup key={saved.url} url={saved.url} onResult={onResult} onChangeAddress={changeAddress} />
+  return <Connect initialAddress={address} onResult={onResult} />
+}
+
+/**
+ * The app on the instance at `url`: its live store, following the event stream while in front. The instance's API
+ * version is checked again each time the stream connects and the app comes to the foreground, as it may have been
+ * updated meanwhile, and with every diagnosis the banner runs. A different instance answering at the address isn't
+ * looked for: that's Settings → Instance's Edit address.
+ */
+function Instance({ url }: { url: string }) {
+  const [store] = useState(() => new LiveStore({ api: instanceApi(url), storage: draftStorage }))
   const active = useAppActive()
+  const [block, setBlock] = useState<VersionBlock>()
+  const connected = useSyncExternalStore(store.subscribe, () => store.connected)
+  const noteCheck = useCallback((result: CheckResult) => {
+    const found = versionBlock(result)
+    if (found !== null) setBlock(found)
+  }, [])
+  useEffect(() => {
+    if (!active) return
+    let current = true
+    void checkFromPhone([url]).then((result) => current && noteCheck(result))
+    return () => void (current = false)
+  }, [connected, active, url, noteCheck])
+
+  if (block) return <Blocked kind={block} url={url} onResult={noteCheck} />
   return (
-    <LiveProvider store={store} active={active}>
-      <Stack />
-    </LiveProvider>
+    <InstanceContext value={{ url, noteCheck }}>
+      <LiveProvider store={store} active={active}>
+        <Stack />
+      </LiveProvider>
+    </InstanceContext>
   )
 }
-
-/** Until the Connect screen exists, the dev build's address comes from its environment. */
-function NoInstance() {
-  const colors = useColors()
-  return (
-    <View style={[styles.center, { backgroundColor: colors.background }]}>
-      <Text style={[text.lg, { color: colors.foreground }]}>No instance set</Text>
-      <Text style={[text.base, styles.hint, { color: colors.mutedForeground }]}>
-        Set EXPO_PUBLIC_OPENBOT_URL in apps/mobile/.env.local to the address you open OpenBot at in your browser, then restart Metro.
-      </Text>
-    </View>
-  )
-}
-
-const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 8 },
-  hint: { textAlign: 'center' },
-})

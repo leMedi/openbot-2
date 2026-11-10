@@ -133,6 +133,8 @@ export class LiveStore {
   /** Settles once the snapshot is restored (or there is none). */
   readonly #restored: Promise<void>
   #saveTimer: ReturnType<typeof setTimeout> | undefined
+  /** Ends the current wait or unanswered attempt of `run`, for `retryNow`. */
+  #retry: (() => void) | undefined
 
   constructor({ api, storage, snapshot }: LiveStoreOptions) {
     this.#api = api
@@ -164,15 +166,43 @@ export class LiveStore {
     // Restored first, so a snapshot never covers what the server sent.
     await this.#restored
     while (!signal.aborted) {
+      const attempt = new AbortController()
+      const stop = () => attempt.abort()
+      signal.addEventListener('abort', stop)
+      let retrying = false
+      this.#retry = () => {
+        if (this.connected) return
+        retrying = true
+        attempt.abort()
+      }
       try {
-        const events = await this.#api.events(this.#stamp, { signal })
+        const events = await this.#api.events(this.#stamp, { signal: attempt.signal })
         for await (const event of events) await this.#apply(event)
       } catch {
         // Disconnected; reconnect below.
+      } finally {
+        signal.removeEventListener('abort', stop)
       }
       if (this.connected) this.#update(() => (this.connected = false))
-      if (!signal.aborted) await new Promise((resolve) => setTimeout(resolve, reconnectDelayMs))
+      if (!signal.aborted && !retrying) {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, reconnectDelayMs)
+          this.#retry = () => {
+            clearTimeout(timer)
+            resolve()
+          }
+        })
+      }
     }
+    this.#retry = undefined
+  }
+
+  /**
+   * Tries to connect again now while disconnected, as the phone's Try now does: the wait before the next attempt ends,
+   * and an attempt the instance hasn't answered is given up for a new one.
+   */
+  retryNow() {
+    this.#retry?.()
   }
 
   /** Loads a chat's latest messages, merging them with any that arrived live meanwhile. */
